@@ -142,8 +142,6 @@ function solve!(solver::ADESolver, u, Δt)
   # uⁿ⁺¹ = solver.uⁿ⁺¹  # new value of u
   pⁿ⁺¹ = solver.pⁿ⁺¹
   qⁿ⁺¹ = solver.qⁿ⁺¹
-  pⁿ = @views u
-  qⁿ = @views u
 
   applybc!(u, solver.bcs, solver.nhalo) # update the ghost cell temperatures
 
@@ -151,6 +149,8 @@ function solve!(solver::ADESolver, u, Δt)
     pⁿ⁺¹[idx] = u[idx]
     qⁿ⁺¹[idx] = u[idx]
   end
+  pⁿ = @views pⁿ⁺¹
+  qⁿ = @views qⁿ⁺¹
 
   # Forward sweep ("implicit" pⁿ⁺¹ for i-1, j-1)
   for j in jlo:jhi
