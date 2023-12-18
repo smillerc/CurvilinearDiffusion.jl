@@ -25,11 +25,11 @@ end
 
 """
 The Alternating Direction Explicit (ADE) diffusion solver. Provide the mesh
-to give sizes to pre-allocate the type members. Provide a `mean_func` to 
-tell the solver how to determine diffusivity at the cell edges, i.e. via a 
+to give sizes to pre-allocate the type members. Provide a `mean_func` to
+tell the solver how to determine diffusivity at the cell edges, i.e. via a
 harmonic mean or arithmetic mean.
 """
-function ADESolver(mesh::CurvilinearGrid2D, bcs, mean_func=harmonic_mean, T=Float64)
+function ADESolver(mesh::CurvilinearGrid2D, bcs, mean_func=arithmetic_mean, T=Float64)
   celldims = cellsize_withhalo(mesh)
   qⁿ⁺¹ = zeros(T, celldims)
   pⁿ⁺¹ = zeros(T, celldims)
@@ -74,10 +74,14 @@ function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
 end
 
 @inline function _metrics_2d(mesh, i, j)
-  metrics_i_plus_half = metrics_with_jacobian(mesh, (i + 1 / 2, j))
-  metrics_i_minus_half = metrics_with_jacobian(mesh, (i - 1 / 2, j))
-  metrics_j_plus_half = metrics_with_jacobian(mesh, (i, j + 1 / 2))
-  metrics_j_minus_half = metrics_with_jacobian(mesh, (i, j - 1 / 2))
+  metrics_i_plus_half = metrics_with_jacobian(mesh, (i + 1, j))
+  metrics_i_minus_half = metrics_with_jacobian(mesh, (i, j))
+  metrics_j_plus_half = metrics_with_jacobian(mesh, (i, j + 1))
+  metrics_j_minus_half = metrics_with_jacobian(mesh, (i, j))
+  # metrics_i_plus_half = metrics_with_jacobian(mesh, (i + 1 / 2, j))
+  # metrics_i_minus_half = metrics_with_jacobian(mesh, (i - 1 / 2, j))
+  # metrics_j_plus_half = metrics_with_jacobian(mesh, (i, j + 1 / 2))
+  # metrics_j_minus_half = metrics_with_jacobian(mesh, (i, j - 1 / 2))
 
   return (
     Jᵢ₊½=metrics_i_plus_half.J,
@@ -104,7 +108,7 @@ end
 end
 
 """
-When using the diffusion solver to solve the heat equation, this can be used to 
+When using the diffusion solver to solve the heat equation, this can be used to
 update the thermal conductivity of the mesh at each cell-center.
 
 # Arguments
@@ -171,14 +175,14 @@ function solve!(solver::ADESolver, u, Δt)
         )
       end
 
-      Gᵢ₊½ = gᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
-      Gᵢ₋½ = gᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
-      Gⱼ₊½ = gⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
-      Gⱼ₋½ = gⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
-      # Gᵢ₊½ = gᵢ₊½ * (pⁿ[i, j+1] - pⁿ⁺¹[i, j-1] + pⁿ[i+1, j+1] - pⁿ⁺¹[i+1, j-1])
-      # Gᵢ₋½ = gᵢ₋½ * (pⁿ[i, j+1] - pⁿ⁺¹[i, j-1] + pⁿ⁺¹[i-1, j+1] - pⁿ⁺¹[i-1, j-1])
-      # Gⱼ₊½ = gⱼ₊½ * (pⁿ[i+1, j] - pⁿ⁺¹[i-1, j] + pⁿ[i+1, j+1] - pⁿ⁺¹[i-1, j+1])
-      # Gⱼ₋½ = gⱼ₋½ * (pⁿ[i+1, j] - pⁿ⁺¹[i-1, j] + pⁿ⁺¹[i+1, j-1] - pⁿ⁺¹[i-1, j-1])
+      # Gᵢ₊½ = gᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
+        # Gᵢ₋½ = gᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
+        # Gⱼ₊½ = gⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
+        # Gⱼ₋½ = gⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
+        # Gᵢ₊½ = gᵢ₊½ * (pⁿ[i, j+1] - pⁿ⁺¹[i, j-1] + pⁿ[i+1, j+1] - pⁿ⁺¹[i+1, j-1])
+        # Gᵢ₋½ = gᵢ₋½ * (pⁿ[i, j+1] - pⁿ⁺¹[i, j-1] + pⁿ⁺¹[i-1, j+1] - pⁿ⁺¹[i-1, j-1])
+        # Gⱼ₊½ = gⱼ₊½ * (pⁿ[i+1, j] - pⁿ⁺¹[i-1, j] + pⁿ[i+1, j+1] - pⁿ⁺¹[i-1, j+1])
+        # Gⱼ₋½ = gⱼ₋½ * (pⁿ[i+1, j] - pⁿ⁺¹[i-1, j] + pⁿ⁺¹[i+1, j-1] - pⁿ⁺¹[i-1, j-1])
 
       pⁿ⁺¹[i, j] = (
         (
@@ -217,10 +221,10 @@ function solve!(solver::ADESolver, u, Δt)
         )
       end
 
-      Gᵢ₊½ = gᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
-      Gᵢ₋½ = gᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
-      Gⱼ₊½ = gⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
-      Gⱼ₋½ = gⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
+      # Gᵢ₊½ = gᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ⁺¹[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
+      # Gᵢ₋½ = gᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ⁺¹[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ⁺¹[i - 1, j - 1])
+      # Gⱼ₊½ = gⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ⁺¹[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
+      # Gⱼ₋½ = gⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ⁺¹[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ⁺¹[i - 1, j - 1])
       # Gᵢ₊½ = gᵢ₊½ * (qⁿ⁺¹[i, j+1] - qⁿ[i, j-1] + qⁿ⁺¹[i+1, j+1] - qⁿ⁺¹[i+1, j-1])
       # Gᵢ₋½ = gᵢ₋½ * (qⁿ⁺¹[i, j+1] - qⁿ[i, j-1] + qⁿ⁺¹[i-1, j+1] - qⁿ[i-1, j-1])
       # Gⱼ₊½ = gⱼ₊½ * (qⁿ⁺¹[i+1, j] - qⁿ[i-1, j] + qⁿ⁺¹[i+1, j+1] - qⁿ⁺¹[i-1, j+1])
