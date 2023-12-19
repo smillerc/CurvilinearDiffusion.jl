@@ -19,7 +19,7 @@ function max_dt(solver, mesh::CurvilinearGrid2D)
     dξ = 1 / sqrt(ξx^2 + ξy^2)
     dη = 1 / sqrt(ηx^2 + ηy^2)
 
-    α = solver.diffusivity[idx]
+    α = solver.aⁿ⁺¹[idx]
 
     dt = min(
       (dξ^2) / α, # ξ direction

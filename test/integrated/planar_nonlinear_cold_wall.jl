@@ -19,12 +19,19 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   @info "Writing to $fn"
   ilo, ihi, jlo, jhi = mesh.limits
 
-  α = @views solver.diffusivity[ilo:ihi, jlo:jhi]
+  α = @views solver.aⁿ⁺¹[ilo:ihi, jlo:jhi]
   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
 
-  @show size(α), size(dens), size(temp)
   kappa = α .* dens
+
+  ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξxim1 = [m.ξxᵢ₋½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξxip1 = [m.ξxᵢ₊½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξy = [m.ξy for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ηx = [m.ηx for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ηy = [m.ηy for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  # J = [m.J for m in solver.metrics[ilo:ihi, jlo:jhi]]
 
   xy_n = CurvilinearGrids.coords(mesh)
   vtk_grid(fn, xy_n) do vtk
@@ -33,6 +40,15 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
     vtk["temperature"] = temp
     vtk["diffusivity"] = α
     vtk["conductivity"] = kappa
+
+    vtk["xi_xim1"] = ξxim1
+    vtk["xi_xip1"] = ξxip1
+    vtk["xi_x"] = ξx
+    vtk["xi_y"] = ξy
+    vtk["eta_x"] = ηx
+    vtk["eta_y"] = ηy
+    vtk["J"] = @view solver.J[ilo:ihi, jlo:jhi]
+
     pvd[t] = vtk
   end
 end
@@ -46,11 +62,17 @@ function wavy_grid(nx, ny)
   y0, y1 = (0, 1)
   a0 = 0.1
 
-  x1d(i) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y1d(j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+  function x(i, j)
+    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+    return x1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+  end
 
-  x(i, j) = @. x1d(i) + a0 * sinpi(2x1d(i)) * sinpi(2y1d(j))
-  y(i, j) = @. y1d(j) + a0 * sinpi(2x1d(i)) * sinpi(2y1d(j))
+  function y(i, j)
+    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+    return y1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+  end
 
   return (x, y)
 end
@@ -67,8 +89,8 @@ end
 
 ni, nj = (41, 41)
 nhalo = 1
-# x, y = wavy_grid(ni, nj)
-x, y = uniform_grid(ni, nj)
+x, y = wavy_grid(ni, nj)
+# x, y = uniform_grid(ni, nj)
 mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
 # ------------------------------------------------------------
@@ -85,11 +107,11 @@ bcs = (
 )
 
 solver = ADESolver(mesh, bcs)
-CFL = 1 # 1/2 is the explicit stability limit
-casename = "nonlinear_coldwall"
+CFL = 0.1 # 1/2 is the explicit stability limit
+casename = "nonlinear_coldwall_ad"
 
 # Temperature and density
-T = ones(Float64, cellsize_withhalo(mesh)) * 1e-1
+T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
 ρ = ones(Float64, cellsize_withhalo(mesh))
 cₚ = 1.0
 
@@ -110,21 +132,24 @@ end
 # Solve
 # ------------------------------------------------------------
 
-Δt = 1e-4
+Δt = 1e-6
 t = 0.0
 maxt = 1.0
-iter = 1
+iter = 0
 maxiter = Inf
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
 save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
+
+# fill!(solver.aⁿ⁺¹, 10.0)
 while true
   CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
   # dt = CurvilinearDiffusion.max_dt(solver, mesh)
   # global Δt = CFL * dt
 
-  L₂, Linf = CurvilinearDiffusion.solve!(solver, T, Δt)
+  L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
   @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
   # if iter % io_interval == 0
@@ -146,4 +171,4 @@ while true
 end
 
 save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-vtk_save(pvd)
+vtk_save(pvd);
