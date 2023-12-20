@@ -1,5 +1,5 @@
 using CurvilinearGrids, CurvilinearDiffusion
-using WriteVTK, Printf
+using WriteVTK, Printf, UnPack
 
 # ------------------------------------------------------------
 # I/O stuff
@@ -25,12 +25,12 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
 
   kappa = α .* dens
 
-  # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxim1 = [m.ξxᵢ₋½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxip1 = [m.ξxᵢ₊½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξy = [m.ξy for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηx = [m.ηx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηy = [m.ηy for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξxim1 = [m.ξxᵢ₋½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξxip1 = [m.ξxᵢ₊½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ξy = [m.ξy for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ηx = [m.ηx for m in solver.metrics[ilo:ihi, jlo:jhi]]
+  ηy = [m.ηy for m in solver.metrics[ilo:ihi, jlo:jhi]]
   # J = [m.J for m in solver.metrics[ilo:ihi, jlo:jhi]]
 
   xy_n = CurvilinearGrids.coords(mesh)
@@ -41,13 +41,13 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
     vtk["diffusivity"] = α
     vtk["conductivity"] = kappa
 
-    # vtk["xi_xim1"] = ξxim1
-    # vtk["xi_xip1"] = ξxip1
-    # vtk["xi_x"] = ξx
-    # vtk["xi_y"] = ξy
-    # vtk["eta_x"] = ηx
-    # vtk["eta_y"] = ηy
-    # vtk["J"] = @view solver.J[ilo:ihi, jlo:jhi]
+    vtk["xi_xim1"] = ξxim1
+    vtk["xi_xip1"] = ξxip1
+    vtk["xi_x"] = ξx
+    vtk["xi_y"] = ξy
+    vtk["eta_x"] = ηx
+    vtk["eta_y"] = ηy
+    vtk["J"] = @view solver.J[ilo:ihi, jlo:jhi]
 
     pvd[t] = vtk
   end
@@ -112,7 +112,7 @@ end
 
 ni, nj = (41, 41)
 nhalo = 1
-x, y = wavy_grid(ni, nj)
+x, y = wavy_grid2(ni, nj)
 # x, y = uniform_grid(ni, nj)
 mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
@@ -120,22 +120,16 @@ mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 # Initialization
 # ------------------------------------------------------------
 T0 = 1.0
-bcs = (
-  ilo=(:fixed, T0),
-  ihi=(:fixed, 0.0),
-  # jlo=:zero_flux,
-  # jhi=:zero_flux,
-  jlo=:periodic,
-  jhi=:periodic,
-)
+bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-solver = ADESolver(mesh, bcs, :conservative)
+solver = ADESolver(mesh, bcs)
 CFL = 0.1 # 1/2 is the explicit stability limit
-casename = "nonlinear_coldwall_ad_cons"
-# casename = "nonlinear_coldwall_ad_noncons"
+casename = "gauss_source"
 
 # Temperature and density
-T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
+T_hot = 1e3
+T_cold = 1e-2
+T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
 ρ = ones(Float64, cellsize_withhalo(mesh))
 cₚ = 1.0
 
@@ -152,6 +146,20 @@ cₚ = 1.0
   end
 end
 
+# Gaussian source term
+fwhm = 0.5
+x0 = 0.0
+y0 = 0.0
+@unpack ilo, ihi, jlo, jhi = mesh.limits
+for j in jlo:jhi
+  for i in ilo:ihi
+    c_loc = centroid(mesh, (i, j))
+
+    solver.source_term[i, j] =
+      T_hot * exp(-(((x0 - c_loc.x)^2) / fwhm + ((y0 - c_loc.y)^2) / fwhm)) + T_cold
+  end
+end
+
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
@@ -160,7 +168,7 @@ end
 t = 0.0
 maxt = 1.0
 iter = 0
-maxiter = 1
+maxiter = Inf
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
@@ -176,7 +184,6 @@ while true
   L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
   @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
-  # if iter % io_interval == 0
   if t + Δt > io_next
     save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
     global io_next += io_interval

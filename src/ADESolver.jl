@@ -25,6 +25,7 @@ struct ADESolver{T,N,EM,F,NT,BC}
   limits::NT
   bcs::BC
   nhalo::Int
+  conservative::Bool # uses the conservative form
 end
 
 """
@@ -33,14 +34,23 @@ to give sizes to pre-allocate the type members. Provide a `mean_func` to
 tell the solver how to determine diffusivity at the cell edges, i.e. via a
 harmonic mean or arithmetic mean.
 """
-function ADESolver(mesh::CurvilinearGrid2D, bcs, mean_func=arithmetic_mean, T=Float64)
+function ADESolver(
+  mesh::CurvilinearGrid2D, bcs, form=:conservative, mean_func=arithmetic_mean, T=Float64
+)
   celldims = cellsize_withhalo(mesh)
   qⁿ⁺¹ = zeros(T, celldims)
   pⁿ⁺¹ = zeros(T, celldims)
   J = zeros(T, celldims)
 
-  metric_type = typeof(compute_metrics_fd(mesh, (1, 1)))
-  # metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
+  if form === :conservative
+    conservative = true
+    metric_type = typeof(_conservative_metrics_2d(mesh, 1, 1))
+  else
+    conservative = false
+    metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
+  end
+  @show conservative
+
   edge_metrics = Array{metric_type,2}(undef, celldims)
 
   diffusivity = zeros(T, celldims)
@@ -62,6 +72,7 @@ function ADESolver(mesh::CurvilinearGrid2D, bcs, mean_func=arithmetic_mean, T=Fl
     limits,
     bcs,
     mesh.nhalo,
+    conservative,
   )
   update_mesh_metrics!(solver, mesh)
 
@@ -72,11 +83,19 @@ end
 function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
   @unpack ilo, ihi, jlo, jhi = mesh.limits
 
-  @inline for j in jlo:jhi
-    for i in ilo:ihi
-      solver.J[i, j] = jacobian(mesh, (i, j))
-      solver.metrics[i, j] = _non_conservative_metrics_2d(mesh, i, j)
-      # solver.metrics[i, j] = compute_metrics_fd(mesh, (i, j))
+  if solver.conservative
+    @inline for j in jlo:jhi
+      for i in ilo:ihi
+        solver.J[i, j] = jacobian(mesh, (i, j))
+        solver.metrics[i, j] = _conservative_metrics_2d(mesh, i, j)
+      end
+    end
+  else
+    @inline for j in jlo:jhi
+      for i in ilo:ihi
+        solver.J[i, j] = jacobian(mesh, (i, j))
+        solver.metrics[i, j] = _non_conservative_metrics_2d(mesh, i, j)
+      end
     end
   end
 
@@ -84,7 +103,7 @@ function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
 end
 
 @inline function _non_conservative_metrics_2d(mesh, i, j)
-  # note, metrics(mesh, (i,j)) uses node-based indexing, and here we're making 
+  # note, metrics(mesh, (i,j)) uses node-based indexing, and here we're making
   # a tuple of metrics that uses cell-based indexing, thus the weird 1/2 offsets
   metricsᵢⱼ = cell_metrics(mesh, (i, j))
   metricsᵢ₊½ = cell_metrics(mesh, (i + 1 / 2, j))
@@ -123,7 +142,7 @@ end
 
 @inline cutoff(a) = (0.5(abs(a) + a))
 
-@inline function _metrics_2d(mesh, i, j)
+@inline function _conservative_metrics_2d(mesh, i, j)
   metrics_i_plus_half = metrics_with_jacobian(mesh, (i + 1, j))
   metrics_i_minus_half = metrics_with_jacobian(mesh, (i, j))
   metrics_j_plus_half = metrics_with_jacobian(mesh, (i, j + 1))
@@ -187,13 +206,20 @@ end
 # Arguments
  - α: Diffusion coefficient
 """
+function solve!(solver::ADESolver, mesh, u, Δt)
+  if solver.conservative
+    solve_conservative!(solver, mesh, u, Δt)
+  else
+    solve_nc_nonlinear!(solver, mesh, u, Δt)
+  end
+end
 # solve!(solver::ADESolver, mesh, u, Δt) = solve_nc_nonlinear!(solver, mesh, u, Δt)
-solve!(solver::ADESolver, mesh, u, Δt) = solve_nc_nonlinear_explicit!(solver, mesh, u, Δt)
+# solve!(solver::ADESolver, mesh, u, Δt) = solve_nc_nonlinear_explicit!(solver, mesh, u, Δt)
 
-function solve_conservative!(solver::ADESolver, u, Δt)
+function solve_conservative!(solver::ADESolver, mesh, u, Δt)
   @unpack ilo, ihi, jlo, jhi = solver.limits
 
-  α = solver.diffusivity
+  α = solver.aⁿ⁺¹
 
   # make alias for code readibilty
   # uⁿ⁺¹ = solver.uⁿ⁺¹  # new value of u
@@ -213,12 +239,17 @@ function solve_conservative!(solver::ADESolver, u, Δt)
       Jᵢⱼ = solver.J[i, j]
       Js = Jᵢⱼ * solver.source_term[i, j]
 
-      a_edge = (
-        αᵢ₊½=solver.mean_func((α[i, j], α[i + 1, j]), (solver.J[i, j], solver.J[i + 1, j])),
-        αᵢ₋½=solver.mean_func((α[i, j], α[i - 1, j]), (solver.J[i, j], solver.J[i - 1, j])),
-        αⱼ₊½=solver.mean_func((α[i, j], α[i, j + 1]), (solver.J[i, j], solver.J[i, j + 1])),
-        αⱼ₋½=solver.mean_func((α[i, j], α[i, j - 1]), (solver.J[i, j], solver.J[i, j - 1])),
-      )
+      aᵢ₊½ = solver.mean_func(α[i, j], α[i + 1, j])
+      aᵢ₋½ = solver.mean_func(α[i, j], α[i - 1, j])
+      aⱼ₊½ = solver.mean_func(α[i, j], α[i, j + 1])
+      aⱼ₋½ = solver.mean_func(α[i, j], α[i, j - 1])
+      a_edge = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
+      # a_edge = (
+      #   αᵢ₊½=solver.mean_func((α[i, j], α[i + 1, j]), (solver.J[i, j], solver.J[i + 1, j])),
+      #   αᵢ₋½=solver.mean_func((α[i, j], α[i - 1, j]), (solver.J[i, j], solver.J[i - 1, j])),
+      #   αⱼ₊½=solver.mean_func((α[i, j], α[i, j + 1]), (solver.J[i, j], solver.J[i, j + 1])),
+      #   αⱼ₋½=solver.mean_func((α[i, j], α[i, j - 1]), (solver.J[i, j], solver.J[i, j - 1])),
+      # )
 
       begin
         @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = edge_terms_with_nonorthongal(
@@ -264,18 +295,17 @@ function solve_conservative!(solver::ADESolver, u, Δt)
       Jᵢⱼ = solver.J[i, j]
       Js = Jᵢⱼ * solver.source_term[i, j]
 
+      aᵢ₊½ = solver.mean_func(α[i, j], α[i + 1, j])
+      aᵢ₋½ = solver.mean_func(α[i, j], α[i - 1, j])
+      aⱼ₊½ = solver.mean_func(α[i, j], α[i, j + 1])
+      aⱼ₋½ = solver.mean_func(α[i, j], α[i, j - 1])
+      a_edge = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
       # a_edge = (
-      #   αᵢ₊½=solver.mean_func(α[i, j], α[i + 1, j]),
-      #   αᵢ₋½=solver.mean_func(α[i, j], α[i - 1, j]),
-      #   αⱼ₊½=solver.mean_func(α[i, j], α[i, j + 1]),
-      #   αⱼ₋½=solver.mean_func(α[i, j], α[i, j - 1]),
+      #   αᵢ₊½=solver.mean_func((α[i, j], α[i + 1, j]), (solver.J[i, j], solver.J[i + 1, j])),
+      #   αᵢ₋½=solver.mean_func((α[i, j], α[i - 1, j]), (solver.J[i, j], solver.J[i - 1, j])),
+      #   αⱼ₊½=solver.mean_func((α[i, j], α[i, j + 1]), (solver.J[i, j], solver.J[i, j + 1])),
+      #   αⱼ₋½=solver.mean_func((α[i, j], α[i, j - 1]), (solver.J[i, j], solver.J[i, j - 1])),
       # )
-      a_edge = (
-        αᵢ₊½=solver.mean_func((α[i, j], α[i + 1, j]), (solver.J[i, j], solver.J[i + 1, j])),
-        αᵢ₋½=solver.mean_func((α[i, j], α[i - 1, j]), (solver.J[i, j], solver.J[i - 1, j])),
-        αⱼ₊½=solver.mean_func((α[i, j], α[i, j + 1]), (solver.J[i, j], solver.J[i, j + 1])),
-        αⱼ₋½=solver.mean_func((α[i, j], α[i, j - 1]), (solver.J[i, j], solver.J[i, j - 1])),
-      )
 
       begin
         @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = edge_terms_with_nonorthongal(
@@ -283,14 +313,10 @@ function solve_conservative!(solver::ADESolver, u, Δt)
         )
       end
 
-      Gᵢ₊½ =
-        gᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ⁺¹[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
-      Gᵢ₋½ =
-        gᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ⁺¹[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ⁺¹[i - 1, j - 1])
-      Gⱼ₊½ =
-        gⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ⁺¹[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
-      Gⱼ₋½ =
-        gⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ⁺¹[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ⁺¹[i - 1, j - 1])
+      Gᵢ₊½ = gᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
+      Gᵢ₋½ = gᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
+      Gⱼ₊½ = gⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
+      Gⱼ₋½ = gⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
       # Gᵢ₊½ = gᵢ₊½ * (qⁿ⁺¹[i, j+1] - qⁿ[i, j-1] + qⁿ⁺¹[i+1, j+1] - qⁿ⁺¹[i+1, j-1])
       # Gᵢ₋½ = gᵢ₋½ * (qⁿ⁺¹[i, j+1] - qⁿ[i, j-1] + qⁿ⁺¹[i-1, j+1] - qⁿ[i-1, j-1])
       # Gⱼ₊½ = gⱼ₊½ * (qⁿ⁺¹[i+1, j] - qⁿ[i-1, j] + qⁿ⁺¹[i+1, j+1] - qⁿ⁺¹[i-1, j+1])
@@ -364,9 +390,8 @@ function solve_conservative!(solver::ADESolver, u, Δt)
 end
 
 function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
-
-  # The mesh metrics are indexed node-based, so the 
-  # convention can sometimes be confusing when trying to 
+  # The mesh metrics are indexed node-based, so the
+  # convention can sometimes be confusing when trying to
   # get the cell-based values
   #
   # The node indexing is as follows:
@@ -403,7 +428,7 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
   #------------------------------------------------------
   # Forward Sweep
   #------------------------------------------------------
-  # anything at i+1 or j+1 is from time level n+1, since we already computed it
+  # anything at i-1 or j-1 is from time level n+1, since we already computed it
 
   # make alias for code readibilty
   pⁿ⁺¹ = solver.pⁿ⁺¹
@@ -419,6 +444,7 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
       aⱼ₊½ = solver.mean_func(α[i, j], α[i, j + 1])
       aⱼ₋½ = solver.mean_func(α[i, j], α[i, j - 1])
 
+      aᵢⱼ = α[i, j]
       aᵢ₊₁ⱼ = α[i + 1, j]
       aᵢ₋₁ⱼ = α[i - 1, j]
       aᵢⱼ₊₁ = α[i, j + 1]
@@ -454,8 +480,8 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
             aᵢⱼ₋₁ * (pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
           ) +
           # geometric terms
-          0.5αᵢⱼ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j]) +
-          0.5βᵢⱼ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1]) +
+          0.5aᵢⱼ * αᵢⱼ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j]) +
+          0.5aᵢⱼ * βᵢⱼ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1]) +
           # source and remaining terms
           solver.source_term[i, j] +
           (pⁿ[i, j] / Δt)
@@ -472,7 +498,7 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
   #------------------------------------------------------
   # Reverse Sweep
   #------------------------------------------------------
-  # anything at i-1 or j-1 is from time level n+1, since we already computed it
+  # anything at i+1 or j+1 is from time level n+1, since we already computed it
 
   # make alias for code readibilty
   qⁿ⁺¹ = solver.qⁿ⁺¹
@@ -488,6 +514,7 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
       aⱼ₊½ = solver.mean_func(α[i, j], α[i, j + 1])
       aⱼ₋½ = solver.mean_func(α[i, j], α[i, j - 1])
 
+      aᵢⱼ = α[i, j]
       aᵢ₊₁ⱼ = α[i + 1, j]
       aᵢ₋₁ⱼ = α[i - 1, j]
       aᵢⱼ₊₁ = α[i, j + 1]
@@ -524,8 +551,8 @@ function solve_nc_nonlinear!(solver::ADESolver, mesh, u, Δt)
             aᵢⱼ₋₁ * (qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
           ) +
           # geometric terms
-          0.5αᵢⱼ * (qⁿ[i + 1, j] - qⁿ⁺¹[i - 1, j]) +
-          0.5βᵢⱼ * (qⁿ[i, j + 1] - qⁿ⁺¹[i, j - 1]) +
+          0.5aᵢⱼ * αᵢⱼ * (qⁿ[i + 1, j] - qⁿ⁺¹[i - 1, j]) +
+          0.5aᵢⱼ * βᵢⱼ * (qⁿ[i, j + 1] - qⁿ⁺¹[i, j - 1]) +
           # source and remaining terms
           solver.source_term[i, j] +
           (qⁿ[i, j] / Δt)
@@ -576,8 +603,8 @@ end
 
 function solve_nc_nonlinear_explicit!(solver::ADESolver, mesh, u, Δt)
 
-  # The mesh metrics are indexed node-based, so the 
-  # convention can sometimes be confusing when trying to 
+  # The mesh metrics are indexed node-based, so the
+  # convention can sometimes be confusing when trying to
   # get the cell-based values
   #
   # The node indexing is as follows:
@@ -652,7 +679,7 @@ function solve_nc_nonlinear_explicit!(solver::ADESolver, mesh, u, Δt)
         Δt * (
           (m.ξx^2 + m.ξy^2) * (aᵢ₊½ * (u[i + 1, j] - u[i, j]) - aᵢ₋½ * (u[i, j] - u[i - 1, j])) +
           (m.ηx^2 + m.ηy^2) * (aⱼ₊½ * (u[i, j + 1] - u[i, j]) - aⱼ₋½ * (u[i, j] - u[i, j - 1])) +
-          0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (aᵢ₊₁ⱼ * (u[i + 1, j + 1] - u[i + 1, j - 1]) - aᵢ₋₁ⱼ * (u[i - 1, j + 1] - u[i - 1, j - 1])) +         
+          0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (aᵢ₊₁ⱼ * (u[i + 1, j + 1] - u[i + 1, j - 1]) - aᵢ₋₁ⱼ * (u[i - 1, j + 1] - u[i - 1, j - 1])) +
           0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (aᵢⱼ₊₁ * (u[i + 1, j + 1] - u[i - 1, j + 1]) - aᵢⱼ₋₁ * (u[i + 1, j - 1] - u[i - 1, j - 1])) +
           0.5aᵢⱼ*αᵢⱼ * (u[i + 1, j] - u[i - 1, j]) + 0.5aᵢⱼ*βᵢⱼ * (u[i, j + 1] - u[i, j - 1]) +
           solver.source_term[i, j] + (u[i, j] / Δt)
