@@ -1,11 +1,13 @@
 module CurvilinearDiffusion
 
-include("ADESolver.jl")
-using .ADESolverType
-export ADESolver, solve!
-export update_conductivity!, update_mesh_metrics!
+include("partitioning.jl")
+using .Partitioning
 
-include("averaging.jl")
+include("ADESolvers.jl")
+using .ADESolvers
+export ADESolver
+export BlockADESolver
+export solve!, update_conductivity!, update_mesh_metrics!
 
 include("max_dt.jl")
 using .TimeStepControl

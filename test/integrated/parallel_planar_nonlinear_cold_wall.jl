@@ -1,5 +1,6 @@
-using CurvilinearGrids, CurvilinearDiffusion
-using WriteVTK, Printf, UnPack
+using CurvilinearGrids
+using CurvilinearDiffusion
+using WriteVTK, Printf
 
 # ------------------------------------------------------------
 # I/O stuff
@@ -110,9 +111,9 @@ function uniform_grid(nx, ny)
   return (x, y)
 end
 
-ni, nj = (41, 41)
+ni, nj = (101, 101)
 nhalo = 1
-x, y = wavy_grid2(ni, nj)
+x, y = wavy_grid(ni, nj)
 # x, y = uniform_grid(ni, nj)
 mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
@@ -120,16 +121,22 @@ mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 # Initialization
 # ------------------------------------------------------------
 T0 = 1.0
-bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
+bcs = (
+  ilo=(:fixed, T0),
+  ihi=(:fixed, 0.0),
+  # jlo=:zero_flux,
+  # jhi=:zero_flux,
+  jlo=:periodic,
+  jhi=:periodic,
+)
 
 solver = BlockADESolver(mesh, bcs)
 CFL = 0.1 # 1/2 is the explicit stability limit
-casename = "gauss_source"
+# casename = "nonlinear_coldwall_ad_cons"
+casename = "parallel_nonlinear_coldwall_noncons"
 
 # Temperature and density
-T_hot = 1e3
-T_cold = 1e-2
-T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
+T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
 ρ = ones(Float64, cellsize_withhalo(mesh))
 cₚ = 1.0
 
@@ -146,20 +153,6 @@ cₚ = 1.0
   end
 end
 
-# Gaussian source term
-fwhm = 0.5
-x0 = 0.0
-y0 = 0.0
-@unpack ilo, ihi, jlo, jhi = mesh.limits
-for j in jlo:jhi
-  for i in ilo:ihi
-    c_loc = centroid(mesh, (i, j))
-
-    solver.source_term[i, j] =
-      T_hot * exp(-(((x0 - c_loc.x)^2) / fwhm + ((y0 - c_loc.y)^2) / fwhm)) + T_cold
-  end
-end
-
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
@@ -168,7 +161,7 @@ end
 t = 0.0
 maxt = 1.0
 iter = 0
-maxiter = 1
+maxiter = 2
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
@@ -183,10 +176,10 @@ while true
 
   L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
   @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
-
   # L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
   # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
+  # if iter % io_interval == 0
   if t + Δt > io_next
     save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
     global io_next += io_interval
@@ -206,3 +199,117 @@ end
 
 save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 vtk_save(pvd);
+
+# BlockADESolver(
+#   ::Tuple{
+#     BlockHaloArrays.BlockHaloArray{
+#       6,
+#       Float64,
+#       2,
+#       2,
+#       2,
+#       Matrix{Float64},
+#       SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#       4,
+#     },
+#     BlockHaloArrays.BlockHaloArray{
+#       6,
+#       Float64,
+#       2,
+#       2,
+#       2,
+#       Matrix{Float64},
+#       SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#       4,
+#     },
+#   },
+#   ::Tuple{
+#     BlockHaloArrays.BlockHaloArray{
+#       6,
+#       Float64,
+#       2,
+#       2,
+#       2,
+#       Matrix{Float64},
+#       SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#       4,
+#     },
+#     BlockHaloArrays.BlockHaloArray{
+#       6,
+#       Float64,
+#       2,
+#       2,
+#       2,
+#       Matrix{Float64},
+#       SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#       4,
+#     },
+#   },
+#   ::BlockHaloArrays.BlockHaloArray{
+#     6,
+#     Float64,
+#     2,
+#     2,
+#     2,
+#     Matrix{Float64},
+#     SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#     4,
+#   },
+#   ::BlockHaloArrays.BlockHaloArray{
+#     6,
+#     Float64,
+#     2,
+#     2,
+#     2,
+#     Matrix{Float64},
+#     SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#     4,
+#   },
+#   ::BlockHaloArrays.BlockHaloArray{
+#     6,
+#     Float64,
+#     2,
+#     2,
+#     2,
+#     Matrix{Float64},
+#     SubArray{Float64,2,Matrix{Float64},Tuple{UnitRange{Int64},UnitRange{Int64}},false},
+#     4,
+#   },
+#   ::Matrix{Float64},
+#   ::Matrix{
+#     NamedTuple{
+#       (
+#         :ξx,
+#         :ξy,
+#         :ηx,
+#         :ηy,
+#         :ξxᵢ₋½,
+#         :ξyᵢ₋½,
+#         :ηxᵢ₋½,
+#         :ηyᵢ₋½,
+#         :ξxⱼ₋½,
+#         :ξyⱼ₋½,
+#         :ηxⱼ₋½,
+#         :ηyⱼ₋½,
+#         :ξxᵢ₊½,
+#         :ξyᵢ₊½,
+#         :ηxᵢ₊½,
+#         :ηyᵢ₊½,
+#         :ξxⱼ₊½,
+#         :ξyⱼ₊½,
+#         :ηxⱼ₊½,
+#         :ηyⱼ₊½,
+#       ),
+#       NTuple{20,Float64},
+#     },
+#   },
+#   ::Matrix{Float64},
+#   ::Matrix{Float64},
+#   ::typeof(CurvilinearDiffusion.ADESolvers.arithmetic_mean),
+#   ::NamedTuple{
+#     (:ilo, :ihi, :jlo, :jhi),
+#     Tuple{Tuple{Symbol,Float64},Tuple{Symbol,Float64},Symbol,Symbol},
+#   },
+#   ::Int64,
+#   ::Bool,
+# )
