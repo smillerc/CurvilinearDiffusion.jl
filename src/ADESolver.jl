@@ -1,32 +1,5 @@
-module ADESolverType
-
-using CurvilinearGrids
-using Polyester, StaticArrays
-using UnPack
-
-export ADESolver, solve!
-export update_conductivity!, update_mesh_metrics!
-
-include("averaging.jl")
-include("boundary_conditions.jl")
 
 # TODO: make a linear and non-linear version based on κ or a
-
-struct ADESolver{T,N,EM,F,NT,BC}
-  qⁿ⁺¹::Array{T,N}
-  pⁿ⁺¹::Array{T,N}
-  J::Array{T,N} # cell-centered Jacobian
-  metrics::Array{EM,N}
-  a₋ⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  a₊ⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  aⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  source_term::Array{T,N} # cell-centered source term
-  mean_func::F
-  limits::NT
-  bcs::BC
-  nhalo::Int
-  conservative::Bool # uses the conservative form
-end
 
 """
 The Alternating Direction Explicit (ADE) diffusion solver. Provide the mesh
@@ -49,7 +22,6 @@ function ADESolver(
     conservative = false
     metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
   end
-  @show conservative
 
   edge_metrics = Array{metric_type,2}(undef, celldims)
 
@@ -187,11 +159,11 @@ update the thermal conductivity of the mesh at each cell-center.
  - `κ::Function`: Function to determine thermal conductivity, e.g. κ(ρ,T) = κ0 * ρ * T^(5/2)
  - `cₚ::Real`: Heat capacity
 """
-function update_conductivity!(solver::ADESolver, T::Array, ρ::Array, κ::Function, cₚ::Real)
-  @inline for idx in eachindex(T)
+function update_conductivity!(solver, T::Array, ρ::Array, κ::Function, cₚ::Real)
+  @batch for idx in eachindex(T)
     rho = ρ[idx]
     kappa = κ(rho, T[idx])
-    solver.aⁿ⁺¹[idx] = kappa / (rho * cₚ)
+    solver.a[idx] = kappa / (rho * cₚ)
   end
 
   return nothing
@@ -845,6 +817,4 @@ function compute_metrics_fd(mesh, (i, j))
   )
 
   return cell_metrics
-end
-
 end
