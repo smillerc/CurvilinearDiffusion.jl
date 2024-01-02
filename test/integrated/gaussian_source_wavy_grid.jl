@@ -120,7 +120,7 @@ function uniform_grid(nx, ny)
 end
 
 ni, nj = (101, 101)
-nhalo = 1
+nhalo = 2
 x, y = wavy_grid2(ni, nj)
 # x, y = uniform_grid(ni, nj)
 mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
@@ -131,7 +131,7 @@ mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 T0 = 1.0
 bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-n_blocks = 4
+n_blocks = 6
 solver = BlockADESolver(mesh, bcs, n_blocks)
 CFL = 0.1 # 1/2 is the explicit stability limit
 casename = "gauss_source"
@@ -177,7 +177,7 @@ end
 t = 0.0
 maxt = 1.0
 iter = 0
-maxiter = 33
+maxiter = Inf
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
