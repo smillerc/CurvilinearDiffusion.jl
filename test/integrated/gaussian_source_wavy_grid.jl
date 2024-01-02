@@ -1,5 +1,6 @@
 using CurvilinearGrids, CurvilinearDiffusion
 using WriteVTK, Printf, UnPack
+using BlockHaloArrays
 
 # ------------------------------------------------------------
 # I/O stuff
@@ -22,7 +23,14 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   α = @views solver.a[ilo:ihi, jlo:jhi]
   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
+  block = zeros(Int, size(dens))
 
+  for blk in 1:nblocks(solver.u[1])
+    globalCI = CartesianIndices(solver.u[1].global_blockranges[blk])
+    for idx in globalCI
+      block[idx] = blk
+    end
+  end
   kappa = α .* dens
 
   # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
@@ -40,6 +48,7 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
     vtk["temperature"] = temp
     vtk["diffusivity"] = α
     vtk["conductivity"] = kappa
+    vtk["block"] = block
 
     # vtk["xi_xim1"] = ξxim1
     # vtk["xi_xip1"] = ξxip1
@@ -110,7 +119,7 @@ function uniform_grid(nx, ny)
   return (x, y)
 end
 
-ni, nj = (41, 41)
+ni, nj = (101, 101)
 nhalo = 1
 x, y = wavy_grid2(ni, nj)
 # x, y = uniform_grid(ni, nj)
@@ -122,7 +131,8 @@ mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 T0 = 1.0
 bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-solver = BlockADESolver(mesh, bcs)
+n_blocks = 4
+solver = BlockADESolver(mesh, bcs, n_blocks)
 CFL = 0.1 # 1/2 is the explicit stability limit
 casename = "gauss_source"
 
@@ -159,7 +169,6 @@ for j in jlo:jhi
       T_hot * exp(-(((x0 - c_loc.x)^2) / fwhm + ((y0 - c_loc.y)^2) / fwhm)) + T_cold
   end
 end
-
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
@@ -168,7 +177,7 @@ end
 t = 0.0
 maxt = 1.0
 iter = 0
-maxiter = 1
+maxiter = 33
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
@@ -192,7 +201,7 @@ while true
     global io_next += io_interval
   end
 
-  if iter >= maxiter
+  if iter >= maxiter - 1
     break
   end
 

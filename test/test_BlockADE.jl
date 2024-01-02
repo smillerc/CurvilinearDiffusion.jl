@@ -26,9 +26,9 @@ solver = BlockADESolver(mesh, bcs)
 
 dims = (8, 3) # a 30 x 20 matrix
 nhalo = 1 # number of halo entries in each dimension
-nblocks = 2 # nthreads() # nblocks must be ≤ nthreads() or a warning will be issued
+n_blocks = 2 # nthreads() # nblocks must be ≤ nthreads() or a warning will be issued
 
-A = BlockHaloArray(dims, nhalo, nblocks; T=Float64)
+A = BlockHaloArray(dims, nhalo, n_blocks; T=Float64)
 
 ilo, ihi, jlo, jhi = A.loop_limits[2]
 blockCI = CartesianIndices((ilo:ihi, jlo:jhi))
@@ -36,6 +36,19 @@ globalCI = CartesianIndices(A.global_blockranges[2])
 
 globalCI[1].I .+ nhalo
 # B = BlockHaloArray(dims, nhalo, nblocks; T=Float64)
+
+function haloviews(A, bid)
+  return (
+    haloview(A, bid, :ilo),
+    haloview(A, bid, :jlo),
+    haloview(A, bid, :jhi),
+    haloview(A, bid, :ihi),
+    haloview(A, bid, :ilojlo),
+    haloview(A, bid, :ilojhi),
+    haloview(A, bid, :ihijlo),
+    haloview(A, bid, :ihijhi),
+  )
+end
 
 # A1 = domainview(A, 1)
 # A1 .= 1

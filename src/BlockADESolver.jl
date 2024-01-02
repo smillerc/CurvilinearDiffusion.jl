@@ -2,7 +2,7 @@ using Plots
 
 # TODO: make a linear and non-linear version based on κ or a
 struct BlockADESolver{BHA,T,N,EM,F,BC}
-  u::NTuple{2,BHA}
+  u::NTuple{3,BHA}
   u_edge::NTuple{2,BHA}
   ϵ::BHA # change in the solution between stages
   qⁿ⁺¹::BHA
@@ -35,6 +35,7 @@ function BlockADESolver(
   celldims_nohalo = cellsize(mesh)
 
   u = (
+    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
     BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
     BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
   )
@@ -409,10 +410,168 @@ function solve_conservative!(solver::BlockADESolver, mesh, u, Δt)
 end
 
 function solve!(
+  solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=Inf, tol=1e-6
+)
+  u⁽⁰⁾ = solver.u[1]
+  u⁽¹⁾ = solver.u[2]
+  u⁽²⁾ = solver.u[3]
+
+  n_blocks = nblocks(u⁽⁰⁾)
+  cycle = 0
+
+  ilo, ihi, jlo, jhi = mesh.limits
+  u_dom = @views u[ilo:ihi, jlo:jhi]
+  applybc!(u, solver.bcs, solver.nhalo)
+
+  copy!(u⁽⁰⁾, u_dom) # save the initial state - we revert to this each cycle
+  copy!(u⁽¹⁾, u_dom)
+
+  # updatehalo!(u⁽⁰⁾) # populate the halo cells
+  updatehalo!(u⁽¹⁾) # populate the halo cells
+
+  # 1st solve
+  nc_solve(solver, u⁽¹⁾, Δt)
+  updatehalo!(u⁽¹⁾)
+
+  copy!(u⁽²⁾, u⁽¹⁾)
+  while true
+    cycle += 1
+
+    # populate the halo cells of all the neighbors
+    # so the boundaries get updated
+    updatehalo!(u⁽²⁾)
+
+    # Reset the domain values. This ignores the halo cells,
+    # which is what we want. The newly updated halo cells will
+    # be used in the next solve
+    copy_domain!(u⁽²⁾, u⁽⁰⁾)
+
+    # solve with the updated boundary values
+    nc_solve(solver, u⁽²⁾, Δt)
+
+    L₂ = compare_solution_norm(u⁽²⁾, u⁽¹⁾)
+    is_converged = (L₂ <= tol)
+
+    if is_converged
+      copy!(u_dom, u⁽²⁾) # copy solution back to u
+      # error("done")
+      return L₂, cycle, is_converged
+    else
+      # we haven't converged yet, so store this cycle's solution
+      # as the new "previous" solution
+      copy!(u⁽¹⁾, u⁽²⁾)
+    end
+
+    if cycle == maxcycles
+      @warn "The BlockADESolver is hitting the maxcycles limit. The solution is likely not converged!"
+      copy!(u_dom, u⁽¹⁾) # copy solution back to u
+      return L₂, cycle, is_converged
+    end
+  end # cycle loop
+
+  return nothing
+end
+
+function solve_orig_blk!(
+  solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=Inf, tol=1e-12
+)
+  u⁽⁰⁾ = solver.u[1]
+  u⁽¹⁾ = solver.u[2]
+  u⁽²⁾ = solver.u[3]
+
+  n_blocks = nblocks(u⁽⁰⁾)
+  cycle = 0
+
+  ilo, ihi, jlo, jhi = mesh.limits
+  u_dom = @views u[ilo:ihi, jlo:jhi]
+  applybc!(u, solver.bcs, solver.nhalo)
+
+  copy!(u⁽⁰⁾, u_dom) # save the initial state - we revert to this each cycle
+  copy!(u⁽¹⁾, u_dom)
+
+  # updatehalo!(u⁽⁰⁾) # populate the halo cells
+  updatehalo!(u⁽¹⁾) # populate the halo cells
+  bid = 3
+
+  # 1st solve
+  @sync for blockid in 1:n_blocks
+    # u⁽¹⁾ is now the 1st guess at the solution.
+    # edges are out of sync still -- this is why we need to cycle a few times
+    @tspawnat blockid solve_block!(solver, u⁽¹⁾, Δt, blockid)
+  end
+  updatehalo!(u⁽¹⁾)
+
+  # p = heatmap(u⁽¹⁾[bid]; title="u⁽¹⁾")
+  # display(p)
+  copy!(u⁽²⁾, u⁽¹⁾)
+
+  L2_sol = @MVector zeros(n_blocks)
+  while true
+    cycle += 1
+
+    # populate the halo cells of all the neighbors
+    # so the boundaries get updated
+    updatehalo!(u⁽²⁾)
+
+    # Reset the domain values. This ignores the halo cells,
+    # which is what we want. The newly updated halo cells will
+    # be used in the next solve
+    copy_domain!(u⁽²⁾, u⁽⁰⁾)
+
+    # p = heatmap(u⁽²⁾[bid]; title="u⁽²⁾")
+    # display(p)
+    # p3 = heatmap(u⁽²⁾[bid] .- u⁽⁰⁾[bid]; title="u⁽²⁾ .- u⁽⁰⁾")
+    # display(p3)
+
+    # solve with the updated boundary values
+    @sync for blockid in 1:n_blocks
+      @tspawnat blockid begin
+        # solve the block now with updated boundary values
+        # in the halo cells
+        # u⁽²⁾[blockid][end, :] .= 4.0
+        L2_block = solve_block!(solver, u⁽²⁾, Δt, blockid)
+        L2_sol[blockid] = L2_block
+      end
+    end
+    # @show maximum(L2_sol)
+
+    # p1 = heatmap(u⁽¹⁾[bid]; title="u⁽¹⁾post")
+    # display(p1)
+    # p2 = heatmap(u⁽²⁾[bid]; title="u⁽²⁾post")
+    # display(p2)
+
+    # p3 = heatmap(u⁽¹⁾[bid] .- u⁽²⁾[bid]; title="u⁽¹⁾ .- u⁽²⁾")
+    # display(p3)
+
+    L₂ = compare_solution_norm(u⁽²⁾, u⁽¹⁾)
+    # L₂ = compare_solution_norm(u⁽²⁾, u⁽⁰⁾)
+    is_converged = (L₂ <= tol)
+    # @show L₂, cycle, is_converged
+
+    if is_converged
+      copy!(u_dom, u⁽²⁾) # copy solution back to u
+      # error("done")
+      return L₂, cycle, is_converged
+    else
+      # we haven't converged yet, so store this cycle's solution
+      # as the new "previous" solution
+      copy!(u⁽¹⁾, u⁽²⁾)
+    end
+
+    if cycle == maxcycles
+      @warn "The BlockADESolver is hitting the maxcycles limit. The solution is likely not converged!"
+      copy!(u_dom, u⁽¹⁾) # copy solution back to u
+      return L₂, cycle, is_converged
+    end
+  end # cycle loop
+
+  return nothing
+end
+
+function solve_orig_edge!(
   solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=5, tol=1e-5
 )
   u⁽⁰⁾ = solver.u[1]
-
   u⁽¹⁾ = solver.u[2]
   u_edge⁽¹⁾ = solver.u_edge[1]
   u_edge⁽²⁾ = solver.u_edge[2]
@@ -423,6 +582,7 @@ function solve!(
   copy!(u⁽⁰⁾, u_dom)
   updatehalo!(u⁽⁰⁾) # populate the halo cells
 
+  cycle = 0
   n_blocks = nblocks(u⁽⁰⁾)
 
   # TODO: I suspect something is amiss with the edges... I'm getting L2 of 0!
@@ -432,14 +592,18 @@ function solve!(
       fill!(u_edge⁽¹⁾[blockid], 0)
       fill!(u_edge⁽²⁾[blockid], 0)
       solve_block!(solver, u⁽¹⁾, Δt, blockid)
-      update_block_edges!(u⁽¹⁾, u_edge⁽¹⁾, blockid)
+
+      # save the boundary/edge values in u_edge⁽¹⁾
+      # we use this to keep track of how much the answer has changed based on the boundaries
+      update_block_edges!(u⁽¹⁾, u_edge⁽¹⁾, blockid, 0)
     end
   end
 
-  ncycles = 0
   while true
-    ncycles += 1
-    updatehalo!(u⁽¹⁾) # update the halo cells
+    cycle += 1
+
+    # use u⁽¹⁾ to populate the halo cells of all the neighbors
+    updatehalo!(u⁽¹⁾)
 
     # reset the domain values
     # this ignores the halo cells, which is what we want. The
@@ -449,30 +613,38 @@ function solve!(
     # solve with the updated boundary values
     @sync for blockid in 1:n_blocks
       @tspawnat blockid begin
-        fill!(u_edge⁽²⁾[blockid], 0)
+        # fill!(u_edge⁽²⁾[blockid], 0)
+
+        # solve the block (now we have updated boundary values)
         solve_block!(solver, u⁽¹⁾, Δt, blockid)
-        update_block_edges!(u⁽¹⁾, u_edge⁽²⁾, blockid)
+
+        # copy the boundary values to u_edge⁽²⁾, so we can keep
+        # track of convergence by comparing u_edge⁽²⁾ and u_edge⁽¹⁾
+        update_block_edges!(u⁽¹⁾, u_edge⁽²⁾, blockid, cycle)
       end
     end
 
+    # find L2 norm of u_edge⁽²⁾ - u_edge⁽¹⁾
     L₂ = check_edge_convergence(solver)
-    @show L₂, ncycles
     is_converged = (L₂ <= tol)
+    @show L₂, cycle, is_converged
 
     if is_converged
       copy!(u_dom, u⁽¹⁾) # copy solution back to u
-      return L₂, ncycles, is_converged
+      error("done")
+      return L₂, cycle, is_converged
     else
       copy!(u_edge⁽¹⁾, u_edge⁽²⁾)
     end
 
-    if ncycles == maxcycles
+    if cycle == maxcycles
       @warn "The BlockADESolver is hitting the maxcycles limit. The solution is likely not converged!"
       copy!(u_dom, u⁽¹⁾) # copy solution back to u
-      return L₂, ncycles, is_converged
+      return L₂, cycle, is_converged
     end
-    error("done")
   end # cycle loop
+
+  return nothing
 end
 
 function solve_block!(solver, u⁽¹⁾, Δt, blockid)
@@ -484,16 +656,16 @@ function solve_block!(solver, u⁽¹⁾, Δt, blockid)
 end
 
 # update the edge values for a particular block
-function update_block_edges!(u, u_edge, blockid)
+function update_block_edges!(u, u_edge, blockid, cycle)
   u_block = u[blockid]
   edge_block = u_edge[blockid]
 
   ilo, ihi, jlo, jhi = u.loop_limits[blockid]
 
-  if blockid == 3
-    p1 = heatmap(edge_block; title="Block $(blockid) before")
-    display(p1)
-  end
+  # if blockid == 3
+  #   p1 = heatmap(edge_block; title="Block $(blockid) before, cycle: $cycle")
+  #   display(p1)
+  # end
 
   for j in jlo:jhi
     for i in ilo:ihi
@@ -505,10 +677,10 @@ function update_block_edges!(u, u_edge, blockid)
     end
   end
 
-  if blockid == 3
-    p2 = heatmap(edge_block; title="Block $(blockid) after")
-    display(p2)
-  end
+  # if blockid == 3
+  #   p2 = heatmap(edge_block; title="Block $(blockid) after, cycle: $cycle")
+  #   display(p2)
+  # end
   return nothing
 end
 
@@ -524,7 +696,6 @@ function check_edge_convergence(solver)
     end
   end
 
-  @show L2
   L2max = maximum(L2)
   return L2max
 end
@@ -548,6 +719,47 @@ function check_edge_convergence_block(solver, blockid)
         ϵ[i, j] = abs(old[i, j] - new[i, j])
       end
     end
+  end
+
+  # if blockid == 3
+  #   p = heatmap(ϵ; title="ϵ")
+  #   display(p)
+  # end
+
+  if !isfinite(L₂denom) || iszero(L₂denom)
+    L2norm = -Inf
+  else
+    L2norm = sqrt(L₂numer) / sqrt(L₂denom)
+  end
+
+  return L2norm
+end
+
+function compare_solution_norm(u2, u1)
+  nb = nblocks(u2)
+  L2 = @MVector zeros(nb)
+
+  @sync for blockid in 1:nb
+    @tspawnat blockid begin
+      L₂_block = compare_solution_norm_block(u2, u1, blockid)
+      L2[blockid] = L₂_block
+    end
+  end
+
+  # @show L2
+  L2max = maximum(L2)
+  return L2max
+end
+
+function compare_solution_norm_block(u2, u1, blockid)
+  d2 = domainview(u2, blockid)
+  d1 = domainview(u1, blockid)
+  L₂denom = 0.0
+  L₂numer = 0.0
+
+  @inline for idx in eachindex(d2)
+    L₂numer += abs2(d2[idx] - d1[idx])
+    L₂denom += abs2(d2[idx])
   end
 
   if !isfinite(L₂denom) || iszero(L₂denom)
@@ -596,14 +808,13 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
   pⁿ⁺¹ = solver.pⁿ⁺¹[blockid]
   qⁿ⁺¹ = solver.qⁿ⁺¹[blockid]
   u = u0[blockid]
-  @inline for idx in blockCI
+  @inline for idx in eachindex(u)
     pⁿ⁺¹[idx] = u[idx]
     qⁿ⁺¹[idx] = u[idx]
   end
   pⁿ = @views pⁿ⁺¹
   qⁿ = @views qⁿ⁺¹
 
-  # @show blockid, globalCI, blockCI
   for (gidx, bidx) in zip(
     globalCI, # global indices
     blockCI,  # block indices
@@ -728,8 +939,9 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
   end
 
   # Now average the forward/reverse sweeps
+  L₂ = 0.0
   @inline for idx in blockCI
-    # solver.ϵ[idx] = abs(qⁿ⁺¹[idx] - pⁿ⁺¹[idx])
+    L₂ += abs2(qⁿ⁺¹[idx] - pⁿ⁺¹[idx])
     u[idx] = 0.5(qⁿ⁺¹[idx] + pⁿ⁺¹[idx])
   end
 
@@ -742,10 +954,254 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
     end
   end
 
-  # N = length(block_indices)
-  # L₂ = sqrt(L₂ / N)
+  N = length(blockCI)
+  L₂ = sqrt(L₂ / N)
 
-  # # return L₂, Linf
+  return L₂
+end
+
+function nc_solve(solver::BlockADESolver, u, Δt)
+  n_blocks = nblocks(u)
+  @sync for blockid in 1:n_blocks
+    @tspawnat blockid nc_forward_sweep_block!(solver, u, Δt, blockid)
+  end
+
+  updatehalo!(solver.pⁿ⁺¹)
+  copy_halo!(u, solver.pⁿ⁺¹)
+
+  @sync for blockid in 1:n_blocks
+    @tspawnat blockid nc_reverse_sweep_block!(solver, u, Δt, blockid)
+  end
+
+  @sync for blockid in 1:n_blocks
+    @tspawnat blockid ave_sweeps(solver, u, blockid)
+  end
+
+  return nothing
+end
+
+function nc_forward_sweep_block!(solver::BlockADESolver, u0, Δt, blockid)
+  # The mesh metrics are indexed node-based, so the
+  # convention can sometimes be confusing when trying to
+  # get the cell-based values
+  #
+  # The node indexing is as follows:
+  #
+  #         (i,j+1)            (i+1,j+1)
+  #           o---------X----------o
+  #           |     (i+1/2,j+1)    |
+  #           |                    |
+  #           |      cell idx      |
+  # (i,j+1/2) X       (I,J)        X (i+1,j+1/2)
+  #           |                    |
+  #           |                    |
+  #           |     (i+1/2,j)      |
+  #           o---------X----------o
+  #         (i,j)               (1+1,j)
+
+  ilo, ihi, jlo, jhi = u0.loop_limits[blockid]
+  globalCI = CartesianIndices(u0.global_blockranges[blockid])
+  blockCI = CartesianIndices((ilo:ihi, jlo:jhi))
+  @assert length(globalCI) == length(blockCI)
+
+  α = solver.a
+  # applybc!(u, solver.bcs, solver.nhalo) # update the ghost cell temperatures
+
+  #------------------------------------------------------
+  # Forward Sweep
+  #------------------------------------------------------
+  # anything at i-1 or j-1 is from time level n+1, since we already computed it
+
+  # make alias for code readibilty
+  pⁿ⁺¹ = solver.pⁿ⁺¹[blockid]
+  u = u0[blockid]
+  @inline for idx in eachindex(u)
+    pⁿ⁺¹[idx] = u[idx]
+  end
+  pⁿ = @views pⁿ⁺¹
+
+  for (gidx, bidx) in zip(
+    globalCI, # global indices
+    blockCI,  # block indices
+  )
+    # @show bidx, gidx
+    bi, bj = Tuple(bidx) # block i, j
+    gi, gj = Tuple(gidx) .+ solver.nhalo # global i, j
+    aᵢ₊½ = solver.mean_func(α[gi, gj], α[gi + 1, gj])
+    aᵢ₋½ = solver.mean_func(α[gi, gj], α[gi - 1, gj])
+    aⱼ₊½ = solver.mean_func(α[gi, gj], α[gi, gj + 1])
+    aⱼ₋½ = solver.mean_func(α[gi, gj], α[gi, gj - 1])
+
+    aᵢⱼ = α[gi, gj]
+    aᵢ₊₁ⱼ = α[gi + 1, gj]
+    aᵢ₋₁ⱼ = α[gi - 1, gj]
+    aᵢⱼ₊₁ = α[gi, gj + 1]
+    aᵢⱼ₋₁ = α[gi, gj - 1]
+
+    # if bi == ihi
+    #   @show aᵢ₊₁ⱼ, pⁿ[bi, bj], pⁿ[bi + 1, bj]
+    # end
+    m = solver.metrics[gi, gj]
+    αᵢⱼ = (
+      m.ξx * (m.ξxᵢ₊½ - m.ξxᵢ₋½) +
+      m.ξy * (m.ξyᵢ₊½ - m.ξyᵢ₋½) +
+      m.ηx * (m.ξxⱼ₊½ - m.ξxⱼ₋½) +
+      m.ηy * (m.ξyⱼ₊½ - m.ξyⱼ₋½)
+    )
+
+    βᵢⱼ = (
+      m.ξx * (m.ηxᵢ₊½ - m.ηxᵢ₋½) +
+      m.ξy * (m.ηyᵢ₊½ - m.ηyᵢ₋½) +
+      m.ηx * (m.ηxⱼ₊½ - m.ηxⱼ₋½) +
+      m.ηy * (m.ηyⱼ₊½ - m.ηyⱼ₋½)
+    )
+
+    pⁿ⁺¹[bi, bj] =
+      (
+        # orthogonal terms
+        (m.ξx^2 + m.ξy^2) *
+        (aᵢ₊½ * (pⁿ[bi + 1, bj] - pⁿ[bi, bj]) + aᵢ₋½ * pⁿ⁺¹[bi - 1, bj]) +
+        (m.ηx^2 + m.ηy^2) *
+        (aⱼ₊½ * (pⁿ[bi, bj + 1] - pⁿ[bi, bj]) + aⱼ₋½ * pⁿ⁺¹[bi, bj - 1]) +
+        # non-orthogonal terms
+        0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (
+          aᵢ₊₁ⱼ * (pⁿ[bi + 1, bj + 1] - pⁿ[bi + 1, bj - 1]) -
+          aᵢ₋₁ⱼ * (pⁿ[bi - 1, bj + 1] - pⁿ[bi - 1, bj - 1])
+        ) +
+        0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (
+          aᵢⱼ₊₁ * (pⁿ[bi + 1, bj + 1] - pⁿ[bi - 1, bj + 1]) -
+          aᵢⱼ₋₁ * (pⁿ[bi + 1, bj - 1] - pⁿ[bi - 1, bj - 1])
+        ) +
+        # geometric terms
+        0.5aᵢⱼ * αᵢⱼ * (pⁿ[bi + 1, bj] - pⁿ⁺¹[bi - 1, bj]) +
+        0.5aᵢⱼ * βᵢⱼ * (pⁿ[bi, bj + 1] - pⁿ⁺¹[bi, bj - 1]) +
+        # source and remaining terms
+        solver.source_term[gi, gj] +
+        (pⁿ[bi, bj] / Δt)
+      ) / ((1 / Δt) + (aᵢ₋½ * (m.ξx^2 + m.ξy^2) + aⱼ₋½ * (m.ηx^2 + m.ηy^2)))
+
+    pⁿ⁺¹[bi, bj] = cutoff(pⁿ⁺¹[bi, bj])
+  end
+end
+
+function nc_reverse_sweep_block!(solver::BlockADESolver, u0, Δt, blockid)
+  # The mesh metrics are indexed node-based, so the
+  # convention can sometimes be confusing when trying to
+  # get the cell-based values
+  #
+  # The node indexing is as follows:
+  #
+  #         (i,j+1)            (i+1,j+1)
+  #           o---------X----------o
+  #           |     (i+1/2,j+1)    |
+  #           |                    |
+  #           |      cell idx      |
+  # (i,j+1/2) X       (I,J)        X (i+1,j+1/2)
+  #           |                    |
+  #           |                    |
+  #           |     (i+1/2,j)      |
+  #           o---------X----------o
+  #         (i,j)               (1+1,j)
+
+  ilo, ihi, jlo, jhi = u0.loop_limits[blockid]
+  globalCI = CartesianIndices(u0.global_blockranges[blockid])
+  blockCI = CartesianIndices((ilo:ihi, jlo:jhi))
+  @assert length(globalCI) == length(blockCI)
+
+  α = solver.a
+  # applybc!(u, solver.bcs, solver.nhalo) # update the ghost cell temperatures
+
+  #------------------------------------------------------
+  # Forward Sweep
+  #------------------------------------------------------
+  # anything at i-1 or j-1 is from time level n+1, since we already computed it
+
+  # make alias for code readibilty
+  qⁿ⁺¹ = solver.qⁿ⁺¹[blockid]
+  u = u0[blockid]
+  @inline for idx in eachindex(u)
+    qⁿ⁺¹[idx] = u[idx]
+  end
+  qⁿ = @views qⁿ⁺¹
+
+  #------------------------------------------------------
+  # Reverse Sweep
+  #------------------------------------------------------
+  # anything at i+1 or j+1 is from time level n+1, since we already computed it
+  @inline for (gidx, bidx) in zip(
+    Iterators.reverse(globalCI), # global indices
+    Iterators.reverse(blockCI),  # block indices
+  )
+    bi, bj = Tuple(bidx) # block i, j
+    gi, gj = Tuple(gidx) .+ solver.nhalo # global i, j
+    aᵢ₊½ = solver.mean_func(α[gi, gj], α[gi + 1, gj])
+    aᵢ₋½ = solver.mean_func(α[gi, gj], α[gi - 1, gj])
+    aⱼ₊½ = solver.mean_func(α[gi, gj], α[gi, gj + 1])
+    aⱼ₋½ = solver.mean_func(α[gi, gj], α[gi, gj - 1])
+
+    aᵢⱼ = α[gi, gj]
+    aᵢ₊₁ⱼ = α[gi + 1, gj]
+    aᵢ₋₁ⱼ = α[gi - 1, gj]
+    aᵢⱼ₊₁ = α[gi, gj + 1]
+    aᵢⱼ₋₁ = α[gi, gj - 1]
+
+    m = solver.metrics[gi, gj]
+
+    αᵢⱼ = (
+      m.ξx * (m.ξxᵢ₊½ - m.ξxᵢ₋½) +
+      m.ξy * (m.ξyᵢ₊½ - m.ξyᵢ₋½) +
+      m.ηx * (m.ξxⱼ₊½ - m.ξxⱼ₋½) +
+      m.ηy * (m.ξyⱼ₊½ - m.ξyⱼ₋½)
+    )
+
+    βᵢⱼ = (
+      m.ξx * (m.ηxᵢ₊½ - m.ηxᵢ₋½) +
+      m.ξy * (m.ηyᵢ₊½ - m.ηyᵢ₋½) +
+      m.ηx * (m.ηxⱼ₊½ - m.ηxⱼ₋½) +
+      m.ηy * (m.ηyⱼ₊½ - m.ηyⱼ₋½)
+    )
+    qⁿ⁺¹[bi, bj] =
+      (
+        # orthogonal terms
+        (m.ξx^2 + m.ξy^2) *
+        (aᵢ₊½ * qⁿ⁺¹[bi + 1, bj] - aᵢ₋½ * (qⁿ[bi, bj] - qⁿ⁺¹[bi - 1, bj])) +
+        (m.ηx^2 + m.ηy^2) *
+        (aⱼ₊½ * qⁿ⁺¹[bi, bj + 1] - aⱼ₋½ * (qⁿ[bi, bj] - qⁿ⁺¹[bi, bj - 1])) +
+        # non-orthogonal terms
+        0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (
+          aᵢ₊₁ⱼ * (qⁿ[bi + 1, bj + 1] - qⁿ[bi + 1, bj - 1]) -
+          aᵢ₋₁ⱼ * (qⁿ[bi - 1, bj + 1] - qⁿ[bi - 1, bj - 1])
+        ) +
+        0.25(m.ξx * m.ηx + m.ξy * m.ηy) * (
+          aᵢⱼ₊₁ * (qⁿ[bi + 1, bj + 1] - qⁿ[bi - 1, bj + 1]) -
+          aᵢⱼ₋₁ * (qⁿ[bi + 1, bj - 1] - qⁿ[bi - 1, bj - 1])
+        ) +
+        # geometric terms
+        0.5aᵢⱼ * αᵢⱼ * (qⁿ[bi + 1, bj] - qⁿ⁺¹[bi - 1, bj]) +
+        0.5aᵢⱼ * βᵢⱼ * (qⁿ[bi, bj + 1] - qⁿ⁺¹[bi, bj - 1]) +
+        # source and remaining terms
+        solver.source_term[gi, gj] +
+        (qⁿ[bi, bj] / Δt)
+      ) / ((1 / Δt) + (aᵢ₊½ * (m.ξx^2 + m.ξy^2) + aⱼ₊½ * (m.ηx^2 + m.ηy^2)))
+
+    qⁿ⁺¹[bi, bj] = cutoff(qⁿ⁺¹[bi, bj])
+  end
+
+  return nothing
+end
+
+function ave_sweeps(solver, u, blockid)
+  u_dom = domainview(u, blockid)
+  qⁿ⁺¹ = domainview(solver.qⁿ⁺¹, blockid)
+  pⁿ⁺¹ = domainview(solver.pⁿ⁺¹, blockid)
+
+  @inline for idx in eachindex(u_dom)
+    u_dom[idx] = 0.5(qⁿ⁺¹[idx] + pⁿ⁺¹[idx])
+    if !isfinite(u_dom[idx])
+      error("invalide u!")
+    end
+  end
+
   return nothing
 end
 
