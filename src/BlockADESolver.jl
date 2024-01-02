@@ -34,18 +34,20 @@ function BlockADESolver(
   celldims = cellsize_withhalo(mesh)
   celldims_nohalo = cellsize(mesh)
 
+  overlap = mesh.nhalo
+
   u = (
-    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
-    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
-    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
+    BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T),
+    BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T),
+    BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T),
   )
   u_edge = (
-    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
-    BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T),
+    BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T),
+    BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T),
   )
-  ϵ = BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T)
-  qⁿ⁺¹ = BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T)
-  pⁿ⁺¹ = BlockHaloArray(celldims_nohalo, mesh.nhalo, nblocks; T=T)
+  ϵ = BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T)
+  qⁿ⁺¹ = BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T)
+  pⁿ⁺¹ = BlockHaloArray(celldims_nohalo, overlap, nblocks; T=T)
 
   # qⁿ⁺¹ = zeros(T, celldims)
   # pⁿ⁺¹ = zeros(T, celldims)
@@ -95,7 +97,7 @@ function BlockADESolver(
     source_term,
     mean_func,
     bcs,
-    mesh.nhalo,
+    overlap,
     conservative,
   )
   update_mesh_metrics!(solver, mesh)
@@ -409,7 +411,7 @@ function solve_conservative!(solver::BlockADESolver, mesh, u, Δt)
   return L₂, Linf
 end
 
-function solve!(
+function solve_innersweep_sync!(
   solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=Inf, tol=1e-6
 )
   u⁽⁰⁾ = solver.u[1]
@@ -472,8 +474,8 @@ function solve!(
   return nothing
 end
 
-function solve_orig_blk!(
-  solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=Inf, tol=1e-12
+function solve!(
+  solver::BlockADESolver, mesh, u::AbstractArray, Δt::Real, maxcycles=Inf, tol=1e-8
 )
   u⁽⁰⁾ = solver.u[1]
   u⁽¹⁾ = solver.u[2]
@@ -792,9 +794,27 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
   #         (i,j)               (1+1,j)
 
   ilo, ihi, jlo, jhi = u0.loop_limits[blockid]
-  globalCI = CartesianIndices(u0.global_blockranges[blockid])
-  blockCI = CartesianIndices((ilo:ihi, jlo:jhi))
+
+  nhalo = solver.nhalo
+  overlap = nhalo - 1
+  blk_ilo = ilo - overlap
+  blk_ihi = ihi + overlap
+  blk_jlo = jlo - overlap
+  blk_jhi = jhi + overlap
+
+  global_ranges = u0.global_blockranges[blockid]
+  # @show global_ranges
+  ilo_g = first(global_ranges[1]) - overlap
+  jlo_g = first(global_ranges[2]) - overlap
+  ihi_g = last(global_ranges[1]) + overlap
+  jhi_g = last(global_ranges[2]) + overlap
+
+  # globalCI = CartesianIndices(u0.global_blockranges[blockid])
+  globalCI = CartesianIndices((ilo_g:ihi_g, jlo_g:jhi_g))
+  blockCI = CartesianIndices((blk_ilo:blk_ihi, blk_jlo:blk_jhi))
+  # @show blockCI, globalCI
   @assert length(globalCI) == length(blockCI)
+  # error("done!")
 
   α = solver.a
   # applybc!(u, solver.bcs, solver.nhalo) # update the ghost cell temperatures
