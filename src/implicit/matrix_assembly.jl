@@ -14,7 +14,7 @@ function diffusion_op_2nd_order_2d_zerogradient_bc(
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
   # Don't use an offset matrix here b/c benchmarking showed it was
-  # ~3x slower. It makes the indexing here more of a pain, 
+  # ~3x slower. It makes the indexing here more of a pain,
   # but 3x slower is a big deal for this performance critical section
   stencil = MMatrix{3,3,T}(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -93,7 +93,7 @@ function diffusion_op_2nd_order_2d_zerogradient_bc(
 
     stencil[1, 1] += gᵢ₋½           # u[i-1, j-1]
     stencil[2, 1] += (-gᵢ₊½ + gᵢ₋½) # u[i  , j-1]
-    stencil[3, 1] += -gᵢ₊½          # u[i+1, j-1]  
+    stencil[3, 1] += -gᵢ₊½          # u[i+1, j-1]
     stencil[1, 3] += -gᵢ₋½          # u[i-1, j+1]
     stencil[2, 3] += (gᵢ₊½ - gᵢ₋½)  # u[i  , j+1]
     stencil[3, 3] += gᵢ₊½           # u[i+1, j+1]
@@ -115,7 +115,7 @@ function diffusion_op_2nd_order_2d_zerogradient_bc(
     stencil[3, 3] += gⱼ₊½           # u[i+1, j+1]
   end
 
-  # return the offset version to make indexing easier 
+  # return the offset version to make indexing easier
   # (no speed penalty using an offset array here)
   return OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
 end
@@ -125,7 +125,7 @@ function inner_diffusion_operator_2d(edge_metrics, a_edge::SVector{4,T}) where {
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
   # Don't use an offset matrix here b/c benchmarking showed it was
-  # ~3x slower. It makes the indexing here more of a pain, 
+  # ~3x slower. It makes the indexing here more of a pain,
   # but 3x slower is a big deal for this performance critical section
   stencil = MMatrix{3,3,T}(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -184,7 +184,7 @@ function inner_diffusion_operator_2d(edge_metrics, a_edge::SVector{4,T}) where {
 
   stencil[1, 1] += gᵢ₋½           # u[i-1, j-1]
   stencil[2, 1] += (-gᵢ₊½ + gᵢ₋½) # u[i  , j-1]
-  stencil[3, 1] += -gᵢ₊½          # u[i+1, j-1]  
+  stencil[3, 1] += -gᵢ₊½          # u[i+1, j-1]
   stencil[1, 3] += -gᵢ₋½          # u[i-1, j+1]
   stencil[2, 3] += (gᵢ₊½ - gᵢ₋½)  # u[i  , j+1]
   stencil[3, 3] += gᵢ₊½           # u[i+1, j+1]
@@ -201,7 +201,7 @@ function inner_diffusion_operator_2d(edge_metrics, a_edge::SVector{4,T}) where {
   stencil[1, 3] += -gⱼ₊½          # u[i-1, j+1]
   stencil[3, 3] += gⱼ₊½           # u[i+1, j+1]
 
-  # return the offset version to make indexing easier 
+  # return the offset version to make indexing easier
   # (no speed penalty using an offset array here)
   return OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
 end
@@ -233,26 +233,89 @@ LI = LinearIndices(CI)
 innerLI = LI[(nh + 1):(end - nh), (nh + 1):(end - nh)]
 
 T = Float64
-_stencil = MMatrix{3,3,T}(0.1, 2, 0.1, 3, -4, 3, 0.1, 2, 0.1)
+_stencil = MMatrix{3,3,T}(11, 21, 31, 12, 22, 32, 13, 23, 33)
 
 stencil = OffsetMatrix(SMatrix{3,3}(_stencil), -1:1, -1:1)
 
 for idx in innerLI
   i, j = CI[idx].I
+  #! format: off
+  A[idx, idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
+  A[idx, idx - ni]     = stencil[+0, -1] # (i  , j-1)
+  A[idx, idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
+  A[idx, idx - 1]      = stencil[-1, +0] # (i-1, j  )
+  A[idx, idx]          = stencil[+0, +0] # (i  , j  )
+  A[idx, idx + 1]      = stencil[+1, +0] # (i+1, j  )
+  A[idx, idx + ni + 1] = stencil[-1, +1] # (i-1, j+1)
+  A[idx, idx + ni]     = stencil[ 0, +1] # (i  , j+1)
+  A[idx, idx + ni - 1] = stencil[+1, +1] # (i+1, j+1)
+  #! format: on
+end
 
-  A[idx, idx - 1] = stencil[0, -1]
-  A[idx, idx] = stencil[0, 0]
-  A[idx, idx + 1] = stencil[0, 1]
+ilo = 1;
+ihi = ni;
+jlo = 1;
+jhi = nj;
+for idx in LI
+  i, j = CI[idx].I
+  A[idx, idx] = stencil[+0, +0] # (i  , j  )
 
-  A[idx, idx - ni - 1] = stencil[1, -1]
-  A[idx, idx - ni] = stencil[1, 0]
-  A[idx, idx - ni + 1] = stencil[1, 1]
+  # if i >= ilo && j >= jlo # (i-1, j-1)
+  im1_jm1 = idx - ni - 1
+  # @show im1_jm1
+  if 1 <= (idx - ni - 1) <= len # (i-1, j-1)
+    A[idx, idx - ni - 1] = stencil[-1, -1]
+    # else
+    # A[idx, idx - ni - 1] = 0
+  end
 
-  A[idx, idx + ni - 1] = stencil[-1, -1]
-  A[idx, idx + ni] = stencil[-1, 0]
-  A[idx, idx + ni + 1] = stencil[-1, 1]
+  # if j >= jlo  # (i  , j-1)
+  if 1 <= (idx - ni) < len  # (i  , j-1)
+    A[idx, idx - ni] = stencil[+0, -1]
+    # else
+    #   A[idx, idx - ni] = 0
+  end
 
-  # @show idx, (i, j), stencil[0, :], A[idx, (idx - 1):(idx + 1)]
+  # if i <= ihi && j >= jlo # (i+1, j-1)
+  if 1 <= (idx - ni + 1) <= len # (i+1, j-1)
+    A[idx, idx - ni + 1] = stencil[+1, -1]
+    # else
+    #   A[idx, idx - ni + 1] = 0
+  end
+
+  if 1 <= (idx - 1) <= len # (i-1, j  )
+    A[idx, idx - 1] = stencil[-1, +0]
+    # else
+    #   A[idx, idx - 1] = 0
+  end
+
+  # if i <= ihi # (i+1, j  )
+  if 1 <= idx + 1 <= len # (i+1, j  )
+    A[idx, idx + 1] = stencil[+1, +0]
+    # else
+    #   A[idx, idx + 1] = 0
+  end
+
+  # if i >= ilo && j <= jhi # (i-1, j+1)
+  if 1 <= (idx + ni + 1) <= len # (i-1, j+1)
+    A[idx, idx + ni + 1] = stencil[-1, +1]
+    # else
+    #   A[idx, idx + ni + 1] = 0
+  end
+
+  # if j <= jhi # (i  , j+1)
+  if 1 <= idx + ni <= len # (i  , j+1)
+    A[idx, idx + ni] = stencil[0, +1]
+    # else
+    #   A[idx, idx + ni] = 0
+  end
+
+  # if i <= ihi && j <= jhi # (i+1, j+1)
+  if 1 <= idx + ni - 1 <= len # (i+1, j+1)
+    A[idx, idx + ni - 1] = stencil[+1, +1]
+    # else
+    #   A[idx, idx + ni - 1] = 0
+  end
 end
 
 # # A = poisson(len);
