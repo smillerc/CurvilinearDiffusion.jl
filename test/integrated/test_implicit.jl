@@ -20,17 +20,11 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   @info "Writing to $fn"
   ilo, ihi, jlo, jhi = mesh.limits
 
-  α = @views solver.a[ilo:ihi, jlo:jhi]
+  α = @views solver.α[ilo:ihi, jlo:jhi]
   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
   block = zeros(Int, size(dens))
 
-  for blk in 1:nblocks(solver.u[1])
-    globalCI = CartesianIndices(solver.u[1].global_blockranges[blk])
-    for idx in globalCI
-      block[idx] = blk
-    end
-  end
   kappa = α .* dens
 
   # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
@@ -119,7 +113,7 @@ function uniform_grid(nx, ny)
   return (x, y)
 end
 
-ni, nj = (201, 201)
+ni, nj = (101, 101)
 nhalo = 2
 x, y = wavy_grid2(ni, nj)
 # x, y = uniform_grid(ni, nj)
@@ -131,12 +125,9 @@ mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 T0 = 1.0
 bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-# n_blocks = 8
-n_blocks = 1
-solver = BlockADESolver(mesh, bcs, n_blocks)
-# solver = ADESolver(mesh, bcs)
+solver = ImplicitScheme(mesh, bcs)
 CFL = 100 # 1/2 is the explicit stability limit
-casename = "gauss_source_$(n_blocks)_block"
+casename = "implicit_gauss_source"
 
 # Temperature and density
 T_hot = 1e3
@@ -178,7 +169,7 @@ end
 Δt0 = 1e-4
 Δt = 1e-4
 t = 0.0
-maxt = 0.15
+maxt = 0.25
 iter = 0
 maxiter = Inf
 io_interval = 0.01
@@ -186,17 +177,20 @@ io_next = io_interval
 pvd = paraview_collection("full_sim")
 save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
+# CurvilinearDiffusion.assemble_matrix!(solver, T, Δt)
 
 # fill!(solver.aⁿ⁺¹, 10.0)
 while true
   CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
-  dt = CurvilinearDiffusion.max_dt(solver, mesh)
-  dt = max(1e-10, min(Δt0, dt))
-  global Δt = CFL * dt
+  # dt = CurvilinearDiffusion.max_dt(solver, mesh)
+  # dt = max(1e-10, min(Δt0, dt))
+  # global Δt = CFL * dt
   # @show Δt, CFL, dt
 
-  L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-  @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
+  # L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
+  CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
+  @printf "cycle: %i t: %.4e Δt: %.3e\n" iter t Δt
+  # @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
 
   # L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
   # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt

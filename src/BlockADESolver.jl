@@ -967,9 +967,9 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
 
   for idx in blockCI
     if !isfinite(u[idx]) || u[idx] < 0
-      # @show u[idx]
-      # @show qⁿ⁺¹[idx]
-      # @show pⁿ⁺¹[idx]
+      @show u[idx]
+      @show qⁿ⁺¹[idx]
+      @show pⁿ⁺¹[idx]
       error("Invalid value for u $(u[idx]) at $idx")
     end
   end

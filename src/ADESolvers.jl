@@ -29,6 +29,8 @@ end
 
 include("averaging.jl")
 include("boundary_conditions.jl")
+include("mesh_metrics.jl")
+include("conductivity.jl")
 include("ADESolver.jl")
 include("BlockADESolver.jl")
 

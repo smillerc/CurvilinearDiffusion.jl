@@ -3,6 +3,11 @@ module CurvilinearDiffusion
 include("partitioning.jl")
 using .Partitioning
 
+include("ImplictSolver.jl")
+using .ImplicitSchemeType
+export ImplicitScheme
+export solve!, assemble_matrix!
+
 include("ADESolvers.jl")
 using .ADESolvers
 export ADESolver
