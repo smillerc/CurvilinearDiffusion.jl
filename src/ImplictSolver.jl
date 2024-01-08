@@ -4,12 +4,13 @@ using LinearSolve
 using CurvilinearGrids
 using Polyester, StaticArrays
 using UnPack
-
+using TimerOutputs
 using SparseArrays
 using StaticArrays
-# using AlgebraicMultigrid
-# using Krylov
-# using LinearSolve
+using AlgebraicMultigrid
+using Krylov
+# using KrylovKit
+using LinearSolve
 using ILUZero
 using IncompleteLU
 using LinearAlgebra
@@ -17,11 +18,12 @@ using OffsetArrays
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{LP,ST,T,N,EM,F,BC,CI1,CI2}
+struct ImplicitScheme{LP,SM,V,ST,T,N,EM,F,BC,CI1,CI2}
   prob::LP # linear problem (contains A, b, u0, solver...)
-  # A::SM # sparse matrix
-  # x::V # solution vector
-  # b::V # RHS vector
+  A::SM # sparse matrix
+  x::V # solution vector
+  u0::V
+  b::V # RHS vector
   solver::ST # linear solver, e.g. GMRES, CG, etc.
   J::Array{T,N} # cell-centered Jacobian
   metrics::Array{EM,N}
@@ -91,17 +93,26 @@ function ImplicitScheme(
   source_term = zeros(T, celldims)
   J = zeros(T, celldims)
 
-  prob = LinearProblem(A, b)
+  # prob = LinearProblem(A, b)
 
-  linear_problem = init(prob; alias_A=false, alias_b=false)
-  # linear_problem = init(prob, KrylovJL_GMRES())
-  # linear_problem = LinearProblem(A, b; u0=u0)
+  # ml = ruge_stuben(prob.A) # Construct a Ruge-Stuben solver
+  # pl = aspreconditioner(ml)
+  # alg = KrylovKitJL_GMRES
+  # alg = KrylovJL(;
+  #   KrylovAlg=Krylov.gmres!, Pl=nothing, Pr=nothing, gmres_restart=0, window=0
+  # )
+
+  # linear_problem = init(prob, alg; alias_A=true, alias_b=true)
+  # linear_problem = init(prob, KrylovJL_GMRES(); alias_A=false, alias_b=false)
+
+  linear_problem = nothing # LinearProblem(A, b; u0=u0)
 
   implicit_solver = ImplicitScheme(
     linear_problem,
-    # A,
-    # x,
-    # b,
+    A,
+    x,
+    u0,
+    b,
     solver,
     J,
     edge_metrics,
@@ -120,37 +131,40 @@ function ImplicitScheme(
 end
 
 function solve!(scheme::ImplicitScheme, mesh, u, Δt)
-
-  # update the A matrix
-  assemble_matrix!(scheme, u, Δt)
-
   domain_LI = LinearIndices(scheme.domain_indices)
 
-  # solve it !
-  # prob = LinearProblem(solver.A, solver.b)
-  # Pl = ilu0(A)
+  # update the A matrix
+  @timeit "assemble_matrix" assemble_matrix!(scheme, u, Δt)
 
-  # LU = ilu(scheme.prob.A; τ=0.1)
-  # scheme.prob.Pl = LU
-  LinearSolve.solve!(scheme.prob)
+  # @timeit "solve_step" LinearSolve.solve!(scheme.prob)
 
-  for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-    u[grid_idx] = scheme.prob.u[mat_idx]
-  end
+  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
+  #   u[grid_idx] = scheme.prob.u[mat_idx]
+  # end
 
   # use the current solution as a guess for the next
-  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-  #   scheme.prob.u0[mat_idx] = u[grid_idx]
-  # end
-  # LU = ilu(scheme.prob.A; τ=0.1)
-  # sol = solve(scheme.prob, KrylovJL_GMRES(); Pl=LU, verbose=false)
+  for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
+    scheme.u0[mat_idx] = u[grid_idx]
+  end
 
-  # # update the solution to u in-place
-  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-  #   u[grid_idx] = sol.u[mat_idx]
-  # end
+  # fill!(scheme.u0, 0)
+  prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
+  LU = ilu(scheme.A; τ=0.1)
+  @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
+  # @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES())
+  # @timeit "solve_step" sol = solve(prob)
+
+  # @timeit "solve_step" sol = solve(scheme.prob)
+
+  # @timeit "solve_step" sol = solve(scheme.prob)
+
+  # update the solution to u in-place
+  for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
+    u[grid_idx] = sol.u[mat_idx]
+  end
   # return sol.resid, sol.iters, true
 
+  return nothing
 end
 
 end

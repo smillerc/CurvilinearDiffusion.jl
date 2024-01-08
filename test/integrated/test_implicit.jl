@@ -1,7 +1,12 @@
 using CurvilinearGrids, CurvilinearDiffusion
 using WriteVTK, Printf, UnPack
 using BlockHaloArrays
+using TimerOutputs
 
+using Glob
+rm.(glob("*.vts"))
+
+reset_timer!()
 # ------------------------------------------------------------
 # I/O stuff
 # ------------------------------------------------------------
@@ -61,8 +66,8 @@ end
 # ------------------------------------------------------------
 
 function wavy_grid(nx, ny)
-  x0, x1 = (0, 1)
-  y0, y1 = (0, 1)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
   a0 = 0.1
 
   function x(i, j)
@@ -104,8 +109,8 @@ function wavy_grid2(ni, nj)
 end
 
 function uniform_grid(nx, ny)
-  x0, x1 = (0, 1)
-  y0, y1 = (0, 1)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
 
   x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
   y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
@@ -116,6 +121,7 @@ end
 ni, nj = (101, 101)
 nhalo = 2
 x, y = wavy_grid2(ni, nj)
+# x, y = wavy_grid(ni, nj)
 # x, y = uniform_grid(ni, nj)
 mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
@@ -175,20 +181,22 @@ maxiter = Inf
 io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
-save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+@timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
 # CurvilinearDiffusion.assemble_matrix!(solver, T, Δt)
 
 # fill!(solver.aⁿ⁺¹, 10.0)
 while true
-  CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
+  @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
+    solver, T, ρ, κ, cₚ
+  )
   # dt = CurvilinearDiffusion.max_dt(solver, mesh)
   # dt = max(1e-10, min(Δt0, dt))
   # global Δt = CFL * dt
   # @show Δt, CFL, dt
 
   # L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-  CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
+  @timeit "solve!" CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
   @printf "cycle: %i t: %.4e Δt: %.3e\n" iter t Δt
   # @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
 
@@ -196,7 +204,7 @@ while true
   # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
   if t + Δt > io_next
-    save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+    @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
     global io_next += io_interval
   end
 
@@ -214,3 +222,5 @@ end
 
 save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 vtk_save(pvd);
+
+print_timer()

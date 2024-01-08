@@ -92,3 +92,29 @@ end
     Jηy_ⱼ₋½=metrics_j_minus_half.ηy * metrics_j_minus_half.J,
   )
 end
+
+"""
+conservative_edge_terms(edge_diffusivity::NTuple{4,T}, m) where {T}
+
+Collect and find the edge terms used for the conservative form of the diffusion equation.
+These are essentially the edge diffusivity + grid metric terms
+"""
+@inline function conservative_edge_terms(
+  edge_diffusivity::NTuple{4,T}, m::NamedTuple
+) where {T}
+
+  # m is a NamedTuple that contains the conservative edge metris for 
+  # a single cell. The names should be self-explainatory
+  @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
+
+  fᵢ₊½ = αᵢ₊½ * (m.Jξx_ᵢ₊½^2 + m.Jξy_ᵢ₊½^2) / m.Jᵢ₊½
+  fᵢ₋½ = αᵢ₋½ * (m.Jξx_ᵢ₋½^2 + m.Jξy_ᵢ₋½^2) / m.Jᵢ₋½
+  fⱼ₊½ = αⱼ₊½ * (m.Jηx_ⱼ₊½^2 + m.Jηy_ⱼ₊½^2) / m.Jⱼ₊½
+  fⱼ₋½ = αⱼ₋½ * (m.Jηx_ⱼ₋½^2 + m.Jηy_ⱼ₋½^2) / m.Jⱼ₋½
+  gᵢ₊½ = αᵢ₊½ * (m.Jξx_ᵢ₊½ * m.Jηx_ᵢ₊½ + m.Jξy_ᵢ₊½ * m.Jηy_ᵢ₊½) / (4m.Jᵢ₊½)
+  gᵢ₋½ = αᵢ₋½ * (m.Jξx_ᵢ₋½ * m.Jηx_ᵢ₋½ + m.Jξy_ᵢ₋½ * m.Jηy_ᵢ₋½) / (4m.Jᵢ₋½)
+  gⱼ₊½ = αⱼ₊½ * (m.Jξx_ⱼ₊½ * m.Jηx_ⱼ₊½ + m.Jξy_ⱼ₊½ * m.Jηy_ⱼ₊½) / (4m.Jⱼ₊½)
+  gⱼ₋½ = αⱼ₋½ * (m.Jξx_ⱼ₋½ * m.Jηx_ⱼ₋½ + m.Jξy_ⱼ₋½ * m.Jηy_ⱼ₋½) / (4m.Jⱼ₋½)
+
+  return (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
+end

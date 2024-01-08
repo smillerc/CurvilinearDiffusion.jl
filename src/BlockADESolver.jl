@@ -9,7 +9,7 @@ struct BlockADESolver{BHA,T,N,EM,F,BC}
   pⁿ⁺¹::BHA
   J::Array{T,N} # cell-centered Jacobian
   metrics::Array{EM,N}
-  a::Array{T,N} # cell-centered diffusivity
+  α::Array{T,N} # cell-centered diffusivity
   source_term::Array{T,N} # cell-centered source term
   mean_func::F
   bcs::BC
@@ -816,7 +816,7 @@ function solve_nc_nonlinear_block!(solver::BlockADESolver, u0, Δt, blockid)
   @assert length(globalCI) == length(blockCI)
   # error("done!")
 
-  α = solver.a
+  α = solver.α
   # applybc!(u, solver.bcs, solver.nhalo) # update the ghost cell temperatures
 
   #------------------------------------------------------
