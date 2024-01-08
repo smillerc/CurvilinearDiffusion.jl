@@ -37,6 +37,7 @@ struct ImplicitScheme{LP,SM,V,ST,T,N,EM,F,BC,CI1,CI2}
   halo_aware_indices::CI2
 end
 
+include("edge_terms.jl")
 include("mesh_metrics.jl")
 include("averaging.jl")
 include("matrix_assembly.jl")
