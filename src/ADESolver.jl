@@ -17,10 +17,10 @@ function ADESolver(
 
   if form === :conservative
     conservative = true
-    metric_type = typeof(_conservative_metrics_2d(mesh, 1, 1))
+    metric_type = typeof(_conservative_metrics(mesh, 1, 1))
   else
     conservative = false
-    metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
+    metric_type = typeof(_non_conservative_metrics(mesh, 1, 1))
   end
 
   edge_metrics = Array{metric_type,2}(undef, celldims)

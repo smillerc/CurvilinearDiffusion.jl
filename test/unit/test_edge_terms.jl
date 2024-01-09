@@ -14,7 +14,6 @@ include("common.jl")
   @test bm1.allocs == 0
 
   edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics)
-  @show edge_terms
   @test edge_terms.fᵢ₊½ == 9.0
   @test edge_terms.fᵢ₋½ == 16.0
 end
@@ -164,7 +163,6 @@ end
 
   non_orth_edge_terms = conservative_edge_terms(edge_diffusivity, non_orth_edge_metrics)
 
-  @show non_orth_edge_terms
   # Ensure that it doesn't allocate! This would kill performance and indicate
   # a type instability somewhere
   bm1 = @benchmark conservative_edge_terms($edge_diffusivity, $non_orth_edge_metrics)

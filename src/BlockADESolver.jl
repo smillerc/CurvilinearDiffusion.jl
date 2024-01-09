@@ -72,10 +72,10 @@ function BlockADESolver(
 
   # if form === :conservative
   #   conservative = true
-  #   metric_type = typeof(_conservative_metrics_2d(mesh, 1, 1))
+  #   metric_type = typeof(_conservative_metrics(mesh, 1, 1))
   # else
   conservative = false
-  metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
+  metric_type = typeof(_non_conservative_metrics(mesh, 1, 1))
   # end
 
   # u_edge_stage = ntuple(i -> zeros(T, celldims), 2)
@@ -113,14 +113,14 @@ end
 #     @inline for j in jlo:jhi
 #       for i in ilo:ihi
 #         solver.J[i, j] = jacobian(mesh, (i, j))
-#         solver.metrics[i, j] = _conservative_metrics_2d(mesh, i, j)
+#         solver.metrics[i, j] = _conservative_metrics(mesh, i, j)
 #       end
 #     end
 #   else
 #     @inline for j in jlo:jhi
 #       for i in ilo:ihi
 #         solver.J[i, j] = jacobian(mesh, (i, j))
-#         solver.metrics[i, j] = _non_conservative_metrics_2d(mesh, i, j)
+#         solver.metrics[i, j] = _non_conservative_metrics(mesh, i, j)
 #       end
 #     end
 #   end
@@ -128,7 +128,7 @@ end
 #   return nothing
 # end
 
-# @inline function _non_conservative_metrics_2d(mesh, i, j)
+# @inline function _non_conservative_metrics(mesh, i, j)
 #   # note, metrics(mesh, (i,j)) uses node-based indexing, and here we're making
 #   # a tuple of metrics that uses cell-based indexing, thus the weird 1/2 offsets
 #   metricsᵢⱼ = cell_metrics(mesh, (i, j))
@@ -168,7 +168,7 @@ end
 
 # @inline cutoff(a) = (0.5(abs(a) + a))
 
-# @inline function _conservative_metrics_2d(mesh, i, j)
+# @inline function _conservative_metrics(mesh, i, j)
 #   metrics_i_plus_half = metrics_with_jacobian(mesh, (i + 1, j))
 #   metrics_i_minus_half = metrics_with_jacobian(mesh, (i, j))
 #   metrics_j_plus_half = metrics_with_jacobian(mesh, (i, j + 1))

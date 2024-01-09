@@ -18,7 +18,7 @@ using OffsetArrays
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{LP,SM,V,ST,T,N,EM,F,BC,CI1,CI2}
+struct ImplicitScheme{N,LP,SM,V,ST,T,EM,F,BC,CI1,CI2}
   prob::LP # linear problem (contains A, b, u0, solver...)
   A::SM # sparse matrix
   x::V # solution vector
@@ -37,7 +37,6 @@ struct ImplicitScheme{LP,SM,V,ST,T,N,EM,F,BC,CI1,CI2}
   halo_aware_indices::CI2
 end
 
-include("edge_terms.jl")
 include("mesh_metrics.jl")
 include("averaging.jl")
 include("matrix_assembly.jl")
@@ -79,10 +78,10 @@ function ImplicitScheme(
 
   if form === :conservative
     conservative = true
-    metric_type = typeof(_conservative_metrics_2d(mesh, 1, 1))
+    metric_type = typeof(_conservative_metrics(mesh, (1, 1)))
   else
     conservative = false
-    metric_type = typeof(_non_conservative_metrics_2d(mesh, 1, 1))
+    metric_type = typeof(_non_conservative_metrics(mesh, (1, 1)))
   end
 
   b = zeros(T, len)
@@ -131,7 +130,7 @@ function ImplicitScheme(
   return implicit_solver
 end
 
-function solve!(scheme::ImplicitScheme, mesh, u, Δt)
+function solve!(scheme::ImplicitScheme, ::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt)
   domain_LI = LinearIndices(scheme.domain_indices)
 
   # update the A matrix
@@ -148,16 +147,10 @@ function solve!(scheme::ImplicitScheme, mesh, u, Δt)
     scheme.u0[mat_idx] = u[grid_idx]
   end
 
-  # fill!(scheme.u0, 0)
   prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
   LU = ilu(scheme.A; τ=0.1)
   @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
-  # @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES())
   # @timeit "solve_step" sol = solve(prob)
-
-  # @timeit "solve_step" sol = solve(scheme.prob)
-
-  # @timeit "solve_step" sol = solve(scheme.prob)
 
   # update the solution to u in-place
   for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)

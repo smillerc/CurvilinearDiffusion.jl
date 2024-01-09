@@ -1,11 +1,12 @@
+include("edge_terms.jl")
 
 """
     assemble_matrix!(scheme::ImplicitScheme, u, Δt)
 
-Assemble the `A` matric and right-hand side vector `b` for the solution
-to the diffusion problem for a state-array `u` over a time step `Δt`.
+Assemble the `A` matrix and right-hand side vector `b` for the solution
+to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 """
-function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
+function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
   ni, nj = size(scheme.domain_indices)
   len = ni * nj
   nhalo = 1
@@ -25,16 +26,17 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
   # assemble the inner domain
   for (grid_idx, mat_idx) in zip(grid_inner_LI, matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = inner_diffusion_operator(i, j, u, Δt, scheme)
+    stencil, rhs = inner_diffusion_operator((i, j), u, Δt, scheme)
+
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
-    A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
     A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
+    A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
     A[mat_idx, mat_idx - 1]      = stencil[-1, +0] # (i-1, j  )
     A[mat_idx, mat_idx]          = stencil[+0, +0] # (i  , j  )
     A[mat_idx, mat_idx + 1]      = stencil[+1, +0] # (i+1, j  )
-    A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
     A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] # (i-1, j+1)
+    A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
     A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
     #! format: on
 
@@ -49,17 +51,18 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
 
   for (grid_idx, mat_idx) in zip(ilo_grid_inner_LI, ilo_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator(i, j, u, Δt, scheme, :ilo)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :ilo)
+
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
-    if (1 <= (mat_idx         ) <= len) A[mat_idx, mat_idx]          = stencil[+0, +0] end # (i  , j  )
-    if (1 <= (mat_idx - ni + 1) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if (1 <= (mat_idx - ni    ) <= len) A[mat_idx, mat_idx - ni]     = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx + 1     ) <= len) A[mat_idx, mat_idx + 1]      = stencil[+1, +0] end # (i+1, j  )
-    if (1 <= (mat_idx + ni    ) <= len) A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] end # (i  , j+1)
-    if (1 <= (mat_idx + ni + 1) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    # if (1 <= (mat_idx - 1     ) <= len) A[mat_idx, mat_idx - 1]      = stencil[-1, +0] end # (i-1, j  )
-    # if (1 <= (mat_idx - ni - 1) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    # if (1 <= (mat_idx + ni - 1) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    # if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    # if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    # if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
     #! format: on
 
     b[mat_idx] = rhs
@@ -73,17 +76,19 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
 
   for (grid_idx, mat_idx) in zip(ihi_grid_inner_LI, ihi_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator(i, j, u, Δt, scheme, :ihi)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :ihi)
+
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
+
     #! format: off
-    if (1 <= (mat_idx         ) <= len) A[mat_idx, mat_idx]          = stencil[+0, +0] end # (i  , j  )
-    if (1 <= (mat_idx - ni - 1) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if (1 <= (mat_idx - ni    ) <= len) A[mat_idx, mat_idx - ni]     = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx - 1     ) <= len) A[mat_idx, mat_idx - 1]      = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + ni    ) <= len) A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] end # (i  , j+1)
-    if (1 <= (mat_idx + ni - 1) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    # if (1 <= (mat_idx - ni + 1) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    # if (1 <= (mat_idx + 1     ) <= len) A[mat_idx, mat_idx + 1]      = stencil[+1, +0] end # (i+1, j  )
-    # if (1 <= (mat_idx + ni + 1) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    # if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+    # if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    # if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
     #! format: on
 
     b[mat_idx] = rhs
@@ -97,17 +102,18 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
 
   for (grid_idx, mat_idx) in zip(jlo_grid_inner_LI, jlo_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator(i, j, u, Δt, scheme, :ihi)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :jlo)
+
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
-    if (1 <= (mat_idx         ) <= len) A[mat_idx, mat_idx]          = stencil[+0, +0] end # (i  , j  )
-    if (1 <= (mat_idx - 1     ) <= len) A[mat_idx, mat_idx - 1]      = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + 1     ) <= len) A[mat_idx, mat_idx + 1]      = stencil[+1, +0] end # (i+1, j  )
-    if (1 <= (mat_idx + ni    ) <= len) A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] end # (i  , j+1)
-    if (1 <= (mat_idx + ni - 1) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    if (1 <= (mat_idx + ni + 1) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    # if (1 <= (mat_idx - ni - 1) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    # if (1 <= (mat_idx - ni + 1) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    # if (1 <= (mat_idx - ni    ) <= len) A[mat_idx, mat_idx - ni]     = stencil[+0, -1] end # (i  , j-1)
+    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    # if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    # if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    # if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
     #! format: on
 
     b[mat_idx] = rhs
@@ -121,17 +127,18 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
 
   for (grid_idx, mat_idx) in zip(jhi_grid_inner_LI, jhi_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator(i, j, u, Δt, scheme, :ihi)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :jhi)
+
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
-    if (1 <= (mat_idx         ) <= len) A[mat_idx, mat_idx]          = stencil[+0, +0] end # (i  , j  )
-    if (1 <= (mat_idx - ni - 1) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if (1 <= (mat_idx - ni + 1) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if (1 <= (mat_idx - ni    ) <= len) A[mat_idx, mat_idx - ni]     = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx - 1     ) <= len) A[mat_idx, mat_idx - 1]      = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + 1     ) <= len) A[mat_idx, mat_idx + 1]      = stencil[+1, +0] end # (i+1, j  )
-    # if (1 <= (mat_idx + ni    ) <= len) A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] end # (i  , j+1)
-    # if (1 <= (mat_idx + ni - 1) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    # if (1 <= (mat_idx + ni + 1) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    # if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    # if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    # if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
     #! format: on
 
     b[mat_idx] = rhs
@@ -140,7 +147,7 @@ function assemble_matrix!(scheme::ImplicitScheme, u, Δt)
   return nothing
 end
 
-@inline function inner_diffusion_operator(i, j, u, Δt, scheme)
+@inline function inner_diffusion_operator((i, j), u, Δt, scheme)
   uᵢⱼ = u[i, j]
   Jᵢⱼ = scheme.J[i, j]
   sᵢⱼ = scheme.source_term[i, j]
@@ -148,17 +155,19 @@ end
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
   aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
-  a_edge = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
 
   edge_metrics = scheme.metrics[i, j]
 
-  stencil, rhs = _inner_diffusion_operator(uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, a_edge)
+  stencil, rhs = _inner_diffusion_operator(
+    uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, edge_diffusivity
+  )
   return stencil, rhs
 end
 
 # Generate a stencil for a single 2d cell in the interior
 @inline function _inner_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics::NTuple{4,T}, edge_diffusivity
+  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics, edge_diffusivity::ET2D
 ) where {T}
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
@@ -166,7 +175,7 @@ end
   # ~3x slower. It makes the indexing here more of a pain,
   # but 3x slower is a big deal for this performance critical section
 
-  fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
+  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
     edge_diffusivity, edge_metrics
   )
 
@@ -210,6 +219,7 @@ end
   #------------------------------------------------------------------------------
 
   stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
+  # @show stencil
 
   # use an offset so we can index via [+1, -1] for (i+1, j-1)
   offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
@@ -219,7 +229,7 @@ end
 
 # Generate a stencil for a single 3d cell in the interior
 @inline function _inner_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics::NTuple{6,T}, edge_diffusivity
+  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics, edge_diffusivity::ET3D
 ) where {T}
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
@@ -278,7 +288,7 @@ end
   return offset_stencil, RHS
 end
 
-@inline function neumann_boundary_diffusion_operator(i, j, u, Δt, scheme, loc)
+@inline function neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, loc)
   uᵢⱼ = u[i, j]
   Jᵢⱼ = scheme.J[i, j]
   sᵢⱼ = scheme.source_term[i, j]
@@ -298,12 +308,12 @@ end
 
 # Generate a stencil for a neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metric, a_edge, loc::Symbol
+  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metric, edge_diffusivity::ET2D, loc::Symbol
 ) where {T}
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
-  fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metrics
+  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
+    edge_diffusivity, edge_metric
   )
 
   if loc === :ilo
@@ -343,7 +353,7 @@ end
   return offset_stencil, RHS
 end
 
-# @inline function dirichlet_boundary_diffusion_operator(i, j, u, Δt, scheme, loc)
+# @inline function dirichlet_boundary_diffusion_operator((i,j), u, Δt, scheme, loc)
 #   uᵢⱼ = u[i, j]
 #   Jᵢⱼ = scheme.J[i, j]
 #   sᵢⱼ = scheme.source_term[i, j]

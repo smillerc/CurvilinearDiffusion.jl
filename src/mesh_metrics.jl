@@ -3,12 +3,12 @@ function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
   @unpack ilo, ihi, jlo, jhi = mesh.limits
 
   if solver.conservative
-    @inline for idx in solver.domain_indices
+    @inline for idx in solver.halo_aware_indices
       solver.J[idx] = jacobian(mesh, idx.I)
       solver.metrics[idx] = _conservative_metrics(mesh, idx.I)
     end
   else
-    @inline for idx in solver.domain_indices
+    @inline for idx in solver.halo_aware_indices
       solver.J[idx] = jacobian(mesh, idx.I)
       solver.metrics[idx] = _non_conservative_metrics(mesh, idx.I)
     end
@@ -17,7 +17,7 @@ function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
   return nothing
 end
 
-@inline function _non_conservative_metrics_2d(mesh, (i, j)::NTuple{2,Real})
+@inline function _non_conservative_metrics(mesh, (i, j)::NTuple{2,Real})
   # note, metrics(mesh, (i,j)) uses node-based indexing, and here we're making
   # a tuple of metrics that uses cell-based indexing, thus the weird 1/2 offsets
   metricsᵢⱼ = cell_metrics(mesh, (i, j))

@@ -3,5 +3,6 @@ using TestItemRunner
 using Test
 
 @testset "CurvilinearDiffusion.jl" begin
-  # Write your tests here.
+  include("unit/test_edge_terms.jl")
+  include("unit/test_metrics.jl")
 end

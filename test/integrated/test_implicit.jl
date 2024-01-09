@@ -183,9 +183,7 @@ io_next = io_interval
 pvd = paraview_collection("full_sim")
 @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
-# CurvilinearDiffusion.assemble_matrix!(solver, T, Δt)
 
-# fill!(solver.aⁿ⁺¹, 10.0)
 while true
   @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
     solver, T, ρ, κ, cₚ
