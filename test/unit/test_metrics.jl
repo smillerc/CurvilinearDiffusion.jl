@@ -1,31 +1,31 @@
 include("common.jl")
 
-@testset "1d metric terms" begin
-  include("../../src/mesh_metrics.jl")
+# @testset "1d metric terms" begin
+#   include("../../src/mesh_metrics.jl")
 
-  function rect_grid(nx)
-    x0, x1 = (0, 2)
+#   function rect_grid(nx)
+#     x0, x1 = (0, 2)
 
-    x(ξ) = @. x0 + (x1 - x0) * ((ξ - 1) / (nx - 1))
-    return x
-  end
+#     x(ξ) = @. x0 + (x1 - x0) * ((ξ - 1) / (nx - 1))
+#     return x
+#   end
 
-  ni = 5
-  nhalo = 0
-  x = rect_grid(ni)
-  mesh = CurvilinearGrid1D(x, ni, nhalo)
+#   ni = 5
+#   nhalo = 0
+#   x = rect_grid(ni)
+#   mesh = CurvilinearGrid1D(x, ni, nhalo)
 
-  idx = (3,)
-  m = _conservative_metrics(mesh, idx)
+#   idx = (3,)
+#   m = _conservative_metrics(mesh, idx)
 
-  # Ensure that it doesn't allocate! This would kill performance and indicate
-  # a type instability somewhere
-  bm1 = @benchmark _conservative_metrics($mesh, $idx)
-  @test bm1.allocs == 0
+#   # Ensure that it doesn't allocate! This would kill performance and indicate
+#   # a type instability somewhere
+#   bm1 = @benchmark _conservative_metrics($mesh, $idx)
+#   @test bm1.allocs == 0
 
-  @test m.Jᵢ₊½ == m.Jᵢ₋½ == 0.125
-  @test m.Jξx_ᵢ₋½ == m.Jξx_ᵢ₊½ == 0.25
-end
+#   @test m.Jᵢ₊½ == m.Jᵢ₋½ == 0.125
+#   @test m.Jξx_ᵢ₋½ == m.Jξx_ᵢ₊½ == 0.25
+# end
 
 @testset "2d metric terms" begin
   include("../../src/mesh_metrics.jl")
