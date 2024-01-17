@@ -17,7 +17,7 @@ end
 function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   fn = get_filename(iteration, name)
   @info "Writing to $fn"
-  ilo, ihi, jlo, jhi = mesh.limits
+  ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   α = @views solver.aⁿ⁺¹[ilo:ihi, jlo:jhi]
   dens = @views ρ[ilo:ihi, jlo:jhi]
@@ -139,7 +139,7 @@ T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
 ρ = ones(Float64, cellsize_withhalo(mesh))
 cₚ = 1.0
 
-# ilo = mesh.limits.ilo
+# ilo = mesh.domain_limits.cell.ilo
 # T[begin:(ilo - 1), :] .= Tbc
 
 # Define the conductivity model

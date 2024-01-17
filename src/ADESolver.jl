@@ -29,7 +29,7 @@ function ADESolver(
   diffusivity_forward = zeros(T, celldims)
   diffusivity_reverse = zeros(T, celldims)
   source_term = zeros(T, celldims)
-  limits = mesh.limits
+  limits = mesh.domain_limits.cell
 
   solver = ADESolver(
     qⁿ⁺¹,

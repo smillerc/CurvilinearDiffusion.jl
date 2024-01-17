@@ -7,7 +7,7 @@ export max_dt
 
 function max_dt(solver, mesh::CurvilinearGrid2D)
   maxdt = Inf
-  @unpack ilo, ihi, jlo, jhi = mesh.limits
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
   CI = CartesianIndices((ilo:ihi, jlo:jhi))
 
   @inline for idx in CI

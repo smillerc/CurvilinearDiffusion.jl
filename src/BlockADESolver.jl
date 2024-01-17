@@ -54,7 +54,7 @@ function BlockADESolver(
   J = zeros(T, celldims)
   # ϵ = zeros(T, celldims)
 
-  # @unpack ilo, ihi, jlo, jhi = mesh.limits
+  # @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   # block_ranges = Vector{CartesianIndices}(undef, nblocks)
   # for tid in 1:nblocks
@@ -83,7 +83,7 @@ function BlockADESolver(
 
   diffusivity = zeros(T, celldims)
   source_term = zeros(T, celldims)
-  # limits = mesh.limits
+  # limits = mesh.domain_limits.cell
 
   solver = BlockADESolver(
     u,
@@ -107,7 +107,7 @@ end
 
 # """Update the mesh metrics. Only do this whenever the mesh moves"""
 # function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
-#   @unpack ilo, ihi, jlo, jhi = mesh.limits
+#   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
 #   if solver.conservative
 #     @inline for j in jlo:jhi
@@ -421,7 +421,7 @@ function solve_innersweep_sync!(
   n_blocks = nblocks(u⁽⁰⁾)
   cycle = 0
 
-  ilo, ihi, jlo, jhi = mesh.limits
+  ilo, ihi, jlo, jhi = mesh.domain_limits.cell
   u_dom = @views u[ilo:ihi, jlo:jhi]
   applybc!(u, solver.bcs, solver.nhalo)
 
@@ -484,7 +484,7 @@ function solve!(
   n_blocks = nblocks(u⁽⁰⁾)
   cycle = 0
 
-  ilo, ihi, jlo, jhi = mesh.limits
+  ilo, ihi, jlo, jhi = mesh.domain_limits.cell
   u_dom = @views u[ilo:ihi, jlo:jhi]
   applybc!(u, solver.bcs, solver.nhalo)
 
@@ -577,7 +577,7 @@ function solve_orig_edge!(
   u⁽¹⁾ = solver.u[2]
   u_edge⁽¹⁾ = solver.u_edge[1]
   u_edge⁽²⁾ = solver.u_edge[2]
-  ilo, ihi, jlo, jhi = mesh.limits
+  ilo, ihi, jlo, jhi = mesh.domain_limits.cell
   u_dom = @views u[ilo:ihi, jlo:jhi]
   applybc!(u, solver.bcs, solver.nhalo)
 

@@ -1,6 +1,6 @@
 """Update the mesh metrics. Only do this whenever the mesh moves"""
 function update_mesh_metrics!(solver, mesh::CurvilinearGrid2D)
-  @unpack ilo, ihi, jlo, jhi = mesh.limits
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   if solver.conservative
     @inline for idx in solver.halo_aware_indices
@@ -73,7 +73,7 @@ end
 @inline function _conservative_metrics(mesh, (i, j)::NTuple{2,Real})
   mᵢ₊½ = metrics(mesh, (i + 1, j))
   mⱼ₊½ = metrics(mesh, (i, j + 1))
-  mᵢⱼ₋½ = metrics(mesh, (i, j))
+  mᵢⱼ₋½ = metrics(mesh, (i, j)) #FIXME: can't combine these
 
   Jᵢ₊½ = mᵢ₊½.J
   Jⱼ₊½ = mⱼ₊½.J
@@ -87,6 +87,7 @@ end
   Jηy_ᵢ₊½ = mᵢ₊½.ηy * mᵢ₊½.J
 
   # i - 1/2, j - 1/2
+  # FIXME: these are wrong!! You need to get edge-based values here...
   Jξx_ᵢ₋½ = Jξx_ⱼ₋½ = mᵢⱼ₋½.ξx * mᵢⱼ₋½.J
   Jξy_ᵢ₋½ = Jξy_ⱼ₋½ = mᵢⱼ₋½.ξy * mᵢⱼ₋½.J
   Jηx_ᵢ₋½ = Jηx_ⱼ₋½ = mᵢⱼ₋½.ηx * mᵢⱼ₋½.J
