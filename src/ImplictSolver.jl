@@ -15,18 +15,19 @@ using ILUZero
 using IncompleteLU
 using LinearAlgebra
 using OffsetArrays
+using .Threads
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{N,LP,SM,V,ST,T,EM,F,BC,CI1,CI2}
+struct ImplicitScheme{N,LP,SM,V,ST,T,F,BC,CI1,CI2}
   prob::LP # linear problem (contains A, b, u0, solver...)
   A::SM # sparse matrix
   x::V # solution vector
   u0::V
   b::V # RHS vector
   solver::ST # linear solver, e.g. GMRES, CG, etc.
-  J::Array{T,N} # cell-centered Jacobian
-  metrics::Array{EM,N}
+  # J::Array{T,N} # cell-centered Jacobian
+  # metrics::Array{EM,N}
   α::Array{T,N} # cell-centered diffusivity
   source_term::Array{T,N} # cell-centered source term
   mean_func::F
@@ -87,11 +88,11 @@ function ImplicitScheme(
   b = zeros(T, len)
   u0 = zeros(T, len) # initial guess for iterative solvers
   x = zeros(T, len)
-  edge_metrics = Array{metric_type,2}(undef, celldims)
+  # edge_metrics = Array{metric_type,2}(undef, celldims)
 
   diffusivity = zeros(T, celldims)
   source_term = zeros(T, celldims)
-  J = zeros(T, celldims)
+  # J = zeros(T, celldims)
 
   # prob = LinearProblem(A, b)
 
@@ -114,8 +115,6 @@ function ImplicitScheme(
     u0,
     b,
     solver,
-    J,
-    edge_metrics,
     diffusivity,
     source_term,
     mean_func,
@@ -125,16 +124,18 @@ function ImplicitScheme(
     domain_CI,
     halo_aware_CI,
   )
-  update_mesh_metrics!(implicit_solver, mesh)
+  # update_mesh_metrics!(implicit_solver, mesh)
 
   return implicit_solver
 end
 
-function solve!(scheme::ImplicitScheme, ::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt)
+function solve!(
+  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt
+)
   domain_LI = LinearIndices(scheme.domain_indices)
 
   # update the A matrix
-  @timeit "assemble_matrix" assemble_matrix!(scheme, u, Δt)
+  @timeit "assemble_matrix" assemble_matrix!(scheme, mesh, u, Δt)
 
   # @timeit "solve_step" LinearSolve.solve!(scheme.prob)
 
@@ -148,7 +149,7 @@ function solve!(scheme::ImplicitScheme, ::CurvilinearGrids.AbstractCurvilinearGr
   end
 
   prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
-  LU = ilu(scheme.A; τ=0.1)
+  @timeit "preconditioner" LU = ilu(scheme.A; τ=0.1)
   @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
   # @timeit "solve_step" sol = solve(prob)
 

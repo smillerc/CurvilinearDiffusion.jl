@@ -6,7 +6,7 @@ include("edge_terms.jl")
 Assemble the `A` matrix and right-hand side vector `b` for the solution
 to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 """
-function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
+function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
   ni, nj = size(scheme.domain_indices)
   len = ni * nj
   nhalo = 1
@@ -26,7 +26,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
   # assemble the inner domain
   for (grid_idx, mat_idx) in zip(grid_inner_LI, matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = inner_diffusion_operator((i, j), u, Δt, scheme)
+    stencil, rhs = inner_diffusion_operator((i, j), u, Δt, scheme, mesh)
 
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
@@ -51,7 +51,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
 
   for (grid_idx, mat_idx) in zip(ilo_grid_inner_LI, ilo_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :ilo)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :ilo)
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
@@ -76,7 +76,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
 
   for (grid_idx, mat_idx) in zip(ihi_grid_inner_LI, ihi_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :ihi)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :ihi)
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
 
@@ -102,7 +102,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
 
   for (grid_idx, mat_idx) in zip(jlo_grid_inner_LI, jlo_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :jlo)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :jlo)
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
@@ -127,7 +127,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
 
   for (grid_idx, mat_idx) in zip(jhi_grid_inner_LI, jhi_matrix_inner_LI)
     i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, :jhi)
+    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :jhi)
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
     #! format: off
@@ -147,9 +147,24 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, u, Δt)
   return nothing
 end
 
-@inline function inner_diffusion_operator((i, j), u, Δt, scheme)
+@inline function inner_diffusion_operator((i,), u, Δt, scheme, mesh::CurvilinearGrid1D)
+  uᵢ = u[i]
+  Jᵢ = mesh.cell_center_metrics[i].J
+  sᵢ = scheme.source_term[i]
+  aᵢ₊½ = scheme.mean_func(scheme.α[i], scheme.α[i + 1])
+  aᵢ₋½ = scheme.mean_func(scheme.α[i], scheme.α[i - 1])
+
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½)
+
+  edge_metrics = (i₊½=mesh.edge_metrics.i₊½[i], i₋½=mesh.edge_metrics.i₊½[i - 1])
+
+  stencil, rhs = _inner_diffusion_operator(uᵢ, Jᵢ, sᵢ, Δt, edge_metrics, edge_diffusivity)
+  return stencil, rhs
+end
+
+@inline function inner_diffusion_operator((i, j), u, Δt, scheme, mesh::CurvilinearGrid2D)
   uᵢⱼ = u[i, j]
-  Jᵢⱼ = scheme.J[i, j]
+  Jᵢⱼ = mesh.cell_center_metrics[i, j].J
   sᵢⱼ = scheme.source_term[i, j]
   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
@@ -157,12 +172,75 @@ end
   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
   edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
 
-  edge_metrics = scheme.metrics[i, j]
+  edge_metrics = (
+    i₊½=mesh.edge_metrics.i₊½[i, j],
+    i₋½=mesh.edge_metrics.i₊½[i - 1, j],
+    j₊½=mesh.edge_metrics.j₊½[i, j],
+    j₋½=mesh.edge_metrics.j₊½[i, j - 1],
+  )
 
   stencil, rhs = _inner_diffusion_operator(
     uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, edge_diffusivity
   )
   return stencil, rhs
+end
+
+@inline function inner_diffusion_operator((i, j, k), u, Δt, scheme, mesh::CurvilinearGrid3D)
+  uᵢⱼₖ = u[i, j, k]
+  Jᵢⱼₖ = mesh.cell_center_metrics[i, j, k].J
+  sᵢⱼₖ = scheme.source_term[i, j, k]
+  aᵢ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i + 1, j, k])
+  aᵢ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i - 1, j, k])
+  aⱼ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j + 1, k])
+  aⱼ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j - 1, k])
+  aₖ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k + 1])
+  aₖ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k - 1])
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½, αₖ₊½=aₖ₊½, αₖ₋½=aₖ₋½)
+
+  edge_metrics = (
+    i₊½=mesh.edge_metrics.i₊½[i, j, k],
+    i₋½=mesh.edge_metrics.i₊½[i - 1, j, k],
+    j₊½=mesh.edge_metrics.j₊½[i, j, k],
+    j₋½=mesh.edge_metrics.j₊½[i, j - 1, k],
+    k₊½=mesh.edge_metrics.k₊½[i, j, k],
+    k₋½=mesh.edge_metrics.k₊½[i, j, k - 1],
+  )
+
+  stencil, rhs = _inner_diffusion_operator(
+    uᵢⱼₖ, Jᵢⱼₖ, sᵢⱼₖ, Δt, edge_metrics, edge_diffusivity
+  )
+  return stencil, rhs
+end
+
+# Generate a stencil for a single 1d cell in the interior
+@inline function _inner_diffusion_operator(
+  uᵢ::T, Jᵢ, sᵢ, Δτ, edge_metrics, edge_diffusivity::ET1D
+) where {T}
+  # Create a stencil matrix to hold the coefficients for u[i±1]
+
+  @unpack fᵢ₊½, fᵢ₋½ = conservative_edge_terms(edge_diffusivity, edge_metrics)
+
+  #------------------------------------------------------------------------------
+  # Equations 3.43 and 3.44
+  #------------------------------------------------------------------------------
+  # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2) / Jᵢ₊½
+  # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2) / Jᵢ₋½
+
+  A = fᵢ₋½                       # (i-1)
+  B = -(fᵢ₋½ + fᵢ₊½ + Jᵢ / Δτ)  # (i)
+  C = fᵢ₊½                       # (i+1)
+  RHS = -(Jᵢ * sᵢ + uᵢ * Jᵢ / Δτ)
+
+  #------------------------------------------------------------------------------
+  # Assemble the stencil
+  #------------------------------------------------------------------------------
+
+  stencil = SVector{3,T}(A, B, C)
+
+  # use an offset so we can index via [+1, -1] for (i+1, j-1)
+  offset_stencil = OffsetVector(stencil, -1:1)
+
+  return offset_stencil, RHS
 end
 
 # Generate a stencil for a single 2d cell in the interior
@@ -179,9 +257,9 @@ end
     edge_diffusivity, edge_metrics
   )
 
-  # #------------------------------------------------------------------------------
-  # # Equations 3.43 and 3.44
-  # #------------------------------------------------------------------------------
+  #------------------------------------------------------------------------------
+  # Equations 3.43 and 3.44
+  #------------------------------------------------------------------------------
   # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
   # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
   # # i terms = fᵢ₋½ * u[i-1,j] - (fᵢ₊½ + fᵢ₋½) * u[i,j] + fᵢ₊½ * u[i+1,j]
@@ -190,9 +268,9 @@ end
   # fⱼ₋½ = a_ⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
   # # j terms = fⱼ₋½ * u[i,j-1] - (fⱼ₊½ + fⱼ₋½) * u[i,j] + fⱼ₊½ * u[i,j+1]
 
-  # #------------------------------------------------------------------------------
-  # # cross terms (Equations 3.45 and 3.46)
-  # #------------------------------------------------------------------------------
+  #------------------------------------------------------------------------------
+  # cross terms (Equations 3.45 and 3.46)
+  #------------------------------------------------------------------------------
   # gᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
   # gᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
   # # i terms = gᵢ₊½ * (u[i, j+1] − u[i, j-1] + u[i+1, j+1] − u[i+1, j-1])
@@ -229,7 +307,7 @@ end
 
 # Generate a stencil for a single 3d cell in the interior
 @inline function _inner_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics, edge_diffusivity::ET3D
+  uᵢⱼₖ::T, Jᵢⱼₖ, sᵢⱼₖₖ, Δτ, edge_metrics, edge_diffusivity::ET3D
 ) where {T}
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
@@ -273,8 +351,8 @@ end
   G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
   H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
   I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-  RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
+  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼₖ / Δτ)  # (i,j)
+  RHS = -(Jᵢⱼₖ * sᵢⱼₖ + uᵢⱼₖ * Jᵢⱼₖ / Δτ)
 
   #------------------------------------------------------------------------------
   # Assemble the stencil
@@ -288,25 +366,111 @@ end
   return offset_stencil, RHS
 end
 
-@inline function neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, loc)
+@inline function neumann_boundary_diffusion_operator(
+  (i,), u, Δt, scheme, mesh::CurvilinearGrid1D, loc
+)
+  uᵢ = u[i]
+  Jᵢ = mesh.cell_center_metrics[i].J
+  sᵢ = scheme.source_term[i]
+  aᵢ₊½ = scheme.mean_func(scheme.α[i], scheme.α[i + 1])
+  aᵢ₋½ = scheme.mean_func(scheme.α[i], scheme.α[i - 1])
+
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½)
+
+  edge_metrics = (i₊½=mesh.edge_metrics.i₊½[i], i₋½=mesh.edge_metrics.i₊½[i - 1])
+
+  stencil, rhs = _neumann_boundary_diffusion_operator(
+    uᵢ, Jᵢ, sᵢ, Δt, edge_metrics, edge_diffusivity, loc
+  )
+  return stencil, rhs
+end
+
+@inline function neumann_boundary_diffusion_operator(
+  (i, j), u, Δt, scheme, mesh::CurvilinearGrid2D, loc
+)
   uᵢⱼ = u[i, j]
-  Jᵢⱼ = scheme.J[i, j]
+  Jᵢⱼ = mesh.cell_center_metrics[i, j].J
   sᵢⱼ = scheme.source_term[i, j]
   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
   aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
-  a_edge = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
 
-  edge_metrics = scheme.metrics[i, j]
+  edge_metrics = (
+    i₊½=mesh.edge_metrics.i₊½[i, j],
+    i₋½=mesh.edge_metrics.i₊½[i - 1, j],
+    j₊½=mesh.edge_metrics.j₊½[i, j],
+    j₋½=mesh.edge_metrics.j₊½[i, j - 1],
+  )
 
   stencil, rhs = _neumann_boundary_diffusion_operator(
-    uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, a_edge, loc
+    uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, edge_diffusivity, loc
   )
   return stencil, rhs
 end
 
-# Generate a stencil for a neumann boundary condition
+@inline function neumann_boundary_diffusion_operator(
+  (i, j, k), u, Δt, scheme, mesh::CurvilinearGrid3D, loc
+)
+  uᵢⱼₖ = u[i, j, k]
+  Jᵢⱼₖ = mesh.cell_center_metrics[i, j, k].J
+  sᵢⱼₖ = scheme.source_term[i, j, k]
+  aᵢ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i + 1, j, k])
+  aᵢ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i - 1, j, k])
+  aⱼ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j + 1, k])
+  aⱼ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j - 1, k])
+  aₖ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k + 1])
+  aₖ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k - 1])
+  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½, αₖ₊½=aₖ₊½, αₖ₋½=aₖ₋½)
+
+  edge_metrics = (
+    i₊½=mesh.edge_metrics.i₊½[i, j, k],
+    i₋½=mesh.edge_metrics.i₊½[i - 1, j, k],
+    j₊½=mesh.edge_metrics.j₊½[i, j, k],
+    j₋½=mesh.edge_metrics.j₊½[i, j - 1, k],
+    k₊½=mesh.edge_metrics.k₊½[i, j, k],
+    k₋½=mesh.edge_metrics.k₊½[i, j, k - 1],
+  )
+
+  stencil, rhs = _neumann_boundary_diffusion_operator(
+    uᵢⱼₖ, Jᵢⱼₖ, sᵢⱼₖ, Δt, edge_metrics, edge_diffusivity, loc
+  )
+  return stencil, rhs
+end
+
+# Generate a stencil for a 1D neumann boundary condition
+@inline function _neumann_boundary_diffusion_operator(
+  uᵢ::T, Jᵢ, sᵢ, Δτ, edge_metric, edge_diffusivity::ET1D, loc::Symbol
+) where {T}
+  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
+
+  @unpack fᵢ₊½, fᵢ₋½ = conservative_edge_terms(edge_diffusivity, edge_metric)
+
+  if loc === :ilo
+    fᵢ₋½ = zero(T)
+  elseif loc === :ihi
+    fᵢ₊½ = zero(T)
+  end
+
+  A = fᵢ₋½                     # (i-1,j)
+  B = -(fᵢ₋½ + fᵢ₊½ + Jᵢ / Δτ) # (i,j)
+  C = fᵢ₊½                     # (i+1,j)
+  RHS = -(Jᵢ * sᵢ + uᵢ * Jᵢ / Δτ)
+
+  #------------------------------------------------------------------------------
+  # Assemble the stencil
+  #------------------------------------------------------------------------------
+
+  stencil = SVector{3,T}(A, B, C)
+
+  # use an offset so we can index via [+1, -1] for (i+1, j-1)
+  offset_stencil = OffsetVector(stencil, -1:1)
+
+  return offset_stencil, RHS
+end
+
+# Generate a stencil for a 2D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
   uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metric, edge_diffusivity::ET2D, loc::Symbol
 ) where {T}
@@ -353,7 +517,7 @@ end
   return offset_stencil, RHS
 end
 
-# @inline function dirichlet_boundary_diffusion_operator((i,j), u, Δt, scheme, loc)
+# @inline function dirichlet_boundary_diffusion_operator((i,j), u, Δt, scheme, mesh, loc)
 #   uᵢⱼ = u[i, j]
 #   Jᵢⱼ = scheme.J[i, j]
 #   sᵢⱼ = scheme.source_term[i, j]
