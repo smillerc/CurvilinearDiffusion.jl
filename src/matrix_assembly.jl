@@ -164,7 +164,7 @@ end
 
 @inline function inner_diffusion_operator((i, j), u, Δt, scheme, mesh::CurvilinearGrid2D)
   uᵢⱼ = u[i, j]
-  Jᵢⱼ = mesh.cell_center_metrics[i, j].J
+  Jᵢⱼ = mesh.cell_center_metrics.J[i, j]
   sᵢⱼ = scheme.source_term[i, j]
   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])

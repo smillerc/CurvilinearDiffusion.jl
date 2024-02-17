@@ -77,13 +77,13 @@ function ImplicitScheme(
   )
   #! format: on
 
-  if form === :conservative
-    conservative = true
-    metric_type = typeof(_conservative_metrics(mesh, (1, 1)))
-  else
-    conservative = false
-    metric_type = typeof(_non_conservative_metrics(mesh, (1, 1)))
-  end
+  # if form === :conservative
+  conservative = true
+  #   metric_type = typeof(_conservative_metrics(mesh, (1, 1)))
+  # else
+  #   conservative = false
+  #   metric_type = typeof(_non_conservative_metrics(mesh, (1, 1)))
+  # end
 
   b = zeros(T, len)
   u0 = zeros(T, len) # initial guess for iterative solvers
