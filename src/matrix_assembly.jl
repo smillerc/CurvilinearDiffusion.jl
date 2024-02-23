@@ -1,4 +1,5 @@
 include("edge_terms.jl")
+using KernelAbstractions
 
 """
     assemble_matrix!(scheme::ImplicitScheme, u, Δt)
@@ -6,27 +7,157 @@ include("edge_terms.jl")
 Assemble the `A` matrix and right-hand side vector `b` for the solution
 to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 """
+
 function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
   ni, nj = size(scheme.domain_indices)
-  len = ni * nj
+
   nhalo = 1
   matrix_domain_LI = LinearIndices(scheme.domain_indices)
-  # grid_domain_LI = LinearIndices(scheme.halo_aware_indices)
 
-  matrix_inner_LI = @view matrix_domain_LI[
-    (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-  ]
-  grid_inner_LI = @view scheme.halo_aware_indices[
+  matrix_indices = @view matrix_domain_LI[
     (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
   ]
 
-  A = scheme.A
-  b = scheme.b
+  inner_domain = @view scheme.halo_aware_indices[
+    (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
+  ]
 
-  # assemble the inner domain
-  for (grid_idx, mat_idx) in zip(grid_inner_LI, matrix_inner_LI)
-    stencil, rhs = inner_diffusion_operator(grid_idx, u, Δt, scheme, mesh)
+  backend = scheme.backend
+  workgroup = (64,)
 
+  inner_diffusion_op_kernel_2d!(backend, workgroup)(
+    scheme.A,
+    scheme.b,
+    scheme.α,
+    u,
+    scheme.source_term,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    inner_domain,
+    matrix_indices,
+    scheme.mean_func,
+    (ni, nj);
+    ndrange=size(inner_domain),
+  )
+
+  # ilo
+  ilo_domain = @view scheme.halo_aware_indices[begin, :]
+  ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
+  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+    scheme.A,
+    scheme.b,
+    scheme.α,
+    u,
+    scheme.source_term,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    ilo_domain,
+    ilo_matrix_indices,
+    scheme.mean_func,
+    (ni, nj),
+    :ilo;
+    ndrange=size(ilo_domain),
+  )
+
+  # ihi
+  ihi_domain = @view scheme.halo_aware_indices[end, :]
+  ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
+  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+    scheme.A,
+    scheme.b,
+    scheme.α,
+    u,
+    scheme.source_term,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    ihi_domain,
+    ihi_matrix_indices,
+    scheme.mean_func,
+    (ni, nj),
+    :ihi;
+    ndrange=size(ihi_domain),
+  )
+
+  # jlo
+  jlo_domain = @view scheme.halo_aware_indices[:, begin]
+  jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
+  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+    scheme.A,
+    scheme.b,
+    scheme.α,
+    u,
+    scheme.source_term,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    jlo_domain,
+    jlo_matrix_indices,
+    scheme.mean_func,
+    (ni, nj),
+    :jlo;
+    ndrange=size(jlo_domain),
+  )
+
+  # jhi
+  jhi_domain = @view scheme.halo_aware_indices[:, end]
+  jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
+  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+    scheme.A,
+    scheme.b,
+    scheme.α,
+    u,
+    scheme.source_term,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    jhi_domain,
+    jhi_matrix_indices,
+    scheme.mean_func,
+    (ni, nj),
+    :jhi;
+    ndrange=size(jhi_domain),
+  )
+
+  KernelAbstractions.synchronize(backend)
+
+  return nothing
+end
+
+@kernel function inner_diffusion_op_kernel_2d!(
+  A,
+  b,
+  @Const(α),
+  @Const(u),
+  @Const(source_term),
+  @Const(Δt),
+  @Const(cell_center_metrics),
+  @Const(edge_metrics),
+  @Const(grid_indices),
+  @Const(matrix_indices),
+  @Const(mean_func::F),
+  @Const((ni, nj))
+) where {F}
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    grid_idx = grid_indices[idx]
+
+    i, j = grid_idx.I
+    edge_diffusivity = (
+      αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
+      αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
+      αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
+      αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
+    )
+
+    stencil, rhs = _inner_diffusion_operator(
+      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx
+    )
+
+    mat_idx = matrix_indices[idx]
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
     A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
@@ -41,173 +172,72 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
 
     b[mat_idx] = rhs
   end
-
-  #------------------------------------------------------------------------------
-  # ilo boundary
-  #------------------------------------------------------------------------------
-  ilo_grid_inner_LI = @view scheme.halo_aware_indices[begin, :]
-  ilo_matrix_inner_LI = @view LinearIndices(scheme.domain_indices)[begin, :]
-
-  for (grid_idx, mat_idx) in zip(ilo_grid_inner_LI, ilo_matrix_inner_LI)
-    i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :ilo)
-
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
-    #! format: off
-    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    # if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    # if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    # if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    #! format: on
-
-    b[mat_idx] = rhs
-  end
-
-  #------------------------------------------------------------------------------
-  # ihi boundary
-  #------------------------------------------------------------------------------
-  ihi_grid_inner_LI = @view scheme.halo_aware_indices[end, :]
-  ihi_matrix_inner_LI = @view LinearIndices(scheme.domain_indices)[end, :]
-
-  for (grid_idx, mat_idx) in zip(ihi_grid_inner_LI, ihi_matrix_inner_LI)
-    i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :ihi)
-
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
-
-    #! format: off
-    if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    # if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    # if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    # if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    #! format: on
-
-    b[mat_idx] = rhs
-  end
-
-  #------------------------------------------------------------------------------
-  # jlo boundary
-  #------------------------------------------------------------------------------
-  jlo_grid_inner_LI = @view scheme.halo_aware_indices[:, begin]
-  jlo_matrix_inner_LI = @view LinearIndices(scheme.domain_indices)[:, begin]
-
-  for (grid_idx, mat_idx) in zip(jlo_grid_inner_LI, jlo_matrix_inner_LI)
-    i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :jlo)
-
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
-    #! format: off
-    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    # if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    # if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    # if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    #! format: on
-
-    b[mat_idx] = rhs
-  end
-
-  #------------------------------------------------------------------------------
-  # jhi boundary
-  #------------------------------------------------------------------------------
-  jhi_grid_inner_LI = @view scheme.halo_aware_indices[:, end]
-  jhi_matrix_inner_LI = @view LinearIndices(scheme.domain_indices)[:, end]
-
-  for (grid_idx, mat_idx) in zip(jhi_grid_inner_LI, jhi_matrix_inner_LI)
-    i, j = grid_idx.I
-    stencil, rhs = neumann_boundary_diffusion_operator((i, j), u, Δt, scheme, mesh, :jhi)
-
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
-    #! format: off
-    if (1 <= (mat_idx - ni - 1 ) <= len) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if (1 <= (mat_idx - ni     ) <= len) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    if (1 <= (mat_idx - ni + 1 ) <= len) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if (1 <= (mat_idx - 1      ) <= len) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    if (1 <= (mat_idx + 1      ) <= len) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    # if (1 <= (mat_idx + ni - 1 ) <= len) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    # if (1 <= (mat_idx + ni     ) <= len) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    # if (1 <= (mat_idx + ni + 1 ) <= len) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    #! format: on
-
-    b[mat_idx] = rhs
-  end
-
-  return nothing
 end
 
-@inline function inner_diffusion_operator((i,), u, Δt, scheme, mesh::CurvilinearGrid1D)
-  uᵢ = u[i]
-  Jᵢ = mesh.cell_center_metrics[i].J
-  sᵢ = scheme.source_term[i]
-  aᵢ₊½ = scheme.mean_func(scheme.α[i], scheme.α[i + 1])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i], scheme.α[i - 1])
+@kernel function boundary_diffusion_op_kernel_2d!(
+  A,
+  b,
+  @Const(α),
+  @Const(u),
+  @Const(source_term),
+  @Const(Δt),
+  @Const(cell_center_metrics),
+  @Const(edge_metrics),
+  @Const(grid_indices),
+  @Const(matrix_indices),
+  @Const(mean_func::F),
+  @Const((ni, nj)),
+  @Const(loc::Symbol)
+) where {F}
+  idx = @index(Global, Linear)
 
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½)
+  len = ni * nj
 
-  edge_metrics = (i₊½=mesh.edge_metrics.i₊½[i], i₋½=mesh.edge_metrics.i₊½[i - 1])
+  @inbounds begin
+    grid_idx = grid_indices[idx]
+    mat_idx = matrix_indices[idx]
 
-  stencil, rhs = _inner_diffusion_operator(uᵢ, Jᵢ, sᵢ, Δt, edge_metrics, edge_diffusivity)
-  return stencil, rhs
-end
+    i, j = grid_idx.I
+    edge_diffusivity = (
+      αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
+      αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
+      αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
+      αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
+    )
 
-@inline function inner_diffusion_operator(
-  idx::CartesianIndex{2}, u, Δt, scheme, mesh::CurvilinearGrid2D
-)
-  i, j = idx.I
-  aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
-  aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
-  aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
+    stencil, rhs = _neumann_boundary_diffusion_operator(
+      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
+    )
 
-  stencil, rhs = _inner_diffusion_operator(
-    u,
-    scheme.source_term,
-    edge_diffusivity,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    idx,
-  )
-  return stencil, rhs
-end
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
 
-@inline function inner_diffusion_operator((i, j, k), u, Δt, scheme, mesh::CurvilinearGrid3D)
-  uᵢⱼₖ = u[i, j, k]
-  Jᵢⱼₖ = mesh.cell_center_metrics[i, j, k].J
-  sᵢⱼₖ = scheme.source_term[i, j, k]
-  aᵢ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i + 1, j, k])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i - 1, j, k])
-  aⱼ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j + 1, k])
-  aⱼ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j - 1, k])
-  aₖ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k + 1])
-  aₖ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k - 1])
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½, αₖ₊½=aₖ₊½, αₖ₋½=aₖ₋½)
+    ip1 = true
+    jp1 = true
+    im1 = true
+    jm1 = true
+    if loc === :ilo
+      im1 = false
+    elseif loc === :ihi
+      ip1 = false
+    elseif loc === :jlo
+      jm1 = false
+    elseif loc === :jhi
+      jp1 = false
+    end
 
-  edge_metrics = (
-    i₊½=mesh.edge_metrics.i₊½[i, j, k],
-    i₋½=mesh.edge_metrics.i₊½[i - 1, j, k],
-    j₊½=mesh.edge_metrics.j₊½[i, j, k],
-    j₋½=mesh.edge_metrics.j₊½[i, j - 1, k],
-    k₊½=mesh.edge_metrics.k₊½[i, j, k],
-    k₋½=mesh.edge_metrics.k₊½[i, j, k - 1],
-  )
+    #! format: off
+    if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+    if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    #! format: on
 
-  stencil, rhs = _inner_diffusion_operator(
-    uᵢⱼₖ, Jᵢⱼₖ, sᵢⱼₖ, Δt, edge_metrics, edge_diffusivity
-  )
-  return stencil, rhs
+    b[mat_idx] = rhs
+  end
 end
 
 # Generate a stencil for a single 1d cell in the interior
@@ -351,77 +381,6 @@ end
   return offset_stencil, RHS
 end
 
-@inline function neumann_boundary_diffusion_operator(
-  (i,), u, Δt, scheme, mesh::CurvilinearGrid1D, loc
-)
-  uᵢ = u[i]
-  Jᵢ = mesh.cell_center_metrics[i].J
-  sᵢ = scheme.source_term[i]
-  aᵢ₊½ = scheme.mean_func(scheme.α[i], scheme.α[i + 1])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i], scheme.α[i - 1])
-
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½)
-
-  edge_metrics = (i₊½=mesh.edge_metrics.i₊½[i], i₋½=mesh.edge_metrics.i₊½[i - 1])
-
-  stencil, rhs = _neumann_boundary_diffusion_operator(
-    uᵢ, Jᵢ, sᵢ, Δt, edge_metrics, edge_diffusivity, loc
-  )
-  return stencil, rhs
-end
-
-@inline function neumann_boundary_diffusion_operator(
-  (i, j), u, Δt, scheme, mesh::CurvilinearGrid2D, loc
-)
-  aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
-  aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
-  aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
-
-  stencil, rhs = _neumann_boundary_diffusion_operator(
-    u,
-    scheme.source_term,
-    edge_diffusivity,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    CartesianIndex(i, j),
-    loc,
-  )
-
-  return stencil, rhs
-end
-
-@inline function neumann_boundary_diffusion_operator(
-  (i, j, k), u, Δt, scheme, mesh::CurvilinearGrid3D, loc
-)
-  uᵢⱼₖ = u[i, j, k]
-  Jᵢⱼₖ = mesh.cell_center_metrics[i, j, k].J
-  sᵢⱼₖ = scheme.source_term[i, j, k]
-  aᵢ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i + 1, j, k])
-  aᵢ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i - 1, j, k])
-  aⱼ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j + 1, k])
-  aⱼ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j - 1, k])
-  aₖ₊½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k + 1])
-  aₖ₋½ = scheme.mean_func(scheme.α[i, j, k], scheme.α[i, j, k - 1])
-  edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½, αₖ₊½=aₖ₊½, αₖ₋½=aₖ₋½)
-
-  edge_metrics = (
-    i₊½=mesh.edge_metrics.i₊½[i, j, k],
-    i₋½=mesh.edge_metrics.i₊½[i - 1, j, k],
-    j₊½=mesh.edge_metrics.j₊½[i, j, k],
-    j₋½=mesh.edge_metrics.j₊½[i, j - 1, k],
-    k₊½=mesh.edge_metrics.k₊½[i, j, k],
-    k₋½=mesh.edge_metrics.k₊½[i, j, k - 1],
-  )
-
-  stencil, rhs = _neumann_boundary_diffusion_operator(
-    uᵢⱼₖ, Jᵢⱼₖ, sᵢⱼₖ, Δt, edge_metrics, edge_diffusivity, loc
-  )
-  return stencil, rhs
-end
-
 # Generate a stencil for a 1D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
   uᵢ::T, Jᵢ, sᵢ, Δτ, edge_metric, edge_diffusivity::ET1D, loc::Symbol
@@ -511,68 +470,3 @@ end
 
   return offset_stencil, RHS
 end
-
-# @inline function dirichlet_boundary_diffusion_operator((i,j), u, Δt, scheme, mesh, loc)
-#   uᵢⱼ = u[i, j]
-#   Jᵢⱼ = scheme.J[i, j]
-#   sᵢⱼ = scheme.source_term[i, j]
-#   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
-#   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
-#   aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
-#   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
-#   a_edge = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
-
-#   edge_metrics = scheme.metrics[i, j]
-
-#   stencil, rhs = _neumann_boundary_diffusion_operator(
-#     uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, a_edge, loc
-#   )
-#   return stencil, rhs
-# end
-
-# # Generate a stencil for a Dirichlet boundary condition
-# @inline function _dirichlet_boundary_diffusion_operator(
-#   uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metric, a_edge, loc::Symbol
-# ) where {T}
-#   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-
-#   fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-#     edge_diffusivity, edge_metrics
-#   )
-
-#   if loc === :ilo
-#     fᵢ₋½ = zero(T)
-#     gᵢ₋½ = zero(T)
-#   elseif loc === :ihi
-#     fᵢ₊½ = zero(T)
-#     gᵢ₊½ = zero(T)
-#   elseif loc === :jlo
-#     fⱼ₋½ = zero(T)
-#     gⱼ₋½ = zero(T)
-#   elseif loc === :jhi
-#     fⱼ₊½ = zero(T)
-#     gⱼ₊½ = zero(T)
-#   end
-
-#   A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
-#   B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
-#   C = -gᵢ₊½ - gⱼ₋½                             # (i+1,j-1)
-#   D = fᵢ₋½ - gⱼ₊½ + gⱼ₋½                       # (i-1,j)
-#   F = fᵢ₊½ + gⱼ₊½ - gⱼ₋½                       # (i+1,j)
-#   G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
-#   H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
-#   I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-#   E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-#   RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
-
-#   #------------------------------------------------------------------------------
-#   # Assemble the stencil
-#   #------------------------------------------------------------------------------
-
-#   stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
-
-#   # use an offset so we can index via [+1, -1] for (i+1, j-1)
-#   offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
-
-#   return offset_stencil, RHS
-# end

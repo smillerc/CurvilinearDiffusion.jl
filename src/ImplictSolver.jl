@@ -36,6 +36,7 @@ struct ImplicitScheme{N,LP,SM,V,ST,T,F,BC,CI1,CI2}
   conservative::Bool # uses the conservative form
   domain_indices::CI1
   halo_aware_indices::CI2
+  backend
 end
 
 include("mesh_metrics.jl")
@@ -49,6 +50,7 @@ function ImplicitScheme(
   mean_func=arithmetic_mean,
   T=Float64,
   solver=KrylovJL_GMRES(),
+  backend=CPU(),
 )
   celldims = cellsize_withhalo(mesh)
 
@@ -113,6 +115,7 @@ function ImplicitScheme(
     conservative,
     domain_CI,
     halo_aware_CI,
+    backend,
   )
 
   return implicit_solver
