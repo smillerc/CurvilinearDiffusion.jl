@@ -74,19 +74,8 @@ function ImplicitScheme(
   diffusivity = zeros(T, celldims)
   source_term = zeros(T, celldims)
 
-  # prob = LinearProblem(A, b)
-
-  # ml = ruge_stuben(prob.A) # Construct a Ruge-Stuben solver
-  # pl = aspreconditioner(ml)
-  # alg = KrylovKitJL_GMRES
-  # alg = KrylovJL(;
-  #   KrylovAlg=Krylov.gmres!, Pl=nothing, Pr=nothing, gmres_restart=0, window=0
-  # )
-
-  # linear_problem = init(prob, alg; alias_A=true, alias_b=true)
-  # linear_problem = init(prob, KrylovJL_GMRES(); alias_A=false, alias_b=false)
-
-  linear_problem = nothing # LinearProblem(A, b; u0=u0)
+  linear_problem = Krylov.GmresSolver(ni, nj, typeof(A))
+  solver_alg = Krylov.gmres!
 
   implicit_solver = ImplicitScheme(
     linear_problem,
@@ -94,7 +83,7 @@ function ImplicitScheme(
     x,
     u0,
     b,
-    solver,
+    solver_alg,
     diffusivity,
     source_term,
     mean_func,
