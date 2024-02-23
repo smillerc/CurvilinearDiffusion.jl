@@ -141,7 +141,8 @@ function solve!(
   end
 
   prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
-  @timeit "preconditioner" LU = ilu(scheme.A; τ=0.1)
+  @timeit "preconditioner" LU = preconditioner(A, τ, backend)
+
   @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
   # @timeit "solve_step" sol = solve(prob; Pl=LU)
 
@@ -152,6 +153,14 @@ function solve!(
   # return sol.resid, sol.iters, true
 
   return nothing
+end
+
+@inline function preconditioner(A, τ, ::CPU)
+  return IncompleteLU.ilu(A; τ=τ)
+end
+
+@inline function preconditioner(A, τ, ::GPU)
+  return KrylovPreconditioners.kp_ilu0(A)
 end
 
 end
