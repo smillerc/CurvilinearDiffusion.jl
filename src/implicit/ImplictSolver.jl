@@ -58,27 +58,14 @@ function ImplicitScheme(
   ni, nj = cellsize(mesh)
   len = ni * nj
 
-  fullCI = mesh.iterators.cell.full
   halo_aware_CI = mesh.iterators.cell.domain
   domain_CI = CartesianIndices(size(halo_aware_CI))
 
   @assert length(domain_CI) == length(halo_aware_CI)
 
-  #! format: off
-  A = spdiagm(
-    -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
-    -ni     => zeros(len - ni),     # (i  , j-1)
-    -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
-    -1      => zeros(len - 1),      # (i-1, j  )
-    0       => ones(len),          # (i  , j  )
-    1       => zeros(len - 1),      # (i+1, j  )
-    ni - 1  => zeros(len - ni + 1), # (i-1, j+1)
-    ni      => zeros(len - ni),     # (i  , j+1)
-    ni + 1  => zeros(len - ni - 1), # (i+1, j+1)
-  )
-  #! format: on
-
   conservative = form === :conservative
+
+  A = init_A_matrix(mesh, backend)
 
   b = zeros(T, len)
   u0 = zeros(T, len) # initial guess for iterative solvers
@@ -120,6 +107,36 @@ function ImplicitScheme(
   )
 
   return implicit_solver
+end
+
+function init_A_matrix(mesh::CurvilinearGrid2D, ::CPU)
+  ni, nj = cellsize(mesh)
+  len = ni * nj
+
+  #! format: off
+  A = spdiagm(
+    -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
+    -ni     => zeros(len - ni),     # (i  , j-1)
+    -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
+    -1      => zeros(len - 1),      # (i-1, j  )
+    0       => ones(len),           # (i  , j  )
+    1       => zeros(len - 1),      # (i+1, j  )
+    ni - 1  => zeros(len - ni + 1), # (i-1, j+1)
+    ni      => zeros(len - ni),     # (i  , j+1)
+    ni + 1  => zeros(len - ni - 1), # (i+1, j+1)
+  )
+  #! format: on
+  return A
+end
+
+function init_A_matrix(mesh::CurvilinearGrid2D, ::GPU)
+  return CuSparseMatrixCSR(init_A_matrix(mesh, CPU()))
+end
+
+function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
+  len, = cellsize(mesh)
+  A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
+  return A
 end
 
 function solve!(
