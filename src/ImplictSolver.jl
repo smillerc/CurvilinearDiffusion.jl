@@ -141,9 +141,8 @@ function solve!(
   end
 
   prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
-  @timeit "preconditioner" LU = preconditioner(A, τ, backend)
-
-  @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
+  @timeit "preconditioner" Pl = preconditioner(scheme.backend, scheme.A)
+  @timeit "solve" sol = solve(prob, KrylovJL_GMRES(); Pl=Pl)
   # @timeit "solve_step" sol = solve(prob; Pl=LU)
 
   # update the solution to u in-place
@@ -155,11 +154,11 @@ function solve!(
   return nothing
 end
 
-@inline function preconditioner(A, τ, ::CPU)
+@inline function preconditioner(::CPU, A, τ=0.1)
   return IncompleteLU.ilu(A; τ=τ)
 end
 
-@inline function preconditioner(A, τ, ::GPU)
+@inline function preconditioner(::GPU, A, τ=0.1)
   return KrylovPreconditioners.kp_ilu0(A)
 end
 
