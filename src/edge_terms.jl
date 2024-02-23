@@ -1,5 +1,6 @@
 
 using UnPack
+using CartesianDomainUtils
 
 ET1D = @NamedTuple{αᵢ₊½::T1, αᵢ₋½::T2} where {T1,T2}
 ET2D = @NamedTuple{αᵢ₊½::T1, αᵢ₋½::T2, αⱼ₊½::T3, αⱼ₋½::T4} where {T1,T2,T3,T4}
@@ -36,36 +37,118 @@ end
 Collect and find the 2D edge terms used for the conservative form of the diffusion equation.
 These are essentially the edge diffusivity + grid metric terms
 """
-@inline function conservative_edge_terms(edge_diffusivity::ET2D, m::NamedTuple)
+# @inline function conservative_edge_terms(edge_diffusivity::ET2D, m::NamedTuple)
+
+#   # m is a NamedTuple that contains the conservative edge metris for 
+#   # a single cell. The names should be self-explainatory
+#   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
+
+#   Jᵢ₊½ = m.i₊½.J
+#   Jⱼ₊½ = m.j₊½.J
+#   Jᵢ₋½ = m.i₋½.J
+#   Jⱼ₋½ = m.j₋½.J
+
+#   Jξx_ᵢ₊½ = m.i₊½.ξx * Jᵢ₊½
+#   Jξy_ᵢ₊½ = m.i₊½.ξy * Jᵢ₊½
+#   Jηx_ᵢ₊½ = m.i₊½.ηx * Jᵢ₊½
+#   Jηy_ᵢ₊½ = m.i₊½.ηy * Jᵢ₊½
+
+#   Jξx_ᵢ₋½ = m.i₋½.ξx * Jᵢ₋½
+#   Jξy_ᵢ₋½ = m.i₋½.ξy * Jᵢ₋½
+#   Jηx_ᵢ₋½ = m.i₋½.ηx * Jᵢ₋½
+#   Jηy_ᵢ₋½ = m.i₋½.ηy * Jᵢ₋½
+
+#   Jξx_ⱼ₊½ = m.j₊½.ξx * Jⱼ₊½
+#   Jξy_ⱼ₊½ = m.j₊½.ξy * Jⱼ₊½
+#   Jηx_ⱼ₊½ = m.j₊½.ηx * Jⱼ₊½
+#   Jηy_ⱼ₊½ = m.j₊½.ηy * Jⱼ₊½
+
+#   Jξx_ⱼ₋½ = m.j₋½.ξx * Jⱼ₋½
+#   Jξy_ⱼ₋½ = m.j₋½.ξy * Jⱼ₋½
+#   Jηx_ⱼ₋½ = m.j₋½.ηx * Jⱼ₋½
+#   Jηy_ⱼ₋½ = m.j₋½.ηy * Jⱼ₋½
+
+#   fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
+#   fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
+#   fⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
+#   fⱼ₋½ = αⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
+#   gᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
+#   gᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
+#   gⱼ₊½ = αⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
+#   gⱼ₋½ = αⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
+
+#   return (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
+# end
+
+@inline function conservative_edge_terms(
+  edge_diffusivity, edge_metrics, idx::CartesianIndex{2}
+)
 
   # m is a NamedTuple that contains the conservative edge metris for 
   # a single cell. The names should be self-explainatory
   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
 
-  Jᵢ₊½ = m.i₊½.J
-  Jⱼ₊½ = m.j₊½.J
-  Jᵢ₋½ = m.i₋½.J
-  Jⱼ₋½ = m.j₋½.J
+  idim, jdim = (1, 2)
+  ᵢ₋₁ = shift(idx, idim, -1)
+  ⱼ₋₁ = shift(idx, jdim, -1)
 
-  Jξx_ᵢ₊½ = m.i₊½.ξx * Jᵢ₊½
-  Jξy_ᵢ₊½ = m.i₊½.ξy * Jᵢ₊½
-  Jηx_ᵢ₊½ = m.i₊½.ηx * Jᵢ₊½
-  Jηy_ᵢ₊½ = m.i₊½.ηy * Jᵢ₊½
+  Jᵢ₊½ = edge_metrics.i₊½.J[idx]
+  Jⱼ₊½ = edge_metrics.j₊½.J[idx]
+  Jᵢ₋½ = edge_metrics.i₊½.J[ᵢ₋₁]
+  Jⱼ₋½ = edge_metrics.j₊½.J[ⱼ₋₁]
 
-  Jξx_ᵢ₋½ = m.i₋½.ξx * Jᵢ₋½
-  Jξy_ᵢ₋½ = m.i₋½.ξy * Jᵢ₋½
-  Jηx_ᵢ₋½ = m.i₋½.ηx * Jᵢ₋½
-  Jηy_ᵢ₋½ = m.i₋½.ηy * Jᵢ₋½
+  Jξx_ᵢ₊½ = edge_metrics.i₊½.ξ̂.x[idx]
+  Jξy_ᵢ₊½ = edge_metrics.i₊½.ξ̂.y[idx]
+  Jηx_ᵢ₊½ = edge_metrics.i₊½.η̂.x[idx]
+  Jηy_ᵢ₊½ = edge_metrics.i₊½.η̂.y[idx]
 
-  Jξx_ⱼ₊½ = m.j₊½.ξx * Jⱼ₊½
-  Jξy_ⱼ₊½ = m.j₊½.ξy * Jⱼ₊½
-  Jηx_ⱼ₊½ = m.j₊½.ηx * Jⱼ₊½
-  Jηy_ⱼ₊½ = m.j₊½.ηy * Jⱼ₊½
+  Jξx_ᵢ₋½ = edge_metrics.i₊½.ξ̂.x[ᵢ₋₁]
+  Jξy_ᵢ₋½ = edge_metrics.i₊½.ξ̂.y[ᵢ₋₁]
+  Jηx_ᵢ₋½ = edge_metrics.i₊½.η̂.x[ᵢ₋₁]
+  Jηy_ᵢ₋½ = edge_metrics.i₊½.η̂.y[ᵢ₋₁]
 
-  Jξx_ⱼ₋½ = m.j₋½.ξx * Jⱼ₋½
-  Jξy_ⱼ₋½ = m.j₋½.ξy * Jⱼ₋½
-  Jηx_ⱼ₋½ = m.j₋½.ηx * Jⱼ₋½
-  Jηy_ⱼ₋½ = m.j₋½.ηy * Jⱼ₋½
+  Jξx_ⱼ₊½ = edge_metrics.j₊½.ξ̂.x[idx]
+  Jξy_ⱼ₊½ = edge_metrics.j₊½.ξ̂.y[idx]
+  Jηx_ⱼ₊½ = edge_metrics.j₊½.η̂.x[idx]
+  Jηy_ⱼ₊½ = edge_metrics.j₊½.η̂.y[idx]
+
+  Jξx_ⱼ₋½ = edge_metrics.j₊½.ξ̂.x[ⱼ₋₁]
+  Jξy_ⱼ₋½ = edge_metrics.j₊½.ξ̂.y[ⱼ₋₁]
+  Jηx_ⱼ₋½ = edge_metrics.j₊½.η̂.x[ⱼ₋₁]
+  Jηy_ⱼ₋½ = edge_metrics.j₊½.η̂.y[ⱼ₋₁]
+
+  #------------------------------------------------------------------------------
+  # Equations 3.43 and 3.44
+  #------------------------------------------------------------------------------
+  fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
+  fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
+  fⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
+  fⱼ₋½ = αⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
+  # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
+  # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
+  # # i terms = fᵢ₋½ * u[i-1,j] - (fᵢ₊½ + fᵢ₋½) * u[i,j] + fᵢ₊½ * u[i+1,j]
+
+  # fⱼ₊½ = a_ⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
+  # fⱼ₋½ = a_ⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
+  # # j terms = fⱼ₋½ * u[i,j-1] - (fⱼ₊½ + fⱼ₋½) * u[i,j] + fⱼ₊½ * u[i,j+1]
+
+  #------------------------------------------------------------------------------
+  # cross terms (Equations 3.45 and 3.46)
+  #------------------------------------------------------------------------------
+  gᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
+  gᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
+  gⱼ₊½ = αⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
+  gⱼ₋½ = αⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
+
+  # gᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
+  # gᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
+  # # i terms = gᵢ₊½ * (u[i, j+1] − u[i, j-1] + u[i+1, j+1] − u[i+1, j-1])
+  # #          -gᵢ₋½ * (u[i, j+1] − u[i, j-1] + u[j−1, j+1] − u[j−1, j-1])
+
+  # gⱼ₊½ = a_ⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
+  # gⱼ₋½ = a_ⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
+  # # j terms = gⱼ₊½ * (u[i+1, j] − u[i-1, j] + u[i+1, j+1] − u[i-1, j+1])
+  # #          -gⱼ₋½ * (u[i+1, j] − u[i-1, j] + u[i+1, j-1] − u[i-1, j-1])
 
   fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
   fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½

@@ -55,10 +55,8 @@ function ImplicitScheme(
   ni, nj = cellsize(mesh)
   len = ni * nj
 
-  fullCI = CartesianIndices(cellsize_withhalo(mesh))
-  halo_aware_CI = fullCI[
-    (begin + mesh.nhalo):(end - mesh.nhalo), (begin + mesh.nhalo):(end - mesh.nhalo)
-  ]
+  fullCI = mesh.iterators.cell.full
+  halo_aware_CI = mesh.iterators.cell.domain
   domain_CI = CartesianIndices(size(halo_aware_CI))
 
   @assert length(domain_CI) == length(halo_aware_CI)
@@ -77,22 +75,14 @@ function ImplicitScheme(
   )
   #! format: on
 
-  # if form === :conservative
-  conservative = true
-  #   metric_type = typeof(_conservative_metrics(mesh, (1, 1)))
-  # else
-  #   conservative = false
-  #   metric_type = typeof(_non_conservative_metrics(mesh, (1, 1)))
-  # end
+  conservative = form === :conservative
 
   b = zeros(T, len)
   u0 = zeros(T, len) # initial guess for iterative solvers
   x = zeros(T, len)
-  # edge_metrics = Array{metric_type,2}(undef, celldims)
 
   diffusivity = zeros(T, celldims)
   source_term = zeros(T, celldims)
-  # J = zeros(T, celldims)
 
   # prob = LinearProblem(A, b)
 
@@ -124,7 +114,6 @@ function ImplicitScheme(
     domain_CI,
     halo_aware_CI,
   )
-  # update_mesh_metrics!(implicit_solver, mesh)
 
   return implicit_solver
 end
@@ -151,7 +140,7 @@ function solve!(
   prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
   @timeit "preconditioner" LU = ilu(scheme.A; τ=0.1)
   @timeit "solve_step" sol = solve(prob, KrylovJL_GMRES(); Pl=LU)
-  # @timeit "solve_step" sol = solve(prob)
+  # @timeit "solve_step" sol = solve(prob; Pl=LU)
 
   # update the solution to u in-place
   for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)

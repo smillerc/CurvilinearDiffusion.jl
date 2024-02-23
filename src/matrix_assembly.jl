@@ -25,8 +25,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
 
   # assemble the inner domain
   for (grid_idx, mat_idx) in zip(grid_inner_LI, matrix_inner_LI)
-    i, j = grid_idx.I
-    stencil, rhs = inner_diffusion_operator((i, j), u, Δt, scheme, mesh)
+    stencil, rhs = inner_diffusion_operator(grid_idx, u, Δt, scheme, mesh)
 
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
@@ -162,25 +161,24 @@ end
   return stencil, rhs
 end
 
-@inline function inner_diffusion_operator((i, j), u, Δt, scheme, mesh::CurvilinearGrid2D)
-  uᵢⱼ = u[i, j]
-  Jᵢⱼ = mesh.cell_center_metrics.J[i, j]
-  sᵢⱼ = scheme.source_term[i, j]
+@inline function inner_diffusion_operator(
+  idx::CartesianIndex{2}, u, Δt, scheme, mesh::CurvilinearGrid2D
+)
+  i, j = idx.I
   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
   aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
   edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
 
-  edge_metrics = (
-    i₊½=mesh.edge_metrics.i₊½[i, j],
-    i₋½=mesh.edge_metrics.i₊½[i - 1, j],
-    j₊½=mesh.edge_metrics.j₊½[i, j],
-    j₋½=mesh.edge_metrics.j₊½[i, j - 1],
-  )
-
   stencil, rhs = _inner_diffusion_operator(
-    uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, edge_diffusivity
+    u,
+    scheme.source_term,
+    edge_diffusivity,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    idx,
   )
   return stencil, rhs
 end
@@ -245,41 +243,23 @@ end
 
 # Generate a stencil for a single 2d cell in the interior
 @inline function _inner_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metrics, edge_diffusivity::ET2D
+  u::AbstractArray{T,2},
+  source_term::AbstractArray{T,2},
+  edge_diffusivity,
+  Δτ,
+  cell_center_metrics,
+  edge_metrics,
+  idx::CartesianIndex{2},
 ) where {T}
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
 
-  # Don't use an offset matrix here b/c benchmarking showed it was
-  # ~3x slower. It makes the indexing here more of a pain,
-  # but 3x slower is a big deal for this performance critical section
+  #
+  Jᵢⱼ = cell_center_metrics.J[idx]
+  sᵢⱼ = source_term[idx]
+  uᵢⱼ = u[idx]
 
   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metrics
+    edge_diffusivity, edge_metrics, idx
   )
-
-  #------------------------------------------------------------------------------
-  # Equations 3.43 and 3.44
-  #------------------------------------------------------------------------------
-  # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
-  # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
-  # # i terms = fᵢ₋½ * u[i-1,j] - (fᵢ₊½ + fᵢ₋½) * u[i,j] + fᵢ₊½ * u[i+1,j]
-
-  # fⱼ₊½ = a_ⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
-  # fⱼ₋½ = a_ⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
-  # # j terms = fⱼ₋½ * u[i,j-1] - (fⱼ₊½ + fⱼ₋½) * u[i,j] + fⱼ₊½ * u[i,j+1]
-
-  #------------------------------------------------------------------------------
-  # cross terms (Equations 3.45 and 3.46)
-  #------------------------------------------------------------------------------
-  # gᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
-  # gᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
-  # # i terms = gᵢ₊½ * (u[i, j+1] − u[i, j-1] + u[i+1, j+1] − u[i+1, j-1])
-  # #          -gᵢ₋½ * (u[i, j+1] − u[i, j-1] + u[j−1, j+1] − u[j−1, j-1])
-
-  # gⱼ₊½ = a_ⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
-  # gⱼ₋½ = a_ⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
-  # # j terms = gⱼ₊½ * (u[i+1, j] − u[i-1, j] + u[i+1, j+1] − u[i-1, j+1])
-  # #          -gⱼ₋½ * (u[i+1, j] − u[i-1, j] + u[i+1, j-1] − u[i-1, j-1])
 
   A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
   B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
@@ -296,8 +276,13 @@ end
   # Assemble the stencil
   #------------------------------------------------------------------------------
 
+  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
+
+  # Don't use an offset matrix here b/c benchmarking showed it was
+  # ~3x slower. It makes the indexing here more of a pain,
+  # but 3x slower is a big deal for this performance critical section
+
   stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
-  # @show stencil
 
   # use an offset so we can index via [+1, -1] for (i+1, j-1)
   offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
@@ -388,25 +373,23 @@ end
 @inline function neumann_boundary_diffusion_operator(
   (i, j), u, Δt, scheme, mesh::CurvilinearGrid2D, loc
 )
-  uᵢⱼ = u[i, j]
-  Jᵢⱼ = mesh.cell_center_metrics[i, j].J
-  sᵢⱼ = scheme.source_term[i, j]
   aᵢ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i + 1, j])
   aᵢ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i - 1, j])
   aⱼ₊½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j + 1])
   aⱼ₋½ = scheme.mean_func(scheme.α[i, j], scheme.α[i, j - 1])
   edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
 
-  edge_metrics = (
-    i₊½=mesh.edge_metrics.i₊½[i, j],
-    i₋½=mesh.edge_metrics.i₊½[i - 1, j],
-    j₊½=mesh.edge_metrics.j₊½[i, j],
-    j₋½=mesh.edge_metrics.j₊½[i, j - 1],
+  stencil, rhs = _neumann_boundary_diffusion_operator(
+    u,
+    scheme.source_term,
+    edge_diffusivity,
+    Δt,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    CartesianIndex(i, j),
+    loc,
   )
 
-  stencil, rhs = _neumann_boundary_diffusion_operator(
-    uᵢⱼ, Jᵢⱼ, sᵢⱼ, Δt, edge_metrics, edge_diffusivity, loc
-  )
   return stencil, rhs
 end
 
@@ -472,14 +455,26 @@ end
 
 # Generate a stencil for a 2D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  uᵢⱼ::T, Jᵢⱼ, sᵢⱼ, Δτ, edge_metric, edge_diffusivity::ET2D, loc::Symbol
+  u::AbstractArray{T,2},
+  source_term::AbstractArray{T,2},
+  edge_diffusivity,
+  Δτ,
+  cell_center_metrics,
+  edge_metrics,
+  idx::CartesianIndex{2},
+  loc::Symbol,
 ) where {T}
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
+
+  #
+  Jᵢⱼ = cell_center_metrics.J[idx]
+  sᵢⱼ = source_term[idx]
+  uᵢⱼ = u[idx]
 
   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metric
+    edge_diffusivity, edge_metrics, idx
   )
 
+  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
   if loc === :ilo
     fᵢ₋½ = zero(T)
     gᵢ₋½ = zero(T)
