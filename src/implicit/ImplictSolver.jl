@@ -9,7 +9,8 @@ using SparseArrays
 using StaticArrays
 using AlgebraicMultigrid
 using Krylov
-# using KrylovKit
+
+using KernelAbstractions
 using LinearSolve
 using ILUZero
 using IncompleteLU
@@ -39,8 +40,8 @@ struct ImplicitScheme{N,LP,SM,V,ST,T,F,BC,CI1,CI2}
   backend
 end
 
-include("mesh_metrics.jl")
-include("averaging.jl")
+include("../averaging.jl")
+include("../edge_terms.jl")
 include("matrix_assembly.jl")
 
 function ImplicitScheme(

@@ -1,18 +1,16 @@
 module CurvilinearDiffusion
 
-include("partitioning.jl")
-using .Partitioning
+using UnPack
+using CartesianDomainUtils
+using KernelAbstractions
 
-include("ImplictSolver.jl")
+include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
 export ImplicitScheme
-export solve!, assemble_matrix!
+export solve!
 
-include("ADESolvers.jl")
-using .ADESolvers
-export ADESolver
-export BlockADESolver
-export solve!, update_conductivity!, update_mesh_metrics!
+include("conductivity.jl")
+export update_conductivity!
 
 include("max_dt.jl")
 using .TimeStepControl

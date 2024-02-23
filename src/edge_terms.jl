@@ -1,5 +1,4 @@
 
-using UnPack
 using CartesianDomainUtils
 
 ET1D = @NamedTuple{αᵢ₊½::T1, αᵢ₋½::T2} where {T1,T2}
@@ -16,7 +15,7 @@ These are essentially the edge diffusivity + grid metric terms
 """
 @inline function conservative_edge_terms(edge_diffusivity::ET1D, m::NamedTuple)
 
-  # m is a NamedTuple that contains the conservative edge metris for 
+  # m is a NamedTuple that contains the conservative edge metris for
   # a single cell. The names should be self-explainatory
   @unpack αᵢ₊½, αᵢ₋½ = edge_diffusivity
 
@@ -31,60 +30,18 @@ These are essentially the edge diffusivity + grid metric terms
 
   return (; fᵢ₊½, fᵢ₋½)
 end
+
 """
   conservative_edge_terms(edge_diffusivity::NTuple{4,T}, m) where {T}
 
 Collect and find the 2D edge terms used for the conservative form of the diffusion equation.
 These are essentially the edge diffusivity + grid metric terms
 """
-# @inline function conservative_edge_terms(edge_diffusivity::ET2D, m::NamedTuple)
-
-#   # m is a NamedTuple that contains the conservative edge metris for 
-#   # a single cell. The names should be self-explainatory
-#   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
-
-#   Jᵢ₊½ = m.i₊½.J
-#   Jⱼ₊½ = m.j₊½.J
-#   Jᵢ₋½ = m.i₋½.J
-#   Jⱼ₋½ = m.j₋½.J
-
-#   Jξx_ᵢ₊½ = m.i₊½.ξx * Jᵢ₊½
-#   Jξy_ᵢ₊½ = m.i₊½.ξy * Jᵢ₊½
-#   Jηx_ᵢ₊½ = m.i₊½.ηx * Jᵢ₊½
-#   Jηy_ᵢ₊½ = m.i₊½.ηy * Jᵢ₊½
-
-#   Jξx_ᵢ₋½ = m.i₋½.ξx * Jᵢ₋½
-#   Jξy_ᵢ₋½ = m.i₋½.ξy * Jᵢ₋½
-#   Jηx_ᵢ₋½ = m.i₋½.ηx * Jᵢ₋½
-#   Jηy_ᵢ₋½ = m.i₋½.ηy * Jᵢ₋½
-
-#   Jξx_ⱼ₊½ = m.j₊½.ξx * Jⱼ₊½
-#   Jξy_ⱼ₊½ = m.j₊½.ξy * Jⱼ₊½
-#   Jηx_ⱼ₊½ = m.j₊½.ηx * Jⱼ₊½
-#   Jηy_ⱼ₊½ = m.j₊½.ηy * Jⱼ₊½
-
-#   Jξx_ⱼ₋½ = m.j₋½.ξx * Jⱼ₋½
-#   Jξy_ⱼ₋½ = m.j₋½.ξy * Jⱼ₋½
-#   Jηx_ⱼ₋½ = m.j₋½.ηx * Jⱼ₋½
-#   Jηy_ⱼ₋½ = m.j₋½.ηy * Jⱼ₋½
-
-#   fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
-#   fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
-#   fⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
-#   fⱼ₋½ = αⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
-#   gᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
-#   gᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
-#   gⱼ₊½ = αⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
-#   gⱼ₋½ = αⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
-
-#   return (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
-# end
-
 @inline function conservative_edge_terms(
   edge_diffusivity, edge_metrics, idx::CartesianIndex{2}
 )
 
-  # m is a NamedTuple that contains the conservative edge metris for 
+  # m is a NamedTuple that contains the conservative edge metris for
   # a single cell. The names should be self-explainatory
   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
 
@@ -170,7 +127,7 @@ These are essentially the edge diffusivity + grid metric terms
 """
 @inline function conservative_edge_terms(edge_diffusivity::ET3D, m::NamedTuple)
 
-  # m is a NamedTuple that contains the conservative edge metris for 
+  # m is a NamedTuple that contains the conservative edge metris for
   # a single cell. The names should be self-explainatory
   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½, αₖ₊½, αₖ₋½ = edge_diffusivity
 
