@@ -17,21 +17,22 @@ function update_conductivity!(
   ρ::AbstractArray{T,N},
   κ::F,
   cₚ::Real,
-) where {T,N,F<:Function}
-
-  # super-simple kernel to update the diffusivity if
-  # we know the conductivity function
-  @kernel function conductivity_kernel(α, @Const(temperature), @Const(density), @Const(cₚ))
-    idx = @index(Global)
-
-    @inbounds begin
-      ρ = density[idx]
-      α[idx] = κ(ρ, temperature[idx]) / (ρ * cₚ)
-    end
-  end
-
+) where {T,N,F}
   backend = KernelAbstractions.get_backend(diffusivity)
-  conductivity_kernel(backend)(diffusivity, temp, ρ, cₚ; ndrange=size(temp))
+  conductivity_kernel(backend)(diffusivity, temp, ρ, κ, cₚ; ndrange=size(temp))
 
   return nothing
+end
+
+# super-simple kernel to update the diffusivity if
+# we know the conductivity function
+@kernel function conductivity_kernel(
+  α, @Const(temperature), @Const(density), @Const(κ::F), @Const(cₚ)
+) where {F}
+  idx = @index(Global)
+
+  @inbounds begin
+    rho = density[idx]
+    α[idx] = κ(rho, temperature[idx]) / (rho * cₚ)
+  end
 end
