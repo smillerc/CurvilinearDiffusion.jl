@@ -1,29 +1,21 @@
 
 using CartesianDomainUtils
 
-ET1D = @NamedTuple{αᵢ₊½::T1, αᵢ₋½::T2} where {T1,T2}
-ET2D = @NamedTuple{αᵢ₊½::T1, αᵢ₋½::T2, αⱼ₊½::T3, αⱼ₋½::T4} where {T1,T2,T3,T4}
-ET3D = @NamedTuple{
-  αᵢ₊½::T1, αᵢ₋½::T2, αⱼ₊½::T3, αⱼ₋½::T4, αₖ₊½::T5, αₖ₋½::T6
-} where {T1,T2,T3,T4,T5,T6}
-
 """
   conservative_edge_terms(edge_diffusivity::NTuple{4,T}, m) where {T}
 
 Collect and find the 2D edge terms used for the conservative form of the diffusion equation.
 These are essentially the edge diffusivity + grid metric terms
 """
-@inline function conservative_edge_terms(edge_diffusivity::ET1D, m::NamedTuple)
-
-  # m is a NamedTuple that contains the conservative edge metris for
-  # a single cell. The names should be self-explainatory
+@inline function conservative_edge_terms(
+  edge_diffusivity, edge_metrics, idx::CartesianIndex{1}
+)
   @unpack αᵢ₊½, αᵢ₋½ = edge_diffusivity
 
-  Jᵢ₊½ = m.i₊½.J
-  Jᵢ₋½ = m.i₋½.J
+  ᵢ₋₁ = idx.I - 1
 
-  Jξx_ᵢ₊½ = m.i₊½.ξx * Jᵢ₊½
-  Jξx_ᵢ₋½ = m.i₋½.ξx * Jᵢ₋½
+  Jξx_ᵢ₊½ = edge_metrics.i₊½.ξ̂.x[idx]
+  Jξx_ᵢ₋½ = edge_metrics.i₊½.ξ̂.x[ᵢ₋₁]
 
   fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2) / ᵢ₊½.J
   fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2) / ᵢ₋½.J
@@ -40,9 +32,6 @@ These are essentially the edge diffusivity + grid metric terms
 @inline function conservative_edge_terms(
   edge_diffusivity, edge_metrics, idx::CartesianIndex{2}
 )
-
-  # m is a NamedTuple that contains the conservative edge metris for
-  # a single cell. The names should be self-explainatory
   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½ = edge_diffusivity
 
   idim, jdim = (1, 2)
@@ -125,75 +114,80 @@ end
 Collect and find the 3D edge terms used for the conservative form of the diffusion equation.
 These are essentially the edge diffusivity + grid metric terms
 """
-@inline function conservative_edge_terms(edge_diffusivity::ET3D, m::NamedTuple)
-
-  # m is a NamedTuple that contains the conservative edge metris for
-  # a single cell. The names should be self-explainatory
+@inline function conservative_edge_terms(
+  edge_diffusivity, edge_metrics, idx::CartesianIndex{3}
+)
   @unpack αᵢ₊½, αᵢ₋½, αⱼ₊½, αⱼ₋½, αₖ₊½, αₖ₋½ = edge_diffusivity
 
-  Jᵢ₊½ = m.i₊½.J
-  Jᵢ₋½ = m.i₋½.J
-  Jⱼ₋½ = m.j₋½.J
-  Jⱼ₊½ = m.j₊½.J
-  Jₖ₋½ = m.k₋½.J
-  Jₖ₊½ = m.k₊½.J
+  idim, jdim, kdim = (1, 2, 3)
+  ᵢ₋₁ = shift(idx, idim, -1)
+  ⱼ₋₁ = shift(idx, jdim, -1)
+  ₖ₋₁ = shift(idx, kdim, -1)
 
-  Jξx_ᵢ₊½ = m.i₊½.ξx * Jᵢ₊½
-  Jξy_ᵢ₊½ = m.i₊½.ξy * Jᵢ₊½
-  Jξz_ᵢ₊½ = m.i₊½.ξz * Jᵢ₊½
-  Jξx_ᵢ₋½ = m.i₋½.ξx * Jᵢ₋½
-  Jξy_ᵢ₋½ = m.i₋½.ξy * Jᵢ₋½
-  Jξz_ᵢ₋½ = m.i₋½.ξz * Jᵢ₋½
-  Jηx_ᵢ₊½ = m.i₊½.ηx * Jᵢ₊½
-  Jηy_ᵢ₊½ = m.i₊½.ηy * Jᵢ₊½
-  Jηz_ᵢ₊½ = m.i₊½.ηz * Jᵢ₊½
-  Jηx_ᵢ₋½ = m.i₋½.ηx * Jᵢ₋½
-  Jηy_ᵢ₋½ = m.i₋½.ηy * Jᵢ₋½
-  Jηz_ᵢ₋½ = m.i₋½.ηz * Jᵢ₋½
-  Jζx_ᵢ₊½ = m.i₊½.ζx * Jᵢ₊½
-  Jζy_ᵢ₊½ = m.i₊½.ζy * Jᵢ₊½
-  Jζz_ᵢ₊½ = m.i₊½.ζz * Jᵢ₊½
-  Jζx_ᵢ₋½ = m.i₋½.ζx * Jᵢ₋½
-  Jζy_ᵢ₋½ = m.i₋½.ζy * Jᵢ₋½
-  Jζz_ᵢ₋½ = m.i₋½.ζz * Jᵢ₋½
+  Jᵢ₊½ = edge_metrics.i₊½.J[idx]
+  Jⱼ₊½ = edge_metrics.j₊½.J[idx]
+  Jₖ₊½ = edge_metrics.k₊½.J[idx]
 
-  Jξx_ⱼ₊½ = m.j₊½.ξx * Jⱼ₊½
-  Jξy_ⱼ₊½ = m.j₊½.ξy * Jⱼ₊½
-  Jξz_ⱼ₊½ = m.j₊½.ξz * Jⱼ₊½
-  Jξx_ⱼ₋½ = m.j₋½.ξx * Jⱼ₋½
-  Jξy_ⱼ₋½ = m.j₋½.ξy * Jⱼ₋½
-  Jξz_ⱼ₋½ = m.j₋½.ξz * Jⱼ₋½
-  Jηx_ⱼ₊½ = m.j₊½.ηx * Jⱼ₊½
-  Jηy_ⱼ₊½ = m.j₊½.ηy * Jⱼ₊½
-  Jηz_ⱼ₊½ = m.j₊½.ηz * Jⱼ₊½
-  Jηx_ⱼ₋½ = m.j₋½.ηx * Jⱼ₋½
-  Jηy_ⱼ₋½ = m.j₋½.ηy * Jⱼ₋½
-  Jηz_ⱼ₋½ = m.j₋½.ηz * Jⱼ₋½
-  Jζx_ⱼ₊½ = m.j₊½.ζx * Jⱼ₊½
-  Jζy_ⱼ₊½ = m.j₊½.ζy * Jⱼ₊½
-  Jζz_ⱼ₊½ = m.j₊½.ζz * Jⱼ₊½
-  Jζx_ⱼ₋½ = m.j₋½.ζx * Jⱼ₋½
-  Jζy_ⱼ₋½ = m.j₋½.ζy * Jⱼ₋½
-  Jζz_ⱼ₋½ = m.j₋½.ζz * Jⱼ₋½
+  Jᵢ₋½ = edge_metrics.i₊½.J[ᵢ₋₁]
+  Jⱼ₋½ = edge_metrics.j₊½.J[ⱼ₋₁]
+  Jₖ₋½ = edge_metrics.k₊½.J[ₖ₋₁]
 
-  Jξx_ₖ₊½ = m.k₊½.ξx * Jₖ₊½
-  Jξy_ₖ₊½ = m.k₊½.ξy * Jₖ₊½
-  Jξz_ₖ₊½ = m.k₊½.ξz * Jₖ₊½
-  Jξx_ₖ₋½ = m.k₋½.ξx * Jₖ₋½
-  Jξy_ₖ₋½ = m.k₋½.ξy * Jₖ₋½
-  Jξz_ₖ₋½ = m.k₋½.ξz * Jₖ₋½
-  Jηx_ₖ₊½ = m.k₊½.ηx * Jₖ₊½
-  Jηy_ₖ₊½ = m.k₊½.ηy * Jₖ₊½
-  Jηz_ₖ₊½ = m.k₊½.ηz * Jₖ₊½
-  Jηx_ₖ₋½ = m.k₋½.ηx * Jₖ₋½
-  Jηy_ₖ₋½ = m.k₋½.ηy * Jₖ₋½
-  Jηz_ₖ₋½ = m.k₋½.ηz * Jₖ₋½
-  Jζx_ₖ₊½ = m.k₊½.ζx * Jₖ₊½
-  Jζy_ₖ₊½ = m.k₊½.ζy * Jₖ₊½
-  Jζz_ₖ₊½ = m.k₊½.ζz * Jₖ₊½
-  Jζx_ₖ₋½ = m.k₋½.ζx * Jₖ₋½
-  Jζy_ₖ₋½ = m.k₋½.ζy * Jₖ₋½
-  Jζz_ₖ₋½ = m.k₋½.ζz * Jₖ₋½
+  Jξx_ᵢ₊½ = edge_metrics.i₊½.ξ̂.x[idx]
+  Jξy_ᵢ₊½ = edge_metrics.i₊½.ξ̂.y[idx]
+  Jξz_ᵢ₊½ = edge_metrics.i₊½.ξ̂.z[idx]
+  Jξx_ᵢ₋½ = edge_metrics.i₊½.ξ̂.x[ᵢ₋₁]
+  Jξy_ᵢ₋½ = edge_metrics.i₊½.ξ̂.y[ᵢ₋₁]
+  Jξz_ᵢ₋½ = edge_metrics.i₊½.ξ̂.z[ᵢ₋₁]
+  Jηx_ᵢ₊½ = edge_metrics.i₊½.η̂.x[idx]
+  Jηy_ᵢ₊½ = edge_metrics.i₊½.η̂.y[idx]
+  Jηz_ᵢ₊½ = edge_metrics.i₊½.η̂.z[idx]
+  Jηx_ᵢ₋½ = edge_metrics.i₊½.η̂.x[ᵢ₋₁]
+  Jηy_ᵢ₋½ = edge_metrics.i₊½.η̂.y[ᵢ₋₁]
+  Jηz_ᵢ₋½ = edge_metrics.i₊½.η̂.z[ᵢ₋₁]
+  Jζx_ᵢ₊½ = edge_metrics.i₊½.ζ̂.x[idx]
+  Jζy_ᵢ₊½ = edge_metrics.i₊½.ζ̂.y[idx]
+  Jζz_ᵢ₊½ = edge_metrics.i₊½.ζ̂.z[idx]
+  Jζx_ᵢ₋½ = edge_metrics.i₊½.ζ̂.x[ᵢ₋₁]
+  Jζy_ᵢ₋½ = edge_metrics.i₊½.ζ̂.y[ᵢ₋₁]
+  Jζz_ᵢ₋½ = edge_metrics.i₊½.ζ̂.z[ᵢ₋₁]
+
+  Jξx_ⱼ₊½ = edge_metrics.j₊½.ξ̂.x[idx]
+  Jξy_ⱼ₊½ = edge_metrics.j₊½.ξ̂.y[idx]
+  Jξz_ⱼ₊½ = edge_metrics.j₊½.ξ̂.z[idx]
+  Jξx_ⱼ₋½ = edge_metrics.j₊½.ξ̂.x[ⱼ₋₁]
+  Jξy_ⱼ₋½ = edge_metrics.j₊½.ξ̂.y[ⱼ₋₁]
+  Jξz_ⱼ₋½ = edge_metrics.j₊½.ξ̂.z[ⱼ₋₁]
+  Jηx_ⱼ₊½ = edge_metrics.j₊½.η̂.x[idx]
+  Jηy_ⱼ₊½ = edge_metrics.j₊½.η̂.y[idx]
+  Jηz_ⱼ₊½ = edge_metrics.j₊½.η̂.z[idx]
+  Jηx_ⱼ₋½ = edge_metrics.j₊½.η̂.x[ⱼ₋₁]
+  Jηy_ⱼ₋½ = edge_metrics.j₊½.η̂.y[ⱼ₋₁]
+  Jηz_ⱼ₋½ = edge_metrics.j₊½.η̂.z[ⱼ₋₁]
+  Jζx_ⱼ₊½ = edge_metrics.j₊½.ζ̂.x[idx]
+  Jζy_ⱼ₊½ = edge_metrics.j₊½.ζ̂.y[idx]
+  Jζz_ⱼ₊½ = edge_metrics.j₊½.ζ̂.z[idx]
+  Jζx_ⱼ₋½ = edge_metrics.j₊½.ζ̂.x[ⱼ₋₁]
+  Jζy_ⱼ₋½ = edge_metrics.j₊½.ζ̂.y[ⱼ₋₁]
+  Jζz_ⱼ₋½ = edge_metrics.j₊½.ζ̂.z[ⱼ₋₁]
+
+  Jξx_ₖ₊½ = edge_metrics.k₊½.ξ̂.x[idx]
+  Jξy_ₖ₊½ = edge_metrics.k₊½.ξ̂.y[idx]
+  Jξz_ₖ₊½ = edge_metrics.k₊½.ξ̂.z[idx]
+  Jξx_ₖ₋½ = edge_metrics.k₊½.ξ̂.x[ₖ₋₁]
+  Jξy_ₖ₋½ = edge_metrics.k₊½.ξ̂.y[ₖ₋₁]
+  Jξz_ₖ₋½ = edge_metrics.k₊½.ξ̂.z[ₖ₋₁]
+  Jηx_ₖ₊½ = edge_metrics.k₊½.η̂.x[idx]
+  Jηy_ₖ₊½ = edge_metrics.k₊½.η̂.y[idx]
+  Jηz_ₖ₊½ = edge_metrics.k₊½.η̂.z[idx]
+  Jηx_ₖ₋½ = edge_metrics.k₊½.η̂.x[ₖ₋₁]
+  Jηy_ₖ₋½ = edge_metrics.k₊½.η̂.y[ₖ₋₁]
+  Jηz_ₖ₋½ = edge_metrics.k₊½.η̂.z[ₖ₋₁]
+  Jζx_ₖ₊½ = edge_metrics.k₊½.ζ̂.x[idx]
+  Jζy_ₖ₊½ = edge_metrics.k₊½.ζ̂.y[idx]
+  Jζz_ₖ₊½ = edge_metrics.k₊½.ζ̂.z[idx]
+  Jζx_ₖ₋½ = edge_metrics.k₊½.ζ̂.x[ₖ₋₁]
+  Jζy_ₖ₋½ = edge_metrics.k₊½.ζ̂.y[ₖ₋₁]
+  Jζz_ₖ₋½ = edge_metrics.k₊½.ζ̂.z[ₖ₋₁]
 
   fᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2 + Jξz_ᵢ₊½^2) / Jᵢ₊½
   fᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2 + Jξz_ᵢ₋½^2) / Jᵢ₋½
@@ -202,6 +196,7 @@ These are essentially the edge diffusivity + grid metric terms
   fₖ₊½ = αₖ₊½ * (Jζx_ₖ₊½^2 + Jζy_ₖ₊½^2 + Jζz_ₖ₊½^2) / Jₖ₊½
   fₖ₋½ = αₖ₋½ * (Jζx_ₖ₋½^2 + Jζy_ₖ₋½^2 + Jζz_ₖ₋½^2) / Jₖ₋½
 
+  # TODO: these need to be verified
   gᵢ₊½ =
     αᵢ₊½ * (
       Jξx_ᵢ₊½ * Jηx_ᵢ₊½ * Jζx_ᵢ₊½ + #
