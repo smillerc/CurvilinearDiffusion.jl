@@ -182,11 +182,10 @@ io_interval = 0.01
 io_next = io_interval
 pvd = paraview_collection("full_sim")
 @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
 
 while true
   @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-    solver, T, ρ, κ, cₚ
+    solver.α, T, ρ, κ, cₚ
   )
   # dt = CurvilinearDiffusion.max_dt(solver, mesh)
   # dt = max(1e-10, min(Δt0, dt))
