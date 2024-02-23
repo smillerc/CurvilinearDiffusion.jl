@@ -126,13 +126,13 @@ end
 
 # Generate a stencil for a 1D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  u::AbstractArray{T,2},
-  source_term::AbstractArray{T,2},
+  u::AbstractArray{T,1},
+  source_term::AbstractArray{T,1},
   edge_diffusivity,
   Δτ,
   cell_center_metrics,
   edge_metrics,
-  idx::CartesianIndex{2},
+  idx,
   loc::Symbol,
 ) where {T}
 
@@ -174,7 +174,7 @@ end
   Δτ,
   cell_center_metrics,
   edge_metrics,
-  idx::CartesianIndex{2},
+  idx,
   loc::Symbol,
 ) where {T}
 
