@@ -1,7 +1,7 @@
 module CurvilinearDiffusion
 
 using UnPack
-using CartesianDomainUtils
+using CartesianDomains
 using KernelAbstractions
 
 include("implicit/ImplictSolver.jl")
