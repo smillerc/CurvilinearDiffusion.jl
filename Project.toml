@@ -6,7 +6,7 @@ version = "0.1.0-DEV"
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
 BlockHaloArrays = "8029ca6b-11ad-4a59-88a2-2e6eee4ef8a2"
-CartesianDomainUtils = "31d3d393-e656-4614-8ab7-f376885a6db2"
+CartesianDomains = "31d3d393-e656-4614-8ab7-f376885a6db2"
 CurvilinearGrids = "58b19789-dd19-4aa2-839c-c763a7b10301"
 Glob = "c27321d9-0574-5035-807b-f59d2c89b15c"
 HYPRE = "b5ffcf37-a2bd-41ab-a3da-4bd9bc8ad771"
