@@ -1,5 +1,5 @@
 
-using CartesianDomainUtils
+using CartesianDomains
 
 """
   conservative_edge_terms(edge_diffusivity::NTuple{4,T}, m) where {T}
