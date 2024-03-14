@@ -1,12 +1,24 @@
 using CurvilinearGrids, CurvilinearDiffusion
-using WriteVTK, Printf, UnPack
+using WriteVTK, Printf, UnPack, Adapt
 using BlockHaloArrays
 using TimerOutputs
-
+using KernelAbstractions
 using Glob
-rm.(glob("*.vts"))
 
-reset_timer!()
+dev = :CPU
+
+if dev === :GPU
+  @info "Using CUDA"
+  using CUDA
+  using CUDA.CUDAKernels
+  backend = CUDABackend()
+  ArrayT = CuArray
+  # CUDA.allowscalar(false)
+else
+  backend = CPU()
+  ArrayT = Array
+end
+
 # ------------------------------------------------------------
 # I/O stuff
 # ------------------------------------------------------------
@@ -64,160 +76,180 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
+function initialize_mesh()
+  function wavy_grid(nx, ny)
+    x0, x1 = (-6, 6)
+    y0, y1 = (-6, 6)
+    a0 = 0.1
 
-function wavy_grid(nx, ny)
-  x0, x1 = (-6, 6)
-  y0, y1 = (-6, 6)
-  a0 = 0.1
+    function x(i, j)
+      x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+      y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+      return x1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+    end
 
-  function x(i, j)
-    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-    return x1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+    function y(i, j)
+      x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+      y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+      return y1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+    end
+
+    return (x, y)
   end
 
-  function y(i, j)
-    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-    return y1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+  function wavy_grid2(ni, nj)
+    Lx = 12
+    Ly = 12
+    n_xy = 6
+    n_yx = 6
+
+    xmin = -Lx / 2
+    ymin = -Ly / 2
+
+    Δx0 = Lx / (ni - 1)
+    Δy0 = Ly / (nj - 1)
+
+    Ax = 0.4 / Δx0
+    Ay = 0.8 / Δy0
+    # Ax = 0.2 / Δx0
+    # Ay = 0.4 / Δy0
+
+    x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+    y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+
+    return (x, y)
   end
 
-  return (x, y)
+  function uniform_grid(nx, ny)
+    x0, x1 = (-6, 6)
+    y0, y1 = (-6, 6)
+
+    x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+    y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+
+    return (x, y)
+  end
+
+  ni, nj = (101, 101)
+  nhalo = 2
+  # x, y = wavy_grid2(ni, nj)
+  # x, y = wavy_grid(ni, nj)
+  x, y = uniform_grid(ni, nj)
+  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
-
-function wavy_grid2(ni, nj)
-  Lx = 12
-  Ly = 12
-  n_xy = 6
-  n_yx = 6
-
-  xmin = -Lx / 2
-  ymin = -Ly / 2
-
-  Δx0 = Lx / (ni - 1)
-  Δy0 = Ly / (nj - 1)
-
-  Ax = 0.4 / Δx0
-  Ay = 0.8 / Δy0
-  # Ax = 0.2 / Δx0
-  # Ay = 0.4 / Δy0
-
-  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-  return (x, y)
-end
-
-function uniform_grid(nx, ny)
-  x0, x1 = (-6, 6)
-  y0, y1 = (-6, 6)
-
-  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-  return (x, y)
-end
-
-ni, nj = (101, 101)
-nhalo = 2
-x, y = wavy_grid2(ni, nj)
-# x, y = wavy_grid(ni, nj)
-# x, y = uniform_grid(ni, nj)
-mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
-T0 = 1.0
-bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
+function init_state()
+  mesh = adapt(ArrayT, initialize_mesh())
 
-solver = ImplicitScheme(mesh, bcs)
-CFL = 100 # 1/2 is the explicit stability limit
-casename = "implicit_gauss_source"
+  T0 = 1.0
+  bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-# Temperature and density
-T_hot = 1e3
-T_cold = 1e-2
-T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
-ρ = ones(Float64, cellsize_withhalo(mesh))
-cₚ = 1.0
+  solver = ImplicitScheme(mesh, bcs; backend=backend)
+  CFL = 100 # 1/2 is the explicit stability limit
+  casename = "implicit_gauss_source"
 
-# ilo = mesh.domain_limits.cell.ilo
-# T[begin:(ilo - 1), :] .= Tbc
+  # Temperature and density
+  T_hot = 1e3
+  T_cold = 1e-2
+  T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
+  ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = similar(ρ)
+  cₚ = 1.0
 
-# Define the conductivity model
-@inline function κ(ρ, T)
-  if !isfinite(T)
-    return 0.0
-  else
-    κ0 = 1.0
-    return κ0 * T^3
+  # Define the conductivity model
+  @inline function κ(ρ, temperature, κ0=1.0)
+    if !isfinite(temperature)
+      return 0.0
+    else
+      return κ0 * temperature^3
+    end
   end
+
+  # Gaussian source term
+  fwhm = 0.5
+  x0 = 0.0
+  y0 = 0.0
+  for idx in mesh.iterators.cell.domain
+    x⃗c = centroid(mesh, idx)
+
+    source_term[idx] =
+      T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+  end
+
+  copy!(solver.source_term, source_term) # move to gpu (if need be)
+
+  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
-# Gaussian source term
-fwhm = 0.5
-x0 = 0.0
-y0 = 0.0
-@unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
-for j in jlo:jhi
-  for i in ilo:ihi
-    c_loc = centroid(mesh, (i, j))
-
-    solver.source_term[i, j] =
-      T_hot * exp(-(((x0 - c_loc.x)^2) / fwhm + ((y0 - c_loc.y)^2) / fwhm)) + T_cold
-  end
-end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
+function run()
+  solver, mesh, T, ρ, cₚ, κ = init_state()
+  global Δt0 = 1e-4
+  global Δt = 1e-4
+  global t = 0.0
+  global maxt = 0.2
+  global iter = 0
+  global maxiter = 1
+  global io_interval = 0.01
+  global io_next = io_interval
+  pvd = paraview_collection("full_sim")
+  # @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 
-Δt0 = 1e-4
-Δt = 1e-4
-t = 0.0
-maxt = 0.25
-iter = 0
-maxiter = Inf
-io_interval = 0.01
-io_next = io_interval
-pvd = paraview_collection("full_sim")
-@timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+  while true
+    @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
+      solver.α, T, ρ, κ, cₚ
+    )
+    # dt = CurvilinearDiffusion.max_dt(solver, mesh)
+    # dt = max(1e-10, min(Δt0, dt))
+    # global Δt = CFL * dt
+    # @show Δt, CFL, dt
 
-while true
-  @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-    solver.α, T, ρ, κ, cₚ
-  )
-  # dt = CurvilinearDiffusion.max_dt(solver, mesh)
-  # dt = max(1e-10, min(Δt0, dt))
-  # global Δt = CFL * dt
-  # @show Δt, CFL, dt
+    # L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
+    @timeit "solve!" CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
+    @printf "cycle: %i t: %.4e Δt: %.3e\n" iter t Δt
+    # @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
 
-  # L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-  @timeit "solve!" CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
-  @printf "cycle: %i t: %.4e Δt: %.3e\n" iter t Δt
-  # @printf "cycle: %i t: %.4e, L2: %.1e, subcycles: %i Δt: %.3e\n" iter t L₂ ncycles Δt
+    # L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
+    # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
-  # L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-  # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
+    # if t + Δt > io_next
+    #   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+    #   global io_next += io_interval
+    # end
 
-  if t + Δt > io_next
-    @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-    global io_next += io_interval
+    if iter >= maxiter - 1
+      break
+    end
+
+    if t >= maxt
+      break
+    end
+
+    global iter += 1
+    global t += Δt
   end
 
-  if iter >= maxiter - 1
-    break
-  end
+  # save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+  # vtk_save(pvd)
 
-  if t >= maxt
-    break
-  end
-
-  global iter += 1
-  global t += Δt
+  print_timer()
+  return solver, T
 end
 
-save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-vtk_save(pvd);
+begin
+  rm.(glob("*.vts"))
+  reset_timer!()
+  solver, temperature = run()
+  nothing
+end
 
-print_timer()
+T_cpu = Array(temperature)
+using Plots: heatmap
+
+heatmap(T_cpu)
+# solver, mesh, T, ρ, cₚ, κ = init_state();
