@@ -1,34 +1,25 @@
 module ImplicitSchemeType
 
-using MKL
-using LinearSolve
+using .Threads
 using CurvilinearGrids
-using Polyester, StaticArrays
-using UnPack
-using TimerOutputs
-using SparseArrays
-using StaticArrays
-using AlgebraicMultigrid
-using LinearOperators
+using ILUZero
+using KernelAbstractions
 using Krylov
 using KrylovPreconditioners
-using CUDA
-
-using KernelAbstractions
-using LinearSolve
-using ILUZero
-using IncompleteLU
 using LinearAlgebra
+using LinearOperators
+using LinearSolve
 using OffsetArrays
-using .Threads
+using SparseArrays
+using StaticArrays
+using TimerOutputs
+using UnPack
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},LP,SM,V,ST,PL,F,BC,CI1,CI2}
-  prob::LP # linear problem (contains A, b, u0, solver...)
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2}
   A::SM # sparse matrix
   x::V # solution vector
-  # u0::V
   b::V # RHS vector
   solver::ST # linear solver, e.g. GMRES, CG, etc.
   Pl::PL # preconditioner
@@ -40,7 +31,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},LP,SM,V,ST,PL,F,BC,CI1,CI2}
   conservative::Bool # uses the conservative form
   domain_indices::CI1
   halo_aware_indices::CI2
-  backend
+  backend # GPU / CPU
   warmed_up::Vector{Bool}
 end
 
@@ -75,10 +66,9 @@ function ImplicitScheme(
   conservative = form === :conservative
 
   A = init_A_matrix(mesh, backend)
-  Pl = ilu0(A)
+  Pl = preconditioner(A, backend)
 
   b = KernelAbstractions.zeros(backend, T, len)
-  # u0 = KernelAbstractions.zeros(backend, T, len) # initial guess for iterative solvers
   x = KernelAbstractions.zeros(backend, T, len)
 
   diffusivity = KernelAbstractions.zeros(backend, T, celldims)
@@ -87,13 +77,7 @@ function ImplicitScheme(
   solver = Krylov.DqgmresSolver(A, b, memory)
   # solver = Krylov.GmresSolver(A, b)
 
-  # linear_problem = init(prob, alg; alias_A=true, alias_b=true)
-  # linear_problem = init(prob, KrylovJL_GMRES(); alias_A=false, alias_b=false)
-
-  linear_problem = nothing # LinearProblem(A, b; u0=u0)
-
   implicit_solver = ImplicitScheme(
-    linear_problem,
     A,
     x,
     b,
@@ -150,10 +134,6 @@ function init_A_matrix(mesh::CurvilinearGrid2D, ::CPU)
   return A
 end
 
-function init_A_matrix(mesh::CurvilinearGrid2D, ::GPU)
-  return CUDA.CUSPARSE.CuSparseMatrixCSR(init_A_matrix(mesh, CPU()))
-end
-
 function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
   len, = cellsize(mesh)
   A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
@@ -168,7 +148,8 @@ function solve!(
   # update the A matrix
   @timeit "assemble_matrix" assemble_matrix!(scheme, mesh, u, Δt)
 
-  @timeit "ilu0!" ilu0!(scheme.Pl, scheme.A)
+  # precondition
+  @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, scheme.A)
 
   n = size(scheme.A, 1)
   precond_op = LinearOperator(
@@ -176,12 +157,12 @@ function solve!(
   )
 
   if !warmedup(scheme)
-    @timeit "dqgmres!" dqgmres!(
+    @timeit "dqgmres! (linear solve)" dqgmres!(
       scheme.solver, scheme.A, scheme.b; N=precond_op, history=true
     )
     warmedup!(scheme)
   else
-    @timeit "dqgmres!" dqgmres!(
+    @timeit "dqgmres! (linear solve)" dqgmres!(
       scheme.solver,
       scheme.A,
       scheme.b,
@@ -199,14 +180,14 @@ function solve!(
     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
   end
 
-  return resids, niter, issolved(scheme.solver), niter
+  return resids, niter, issolved(scheme.solver)
 end
 
-@inline function preconditioner(::CPU, A, τ=0.1)
-  return IncompleteLU.ilu(A; τ=τ)
+@inline function preconditioner(A, ::CPU, τ=0.1)
+  return ILUZero.ilu0(A)
 end
 
-@inline function preconditioner(::GPU, A, τ=0.1)
+@inline function preconditioner(A, ::GPU, τ=0.1)
   return KrylovPreconditioners.kp_ilu0(A)
 end
 
