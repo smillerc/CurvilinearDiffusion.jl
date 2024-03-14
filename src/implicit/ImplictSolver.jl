@@ -1,5 +1,6 @@
 module ImplicitSchemeType
 
+using MKL
 using LinearSolve
 using CurvilinearGrids
 using Polyester, StaticArrays
@@ -8,6 +9,7 @@ using TimerOutputs
 using SparseArrays
 using StaticArrays
 using AlgebraicMultigrid
+using LinearOperators
 using Krylov
 using KrylovPreconditioners
 using CUDA
@@ -22,13 +24,14 @@ using .Threads
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},LP,SM,V,ST,F,BC,CI1,CI2}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},LP,SM,V,ST,PL,F,BC,CI1,CI2}
   prob::LP # linear problem (contains A, b, u0, solver...)
   A::SM # sparse matrix
   x::V # solution vector
-  u0::V
+  # u0::V
   b::V # RHS vector
   solver::ST # linear solver, e.g. GMRES, CG, etc.
+  Pl::PL # preconditioner
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
   mean_func::F
@@ -38,6 +41,12 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},LP,SM,V,ST,F,BC,CI1,CI2}
   domain_indices::CI1
   halo_aware_indices::CI2
   backend
+  warmed_up::Vector{Bool}
+end
+
+warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
+function warmedup!(scheme::ImplicitScheme)
+  return scheme.warmed_up[1] = true
 end
 
 include("../averaging.jl")
@@ -50,7 +59,7 @@ function ImplicitScheme(
   form=:conservative,
   mean_func=arithmetic_mean,
   T=Float64,
-  solver=KrylovJL_GMRES(),
+  # solver=KrylovJL_GMRES(),
   backend=CPU(),
 )
   celldims = cellsize_withhalo(mesh)
@@ -66,22 +75,17 @@ function ImplicitScheme(
   conservative = form === :conservative
 
   A = init_A_matrix(mesh, backend)
+  Pl = ilu0(A)
 
   b = KernelAbstractions.zeros(backend, T, len)
-  u0 = KernelAbstractions.zeros(backend, T, len) # initial guess for iterative solvers
+  # u0 = KernelAbstractions.zeros(backend, T, len) # initial guess for iterative solvers
   x = KernelAbstractions.zeros(backend, T, len)
 
   diffusivity = KernelAbstractions.zeros(backend, T, celldims)
   source_term = KernelAbstractions.zeros(backend, T, celldims)
-
-  # prob = LinearProblem(A, b)
-
-  # ml = ruge_stuben(prob.A) # Construct a Ruge-Stuben solver
-  # pl = aspreconditioner(ml)
-  # alg = KrylovKitJL_GMRES
-  # alg = KrylovJL(;
-  #   KrylovAlg=Krylov.gmres!, Pl=nothing, Pr=nothing, gmres_restart=0, window=0
-  # )
+  memory = 50
+  solver = Krylov.DqgmresSolver(A, b, memory)
+  # solver = Krylov.GmresSolver(A, b)
 
   # linear_problem = init(prob, alg; alias_A=true, alias_b=true)
   # linear_problem = init(prob, KrylovJL_GMRES(); alias_A=false, alias_b=false)
@@ -92,9 +96,9 @@ function ImplicitScheme(
     linear_problem,
     A,
     x,
-    u0,
     b,
     solver,
+    Pl,
     diffusivity,
     source_term,
     mean_func,
@@ -104,6 +108,7 @@ function ImplicitScheme(
     domain_CI,
     halo_aware_CI,
     backend,
+    [false],
   )
 
   return implicit_solver
@@ -163,38 +168,38 @@ function solve!(
   # update the A matrix
   @timeit "assemble_matrix" assemble_matrix!(scheme, mesh, u, Δt)
 
-  # @timeit "solve_step" LinearSolve.solve!(scheme.prob)
+  @timeit "ilu0!" ilu0!(scheme.Pl, scheme.A)
 
-  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-  #   u[grid_idx] = scheme.prob.u[mat_idx]
-  # end
+  n = size(scheme.A, 1)
+  precond_op = LinearOperator(
+    eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
+  )
 
-  # use the current solution as a guess for the next
-  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-  #   scheme.u0[mat_idx] = u[grid_idx]
-  # end
-
-  @views begin
-    copyto!(scheme.u0[domain_LI], u[scheme.halo_aware_indices])
+  if !warmedup(scheme)
+    @timeit "dqgmres!" dqgmres!(
+      scheme.solver, scheme.A, scheme.b; N=precond_op, history=true
+    )
+    warmedup!(scheme)
+  else
+    @timeit "dqgmres!" dqgmres!(
+      scheme.solver,
+      scheme.A,
+      scheme.b,
+      scheme.solver.x; # use last step as a starting point
+      N=precond_op,
+      history=true,
+    )
   end
 
-  prob = LinearProblem(scheme.A, scheme.b; u0=scheme.u0)
-  @timeit "preconditioner" Pl = preconditioner(scheme.backend, scheme.A)
-  @timeit "solve" sol = solve(prob, KrylovJL_GMRES(); Pl=Pl)
-  # @timeit "solve_step" sol = solve(prob; Pl=LU)
+  resids = last(scheme.solver.stats.residuals)
+  niter = scheme.solver.stats.niter
 
-  # update the solution to u in-place
-  # for (grid_idx, mat_idx) in zip(scheme.halo_aware_indices, domain_LI)
-  #   u[grid_idx] = sol.u[mat_idx]
-  # end
-
+  # update u to the solution
   @views begin
-    copyto!(u[scheme.halo_aware_indices], sol.u[domain_LI])
+    copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
   end
 
-  # return sol.resid, sol.iters, true
-
-  return nothing
+  return resids, niter, issolved(scheme.solver), niter
 end
 
 @inline function preconditioner(::CPU, A, τ=0.1)
