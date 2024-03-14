@@ -4,6 +4,19 @@ using BlockHaloArrays
 using TimerOutputs
 using KernelAbstractions
 using Glob
+using LinearAlgebra
+
+@static if Sys.islinux()
+  using MKL
+elseif Sys.isapple()
+  using AppleAccelerate
+end
+
+NMAX = Sys.CPU_THREADS
+BLAS.set_num_threads(NMAX)
+BLAS.get_num_threads()
+
+@show BLAS.get_config()
 
 dev = :CPU
 
@@ -130,7 +143,7 @@ function initialize_mesh()
     return (x, y)
   end
 
-  ni, nj = (1001, 1001)
+  ni, nj = (101, 101)
   nhalo = 2
   # x, y = wavy_grid2(ni, nj)
   # x, y = wavy_grid(ni, nj)
@@ -201,6 +214,10 @@ function run()
   # @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 
   while true
+    if iter == 0
+      reset_timer!()
+    end
+
     @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
       solver.α, T, ρ, κ, cₚ
     )
@@ -209,15 +226,10 @@ function run()
     # global Δt = CFL * dt
     # @show Δt, CFL, dt
 
-    # L₂, ncycles, is_converged = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
     @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
       solver, mesh, T, Δt
     )
-    # @printf "cycle: %i t: %.4e Δt: %.3e\n" iter t Δt
     @printf "cycle: %i t: %.4e, L2: %.1e, iterations: %i Δt: %.3e\n" iter t L₂ ncycles Δt
-
-    # L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-    # @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
 
     # if t + Δt > io_next
     #   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
@@ -245,7 +257,7 @@ end
 
 begin
   rm.(glob("*.vts"))
-  reset_timer!()
+
   solver, temperature = run()
   nothing
 end
