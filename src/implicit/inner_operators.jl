@@ -19,7 +19,7 @@
 ) where {F}
   idx = @index(Global, Linear)
 
-  @inbounds begin
+  begin
     grid_idx = grid_indices[idx]
 
     i, = grid_idx.I
@@ -49,16 +49,16 @@ end
   @Const(u),
   @Const(source_term),
   @Const(Δt),
-  @Const(cell_center_metrics),
-  @Const(edge_metrics),
-  @Const(grid_indices),
-  @Const(matrix_indices),
-  @Const(mean_func::F),
-  @Const((ni, nj))
+  cell_center_metrics,
+  edge_metrics,
+  grid_indices,
+  matrix_indices,
+  mean_func::F,
+  (ni, nj),
 ) where {F}
   idx = @index(Global, Linear)
 
-  @inbounds begin
+  begin
     grid_idx = grid_indices[idx]
 
     i, j = grid_idx.I
@@ -74,17 +74,17 @@ end
     )
 
     mat_idx = matrix_indices[idx]
-    #! format: off
+    # #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
-    A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
+    A[mat_idx, mat_idx - ni] = stencil[+0, -1] # (i  , j-1)
     A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
-    A[mat_idx, mat_idx - 1]      = stencil[-1, +0] # (i-1, j  )
-    A[mat_idx, mat_idx]          = stencil[+0, +0] # (i  , j  )
-    A[mat_idx, mat_idx + 1]      = stencil[+1, +0] # (i+1, j  )
+    A[mat_idx, mat_idx - 1] = stencil[-1, +0] # (i-1, j  )
+    A[mat_idx, mat_idx] = stencil[+0, +0] # (i  , j  )
+    A[mat_idx, mat_idx + 1] = stencil[+1, +0] # (i+1, j  )
     A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] # (i-1, j+1)
-    A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
+    A[mat_idx, mat_idx + ni] = stencil[0, +1] # (i  , j+1)
     A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
-    #! format: on
+    # #! format: on
 
     b[mat_idx] = rhs
   end
