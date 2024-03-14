@@ -42,6 +42,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
     ndrange=size(inner_domain),
   )
 
+  bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4)
   # ilo
   ilo_domain = @view scheme.halo_aware_indices[begin, :]
   ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
@@ -58,7 +59,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
     ilo_matrix_indices,
     scheme.mean_func,
     (ni, nj),
-    :ilo;
+    bc_locs.ilo;
     ndrange=size(ilo_domain),
   )
 
@@ -78,7 +79,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
     ihi_matrix_indices,
     scheme.mean_func,
     (ni, nj),
-    :ihi;
+    bc_locs.ihi;
     ndrange=size(ihi_domain),
   )
 
@@ -98,7 +99,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
     jlo_matrix_indices,
     scheme.mean_func,
     (ni, nj),
-    :jlo;
+    bc_locs.jlo;
     ndrange=size(jlo_domain),
   )
 
@@ -118,7 +119,7 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
     jhi_matrix_indices,
     scheme.mean_func,
     (ni, nj),
-    :jhi;
+    bc_locs.jhi;
     ndrange=size(jhi_domain),
   )
 

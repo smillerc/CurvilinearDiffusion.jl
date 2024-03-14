@@ -20,7 +20,7 @@
 ) where {F}
   idx = @index(Global, Linear)
 
-  @inbounds begin
+  begin
     grid_idx = grid_indices[idx]
     mat_idx = matrix_indices[idx]
 
@@ -57,23 +57,23 @@ end
 @kernel function boundary_diffusion_op_kernel_2d!(
   A,
   b,
-  @Const(α),
-  @Const(u),
-  @Const(source_term),
-  @Const(Δt),
-  @Const(cell_center_metrics),
-  @Const(edge_metrics),
-  @Const(grid_indices),
-  @Const(matrix_indices),
-  @Const(mean_func::F),
-  @Const((ni, nj)),
-  @Const(loc::Symbol)
+  α,
+  u,
+  source_term,
+  Δt,
+  cell_center_metrics,
+  edge_metrics,
+  grid_indices,
+  matrix_indices,
+  mean_func::F,
+  (ni, nj),
+  loc::Int,
 ) where {F}
   idx = @index(Global, Linear)
 
   len = ni * nj
 
-  @inbounds begin
+  begin
     grid_idx = grid_indices[idx]
     mat_idx = matrix_indices[idx]
 
@@ -95,13 +95,13 @@ end
     jp1 = true
     im1 = true
     jm1 = true
-    if loc === :ilo
+    if loc == 1 # :ilo
       im1 = false
-    elseif loc === :ihi
+    elseif loc == 2 # :ihi
       ip1 = false
-    elseif loc === :jlo
+    elseif loc == 3 # :jlo
       jm1 = false
-    elseif loc === :jhi
+    elseif loc == 4 # :jhi
       jp1 = false
     end
 
@@ -133,7 +133,7 @@ end
   cell_center_metrics,
   edge_metrics,
   idx,
-  loc::Symbol,
+  loc,
 ) where {T}
 
   #
@@ -143,9 +143,9 @@ end
 
   @unpack fᵢ₊½, fᵢ₋½ = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
 
-  if loc === :ilo
+  if loc == 1 # :ilo
     fᵢ₋½ = zero(T)
-  elseif loc === :ihi
+  elseif loc == 2 # :ihi
     fᵢ₊½ = zero(T)
   end
 
@@ -175,7 +175,7 @@ end
   cell_center_metrics,
   edge_metrics,
   idx,
-  loc::Symbol,
+  loc,
 ) where {T}
 
   #
@@ -188,16 +188,16 @@ end
   )
 
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-  if loc === :ilo
+  if loc == 1 # :ilo
     fᵢ₋½ = zero(T)
     gᵢ₋½ = zero(T)
-  elseif loc === :ihi
+  elseif loc == 2 # :ihi
     fᵢ₊½ = zero(T)
     gᵢ₊½ = zero(T)
-  elseif loc === :jlo
+  elseif loc == 3 # :jlo
     fⱼ₋½ = zero(T)
     gⱼ₋½ = zero(T)
-  elseif loc === :jhi
+  elseif loc == 4 # :jhi
     fⱼ₊½ = zero(T)
     gⱼ₊½ = zero(T)
   end
