@@ -144,7 +144,7 @@ function initialize_mesh()
   end
 
   ni, nj = (101, 101)
-  nhalo = 2
+  nhalo = 6
   # x, y = wavy_grid2(ni, nj)
   # x, y = wavy_grid(ni, nj)
   x, y = uniform_grid(ni, nj)

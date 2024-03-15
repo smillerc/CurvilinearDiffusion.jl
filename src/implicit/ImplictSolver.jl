@@ -141,7 +141,7 @@ function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
 end
 
 function solve!(
-  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt; maxiter=Inf
+  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt; maxiter=500
 )
   domain_LI = LinearIndices(scheme.domain_indices)
 
@@ -155,6 +155,9 @@ function solve!(
   precond_op = LinearOperator(
     eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
   )
+
+  @show extrema(scheme.b)
+  @show extrema(scheme.A)
 
   if !warmedup(scheme)
     @timeit "dqgmres! (linear solve)" dqgmres!(

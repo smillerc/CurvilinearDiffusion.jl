@@ -43,85 +43,85 @@ function assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
   )
 
   bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4)
-  # ilo
-  ilo_domain = @view scheme.halo_aware_indices[begin, :]
-  ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    scheme.A,
-    scheme.b,
-    scheme.α,
-    u,
-    scheme.source_term,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    ilo_domain,
-    ilo_matrix_indices,
-    scheme.mean_func,
-    (ni, nj),
-    bc_locs.ilo;
-    ndrange=size(ilo_domain),
-  )
+  # # ilo
+  # ilo_domain = @view scheme.halo_aware_indices[begin, :]
+  # ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
+  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+  #   scheme.A,
+  #   scheme.b,
+  #   scheme.α,
+  #   u,
+  #   scheme.source_term,
+  #   Δt,
+  #   mesh.cell_center_metrics,
+  #   mesh.edge_metrics,
+  #   ilo_domain,
+  #   ilo_matrix_indices,
+  #   scheme.mean_func,
+  #   (ni, nj),
+  #   bc_locs.ilo;
+  #   ndrange=size(ilo_domain),
+  # )
 
-  # ihi
-  ihi_domain = @view scheme.halo_aware_indices[end, :]
-  ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    scheme.A,
-    scheme.b,
-    scheme.α,
-    u,
-    scheme.source_term,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    ihi_domain,
-    ihi_matrix_indices,
-    scheme.mean_func,
-    (ni, nj),
-    bc_locs.ihi;
-    ndrange=size(ihi_domain),
-  )
+  # # ihi
+  # ihi_domain = @view scheme.halo_aware_indices[end, :]
+  # ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
+  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+  #   scheme.A,
+  #   scheme.b,
+  #   scheme.α,
+  #   u,
+  #   scheme.source_term,
+  #   Δt,
+  #   mesh.cell_center_metrics,
+  #   mesh.edge_metrics,
+  #   ihi_domain,
+  #   ihi_matrix_indices,
+  #   scheme.mean_func,
+  #   (ni, nj),
+  #   bc_locs.ihi;
+  #   ndrange=size(ihi_domain),
+  # )
 
-  # jlo
-  jlo_domain = @view scheme.halo_aware_indices[:, begin]
-  jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    scheme.A,
-    scheme.b,
-    scheme.α,
-    u,
-    scheme.source_term,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    jlo_domain,
-    jlo_matrix_indices,
-    scheme.mean_func,
-    (ni, nj),
-    bc_locs.jlo;
-    ndrange=size(jlo_domain),
-  )
+  # # jlo
+  # jlo_domain = @view scheme.halo_aware_indices[:, begin]
+  # jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
+  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+  #   scheme.A,
+  #   scheme.b,
+  #   scheme.α,
+  #   u,
+  #   scheme.source_term,
+  #   Δt,
+  #   mesh.cell_center_metrics,
+  #   mesh.edge_metrics,
+  #   jlo_domain,
+  #   jlo_matrix_indices,
+  #   scheme.mean_func,
+  #   (ni, nj),
+  #   bc_locs.jlo;
+  #   ndrange=size(jlo_domain),
+  # )
 
-  # jhi
-  jhi_domain = @view scheme.halo_aware_indices[:, end]
-  jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    scheme.A,
-    scheme.b,
-    scheme.α,
-    u,
-    scheme.source_term,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    jhi_domain,
-    jhi_matrix_indices,
-    scheme.mean_func,
-    (ni, nj),
-    bc_locs.jhi;
-    ndrange=size(jhi_domain),
-  )
+  # # jhi
+  # jhi_domain = @view scheme.halo_aware_indices[:, end]
+  # jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
+  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+  #   scheme.A,
+  #   scheme.b,
+  #   scheme.α,
+  #   u,
+  #   scheme.source_term,
+  #   Δt,
+  #   mesh.cell_center_metrics,
+  #   mesh.edge_metrics,
+  #   jhi_domain,
+  #   jhi_matrix_indices,
+  #   scheme.mean_func,
+  #   (ni, nj),
+  #   bc_locs.jhi;
+  #   ndrange=size(jhi_domain),
+  # )
 
   KernelAbstractions.synchronize(backend)
 

@@ -73,6 +73,10 @@ end
       u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx
     )
 
+    if any(isnan.(stencil)) || any(isnan.(rhs))
+      @show stencil, rhs
+      error("NaNs in the stencil or rhs")
+    end
     mat_idx = matrix_indices[idx]
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
