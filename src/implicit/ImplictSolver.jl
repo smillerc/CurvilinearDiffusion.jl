@@ -14,6 +14,7 @@ using SparseArrays
 using StaticArrays
 using TimerOutputs
 using UnPack
+using Printf
 
 export ImplicitScheme, solve!, assemble_matrix!
 
@@ -141,7 +142,12 @@ function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
 end
 
 function solve!(
-  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt; maxiter=500
+  scheme::ImplicitScheme,
+  mesh::CurvilinearGrids.AbstractCurvilinearGrid,
+  u,
+  Δt;
+  maxiter=500,
+  show_hist=true,
 )
   domain_LI = LinearIndices(scheme.domain_indices)
 
@@ -155,9 +161,6 @@ function solve!(
   precond_op = LinearOperator(
     eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
   )
-
-  @show extrema(scheme.b)
-  @show extrema(scheme.A)
 
   if !warmedup(scheme)
     @timeit "dqgmres! (linear solve)" dqgmres!(
@@ -183,7 +186,11 @@ function solve!(
   @views begin
     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
   end
-  @show resids, niter, issolved(scheme.solver)
+
+  # if show_hist
+  #   @printf "Convergence: %.1e, iterations: %i Δt: %.3e\n" resids niter Δt
+  # end
+
   return resids, niter, issolved(scheme.solver)
 end
 

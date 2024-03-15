@@ -200,6 +200,8 @@ end
   elseif loc == 4 # :jhi
     fⱼ₊½ = zero(T)
     gⱼ₊½ = zero(T)
+  else
+    error("bad boundary location")
   end
 
   A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
@@ -218,6 +220,24 @@ end
   #------------------------------------------------------------------------------
 
   stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
+
+  # if any(isnan.(stencil))
+  #   @show idx
+  #   @show edge_diffusivity
+  #   @show stencil
+  #   @show Jᵢⱼ sᵢⱼ uᵢⱼ
+  #   @show fᵢ₊½ fᵢ₋½ fⱼ₊½ fⱼ₋½ gᵢ₊½ gᵢ₋½ gⱼ₊½ gⱼ₋½
+
+  #   idim, jdim = (1, 2)
+  #   ᵢ₋₁ = shift(idx, idim, -1)
+  #   ⱼ₋₁ = shift(idx, jdim, -1)
+
+  #   @show edge_metrics.i₊½.η̂[idx]
+  #   @show edge_metrics.i₊½.η̂[ⱼ₋₁]
+  #   @show edge_metrics.i₊½.ξ̂[idx]
+  #   @show edge_metrics.i₊½.ξ̂[ᵢ₋₁]
+  #   error("done")
+  # end
 
   # use an offset so we can index via [+1, -1] for (i+1, j-1)
   offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
