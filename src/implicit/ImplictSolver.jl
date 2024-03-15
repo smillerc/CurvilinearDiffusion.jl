@@ -141,7 +141,7 @@ function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
 end
 
 function solve!(
-  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt
+  scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt; maxiter=Inf
 )
   domain_LI = LinearIndices(scheme.domain_indices)
 
@@ -158,7 +158,7 @@ function solve!(
 
   if !warmedup(scheme)
     @timeit "dqgmres! (linear solve)" dqgmres!(
-      scheme.solver, scheme.A, scheme.b; N=precond_op, history=true
+      scheme.solver, scheme.A, scheme.b; N=precond_op, history=true, itmax=maxiter
     )
     warmedup!(scheme)
   else
@@ -168,6 +168,7 @@ function solve!(
       scheme.b,
       scheme.solver.x; # use last step as a starting point
       N=precond_op,
+      itmax=maxiter,
       history=true,
     )
   end
@@ -179,7 +180,7 @@ function solve!(
   @views begin
     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
   end
-
+  @show resids, niter, issolved(scheme.solver)
   return resids, niter, issolved(scheme.solver)
 end
 
