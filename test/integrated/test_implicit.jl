@@ -54,7 +54,7 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
   block = zeros(Int, size(dens))
-
+  q = @views solver.source_term[ilo:ihi, jlo:jhi]
   kappa = α .* dens
 
   # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
@@ -73,6 +73,7 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
     # vtk["diffusivity"] = α
     vtk["conductivity"] = kappa
     vtk["block"] = block
+    vtk["source_term"] = q
 
     # vtk["xi_xim1"] = ξxim1
     # vtk["xi_xip1"] = ξxip1
@@ -146,7 +147,6 @@ function initialize_mesh()
   ni, nj = (101, 101)
   nhalo = 6
   # x, y = wavy_grid2(ni, nj)
-  # x, y = wavy_grid(ni, nj)
   x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
@@ -162,7 +162,6 @@ function init_state()
 
   solver = ImplicitScheme(mesh, bcs; backend=backend)
   CFL = 100 # 1/2 is the explicit stability limit
-  casename = "implicit_gauss_source"
 
   # Temperature and density
   T_hot = 1e3
@@ -207,11 +206,11 @@ function run()
   global t = 0.0
   global maxt = 0.2
   global iter = 0
-  global maxiter = 50
+  global maxiter = Inf
   global io_interval = 0.01
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
-  # @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+  @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 
   while true
     if iter == 0
@@ -231,10 +230,10 @@ function run()
     )
     @printf "cycle: %i t: %.4e, L2: %.1e, iterations: %i Δt: %.3e\n" iter t L₂ ncycles Δt
 
-    # if t + Δt > io_next
-    #   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-    #   global io_next += io_interval
-    # end
+    if t + Δt > io_next
+      @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+      global io_next += io_interval
+    end
 
     if iter >= maxiter - 1
       break
@@ -256,14 +255,16 @@ function run()
 end
 
 begin
+  cd(@__DIR__)
+  const casename = "implicit_gauss_source"
   rm.(glob("*.vts"))
 
   solver, temperature = run()
   nothing
 end
 
-T_cpu = Array(temperature)
-using Plots: heatmap
+# T_cpu = Array(temperature)
+# using Plots: heatmap
 
-heatmap(T_cpu)
+# heatmap(T_cpu)
 # solver, mesh, T, ρ, cₚ, κ = init_state();
