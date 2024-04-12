@@ -24,7 +24,7 @@
 
     i, = grid_idx.I
     edge_diffusivity = (
-      αᵢ₊½=mean_func(α[i, j], α[i + 1]), αᵢ₋½=mean_func(α[i, j], α[i - 1])
+      αᵢ₊½=mean_func(α[i, j], α[i+1]), αᵢ₋½=mean_func(α[i, j], α[i-1])
     )
 
     stencil, rhs = _inner_diffusion_operator(
@@ -63,10 +63,10 @@ end
 
     i, j = grid_idx.I
     edge_diffusivity = (
-      αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
-      αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
-      αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
-      αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
+      αᵢ₊½=mean_func(α[i, j], α[i+1, j]),
+      αᵢ₋½=mean_func(α[i, j], α[i-1, j]),
+      αⱼ₊½=mean_func(α[i, j], α[i, j+1]),
+      αⱼ₋½=mean_func(α[i, j], α[i, j-1]),
     )
 
     stencil, rhs = _inner_diffusion_operator(
