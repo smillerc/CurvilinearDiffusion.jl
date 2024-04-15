@@ -1,3 +1,7 @@
+using UnPack
+using StaticArrays
+using OffsetArrays
+
 function inner_op_1d(
   metric_terms, diffusivity, uⁿᵢ::T, Δt::T, s::T, meanfunc::F
 ) where {T,F<:Function}
@@ -22,7 +26,9 @@ function inner_op_1d(
   return OffsetVector(stencil, -1:1), rhs
 end
 
-function inner_op_2d(metric_terms, uⁿᵢⱼ::T, Δt::T, s::T, meanfunc::F) where {T,F<:Function}
+function inner_op_2d(
+  metric_terms, diffusivity, uⁿᵢⱼ::T, Δt::T, s::T, meanfunc::F
+) where {T,F<:Function}
   @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
   @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁ = diffusivity
 
@@ -58,8 +64,10 @@ function inner_op_2d(metric_terms, uⁿᵢⱼ::T, Δt::T, s::T, meanfunc::F) whe
   return OffsetMatrix(stencil, (-1:1, -1:1)), rhs
 end
 
-function inner_op_3d(metric_terms, uⁿᵢⱼ, Δt, s)
-  @unpack α, β, f_ξ, f_η, f_ξη, f_ηζ, f_ξζ = metric_terms
+function inner_op_3d(
+  metric_terms, diffusivity, uⁿᵢⱼₖ::T, Δt::T, s::T, meanfunc::F
+) where {T,F<:Function}
+  @unpack α, β, f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ = metric_terms
   @unpack aᵢⱼₖ, aᵢ₊₁ⱼₖ, aᵢ₋₁ⱼₖ, aᵢⱼ₊₁ₖ, aᵢⱼ₋₁ₖ, aᵢⱼₖ₊₁, aᵢⱼₖ₋₁ = diffusivity
 
   inv_dt = inv(Δt)
@@ -68,10 +76,10 @@ function inner_op_3d(metric_terms, uⁿᵢⱼ, Δt, s)
   aᵢ₋½ = meanfunc(aᵢⱼₖ, aᵢ₋₁ⱼₖ)
   aⱼ₊½ = meanfunc(aᵢⱼₖ, aᵢⱼ₊₁ₖ)
   aⱼ₋½ = meanfunc(aᵢⱼₖ, aᵢⱼ₋₁ₖ)
-  aₖ₊½ = meanfunc(aᵢⱼₖ, aᵢₖ₊₁)
-  aₖ₋½ = meanfunc(aᵢⱼₖ, aᵢₖ₋₁)
+  aₖ₊½ = meanfunc(aᵢⱼₖ, aᵢⱼₖ₊₁)
+  aₖ₋½ = meanfunc(aᵢⱼₖ, aᵢⱼₖ₋₁)
 
-  rhs = s + uⁿᵢⱼ * inv_dt
+  rhs = s + uⁿᵢⱼₖ * inv_dt
 
   stencil = SArray{Tuple{3,3,3},T}(
     0,                             # uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ₋₁ 
