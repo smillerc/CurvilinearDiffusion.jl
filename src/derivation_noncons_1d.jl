@@ -13,10 +13,10 @@ using LinearAlgebra
 # ╔═╡ 26c1f261-6587-4f3b-bfff-29747e410a6f
 using Latexify
 
-# ╔═╡ aaff6e33-8b52-415f-82f7-74bf03ef09c9
+# ╔═╡ 90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 html"""<style>
 main {
-    max-width: 1200px;
+    max-width: 900px;
 }
 """
 
@@ -24,87 +24,97 @@ main {
 @variables ξ η ζ
 
 # ╔═╡ d35f9309-6543-4707-a1ad-80d3274103d1
-@variables ξ_x ξ_y ξ_z η_x η_y η_z ζ_x ζ_y ζ_z a J u
-
-# ╔═╡ 4772212d-f193-40a5-a4ee-e97464f348e5
-@variables ∂u∂ξx ∂u∂ξy ∂u∂ξz ∂u∂ηx ∂u∂ηy ∂u∂ηz ∂u∂ζx ∂u∂ζy ∂u∂ζz
-
-# ╔═╡ 455ffa44-6fcd-4d78-a2f8-2f543153ec16
-@variables 	ξ̂_x ξ̂_y ξ̂_z η̂_x η̂_y η̂_z	ζ̂_x ζ̂_y ζ̂_z
-
-# ╔═╡ c7aacb80-6bbb-46f3-b16a-fd9d6b1fe857
-J3d = [
-	ξ_x ξ_y ξ_z 
-	η_x η_y η_z 
-	ζ_x ζ_y ζ_z
-]
-
-# ╔═╡ f4f42701-dd1a-4d24-bf78-90c85a0bda88
-J2d = [
-	ξ_x ξ_y
-	η_x η_y
-]
-
-# ╔═╡ 72d48b89-8239-413c-8015-4a7401963e7b
-Ja3d = [
-	ξ̂_x ξ̂_y ξ̂_z 
-	η̂_x η̂_y η̂_z	
-	ζ̂_x ζ̂_y ζ̂_z
-]
-
-# ╔═╡ b8d42b3c-f152-4400-b83c-f555960e01d7
-Ja_2d = [
-	ξ̂_x ξ̂_y
-	η̂_x η̂_y
-]
+@variables ξ_x ξ_y ξ_z η_x η_y a J u s
 
 # ╔═╡ 11a118ad-43d5-4bd9-b6dd-35d1181cc92a
 D = [
 	Differential(ξ)
-	Differential(η)
-	Differential(ζ)
 ]
 
-# ╔═╡ 82ec6781-85f4-4b6f-9ff9-07c041e44cbe
-begin
-	a2d = eachrow(J2d)
-	a3d = eachrow(J3d)
+# ╔═╡ 4b53b847-46e1-4805-8e33-7d86aee86935
+J⁻¹ = [
+	ξ_x
+]
 
-	Ja2d = eachrow(Ja_2d)
-end
-
-# ╔═╡ 6ccc5e5d-8f38-428d-8c3d-ac9ce24e9b19
-md"""
-Build the RHS of the 2D/3D diffusion equation. Note, there is a 1/J term that should be included, but the LHS includes a J term. These cancel each other out!
-
-I use the ξ̂ terms to signify the Jξ terms that Huang and Russell have in their book. This doesn't lend itself nicely to cancellation however, so keep the Jξ syntax in the derivation...
-"""
+# ╔═╡ 00044dca-056c-4c0e-a49d-924e9591b552
+a1d = eachrow(J⁻¹)
 
 # ╔═╡ 403d1615-aa9e-4b2b-af0f-cb52e858e881
 begin
-	diffusion2d = 0 #Symbolics.Num
-	for j in 1:2
-		for i in 1:2
-			diffusion2d += D[i](
-				a * J * a2d[i] ⋅ a2d[j] *  D[j](u)
-			)
+	function diff1deq()
+		term1 = 0
+		for j in 1:1
+			for i in 1:1
+				term1 += a1d[i] ⋅ a1d[j] * D[i](a * D[j](u))
+			end
 		end
+
+		term2 = 0
+		
+		for i in 1:1
+			term3 = 0
+			for j in 1:1
+				term3 += a1d[j] ⋅ D[j].(a1d[i])
+			end
+			term2 += term3 * D[i](u)
+		end
+		term2 *= a
+		
+		diffusion = term1 + term2
 	end
-	diffusion2d 
+	diff1d = diff1deq()
 end
 
-# ╔═╡ b456d95f-ff23-4cae-98ef-f08b70a60310
-begin
-	diffusion3d = 0 #Symbolics.Num
-	for j in 1:3
-		for i in 1:3
-			diffusion3d += D[i](
-				a * J * a3d[i] ⋅ a3d[j] *  D[j](u)
-			)
-			# diffusion += α * Ja[i] ⋅ a[j] * D[j](u)
-		end
-	end
-	diffusion3d # |> latexify  |> print
+# ╔═╡ 61da9e46-2bbc-44c9-88a5-b553c9f96ca1
+simplify(diff1d, expand=true) |> latexify |> println
+
+# ╔═╡ 788c2865-05e3-4e02-bc72-8a55aab9fcc8
+@variables aᵢ₊½ aᵢ₋½ α
+
+# ╔═╡ 5a542599-21ab-4409-9f32-73b44a31248f
+@variables f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ
+
+# ╔═╡ d33cf295-0179-4ea9-8dd2-4663032b0a6b
+@variables  begin
+    uᵢ
+	uᵢ₊₁
+	uᵢ₋₁
+end
+
+# ╔═╡ ff10c7a4-1689-476b-92dd-f819fe750059
+@variables  begin
+    aᵢ
+    aᵢ₊₁
+    aᵢ₋₁
+	Δt
+end
+
+# ╔═╡ d8fb476f-4881-42ca-aac9-d98c1f392d12
+RHS = (
+	    f_ξ² * (aᵢ₊½ * (uᵢ₊₁ - uᵢ) - aᵢ₋½ * (uᵢ - uᵢ₋₁)) +
+    	aᵢ * α / 2 * (uᵢ₊₁ - uᵢ₋₁) + s
+  	) 
+
+# ╔═╡ 2ec9da95-eadd-470a-ac24-5fa693b53f79
+uⁿ⁺¹ = Δt * (RHS)
+
+# ╔═╡ 6c783ade-1419-4997-91d3-7a0d138c32f4
+A_coeff = uᵢ - Δt * RHS
+
+# ╔═╡ 2f7c7ef5-d03a-4598-b3d6-f6855d6d14fd
+b = uᵢ + Δt * s
+
+# ╔═╡ 98daf0da-5811-4a2f-adf6-936bcd8b0850
+vars = [
+  uᵢ,
+  uᵢ₊₁,
+  uᵢ₋₁,
+]
+
+# ╔═╡ 6ff5aa23-1478-4b8a-9482-9d4a2e12ce10
+for v in vars
+  c = Symbolics.coeff(simplify(A_coeff; expand=true), v)
+  println("$v = $c")
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -964,22 +974,26 @@ version = "17.4.0+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═aaff6e33-8b52-415f-82f7-74bf03ef09c9
+# ╠═90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 # ╠═6ad7bf8e-f75f-11ee-0dec-efdffaa6e329
 # ╠═646847cf-b467-4f69-b843-b38181a9d91e
 # ╠═26c1f261-6587-4f3b-bfff-29747e410a6f
 # ╠═9f4c2ce5-75ae-4652-96d5-a50b8e9c8197
 # ╠═d35f9309-6543-4707-a1ad-80d3274103d1
-# ╠═4772212d-f193-40a5-a4ee-e97464f348e5
-# ╠═455ffa44-6fcd-4d78-a2f8-2f543153ec16
-# ╠═c7aacb80-6bbb-46f3-b16a-fd9d6b1fe857
-# ╠═f4f42701-dd1a-4d24-bf78-90c85a0bda88
-# ╠═72d48b89-8239-413c-8015-4a7401963e7b
-# ╠═b8d42b3c-f152-4400-b83c-f555960e01d7
 # ╠═11a118ad-43d5-4bd9-b6dd-35d1181cc92a
-# ╠═82ec6781-85f4-4b6f-9ff9-07c041e44cbe
-# ╠═6ccc5e5d-8f38-428d-8c3d-ac9ce24e9b19
+# ╠═4b53b847-46e1-4805-8e33-7d86aee86935
+# ╠═00044dca-056c-4c0e-a49d-924e9591b552
 # ╠═403d1615-aa9e-4b2b-af0f-cb52e858e881
-# ╠═b456d95f-ff23-4cae-98ef-f08b70a60310
+# ╠═61da9e46-2bbc-44c9-88a5-b553c9f96ca1
+# ╠═788c2865-05e3-4e02-bc72-8a55aab9fcc8
+# ╠═5a542599-21ab-4409-9f32-73b44a31248f
+# ╠═d33cf295-0179-4ea9-8dd2-4663032b0a6b
+# ╠═ff10c7a4-1689-476b-92dd-f819fe750059
+# ╠═d8fb476f-4881-42ca-aac9-d98c1f392d12
+# ╠═2ec9da95-eadd-470a-ac24-5fa693b53f79
+# ╠═6c783ade-1419-4997-91d3-7a0d138c32f4
+# ╠═2f7c7ef5-d03a-4598-b3d6-f6855d6d14fd
+# ╟─98daf0da-5811-4a2f-adf6-936bcd8b0850
+# ╠═6ff5aa23-1478-4b8a-9482-9d4a2e12ce10
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002

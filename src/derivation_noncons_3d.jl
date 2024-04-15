@@ -13,11 +13,18 @@ using LinearAlgebra
 # ╔═╡ 26c1f261-6587-4f3b-bfff-29747e410a6f
 using Latexify
 
+# ╔═╡ 90b35e26-c0c0-45f1-82a3-858fe4f38c8f
+html"""<style>
+main {
+    max-width: 1800px;
+}
+"""
+
 # ╔═╡ 9f4c2ce5-75ae-4652-96d5-a50b8e9c8197
 @variables ξ η ζ
 
 # ╔═╡ d35f9309-6543-4707-a1ad-80d3274103d1
-@variables ξ_x ξ_y ξ_z η_x η_y η_z ζ_x ζ_y ζ_z a J u
+@variables ξ_x ξ_y ξ_z η_x η_y η_z ζ_x ζ_y ζ_z a J u s
 
 # ╔═╡ 11a118ad-43d5-4bd9-b6dd-35d1181cc92a
 D = [
@@ -26,35 +33,205 @@ D = [
 	Differential(ζ)
 ]
 
-# ╔═╡ 403d1615-aa9e-4b2b-af0f-cb52e858e881
+# ╔═╡ 99f26e1e-f676-4e4c-bcb9-96de69a907b8
+J⁻¹3d = [
+	ξ_x ξ_y ξ_z
+	η_x η_y η_z
+	ζ_x ζ_y ζ_z
+]
+
+# ╔═╡ 4b53b847-46e1-4805-8e33-7d86aee86935
+J⁻¹2d = [
+	ξ_x ξ_y
+	η_x η_y
+]
+
+# ╔═╡ 00044dca-056c-4c0e-a49d-924e9591b552
 begin
-	function f1()
-		diffusion2d = 0 #Symbolics.Num
-		for j in 1:2
-			for i in 1:2
-				diffusion2d += D[i](
-					a * J * a2d[i] ⋅ a2d[j] *  D[j](u)
-				)
-			end
-		end
-		diffusion2d 
-	end
-	f1()
+	a2d = eachrow(J⁻¹2d)
+	a3d = eachrow(J⁻¹3d)
 end
 
-# ╔═╡ b456d95f-ff23-4cae-98ef-f08b70a60310
+# ╔═╡ d2a5d698-a0b7-4113-8eec-d1ba9e0aaea2
 begin
-	diffusion3d = 0 #Symbolics.Num
-	for j in 1:3
-		for i in 1:3
-			diffusion3d += D[i](
-				a * J * a3d[i] ⋅ a3d[j] *  D[j](u)
-			)
-			# diffusion += α * Ja[i] ⋅ a[j] * D[j](u)
+	function diff3deq()
+		term1 = 0
+		for j in 1:3
+			for i in 1:3
+				term1 += a3d[i] ⋅ a3d[j] * D[i](a * D[j](u))
+			end
 		end
+
+		term2 = 0
+		
+		for i in 1:3
+			term3 = 0
+			for j in 1:3
+				term3 += a3d[j] ⋅ D[j].(a3d[i])
+			end
+			term2 += term3 * D[i](u)
+		end
+		term2 *= a
+		
+		return term1 + term2
 	end
-	diffusion3d # |> latexify  |> print
+	diff3d = diff3deq() |> simplify #|> latexify |> println
+
 end
+
+# ╔═╡ 403d1615-aa9e-4b2b-af0f-cb52e858e881
+begin
+	function diff2deq()
+		term1 = 0
+		for j in 1:2
+			for i in 1:2
+				term1 += a2d[i] ⋅ a2d[j] * D[i](a * D[j](u))
+			end
+		end
+
+		term2 = 0
+		
+		for i in 1:2
+			term3 = 0
+			for j in 1:2
+				term3 += a2d[j] ⋅ D[j].(a2d[i])
+			end
+			term2 += term3 * D[i](u)
+		end
+		term2 *= a
+		
+		diffusion2d = term1 + term2
+	end
+	diff2d = diff2deq()
+end
+
+# ╔═╡ 61da9e46-2bbc-44c9-88a5-b553c9f96ca1
+diff2d |> simplify
+
+# ╔═╡ 788c2865-05e3-4e02-bc72-8a55aab9fcc8
+@variables aᵢ₊½ aᵢ₋½ aⱼ₊½ aⱼ₋½ aₖ₊½ aₖ₋½ α β γ
+
+# ╔═╡ 5a542599-21ab-4409-9f32-73b44a31248f
+@variables f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ
+
+# ╔═╡ d33cf295-0179-4ea9-8dd2-4663032b0a6b
+@variables  begin
+    uᵢⱼₖ
+	uᵢ₊₁ⱼ₊₁ₖ
+	uᵢ₊₁ⱼ₊₁ₖ₊₁
+	uᵢ₊₁ⱼ₊₁ₖ₋₁
+	uᵢ₊₁ⱼ₋₁ₖ
+	uᵢ₊₁ⱼ₋₁ₖ₊₁
+	uᵢ₊₁ⱼ₋₁ₖ₋₁
+	uᵢ₊₁ⱼₖ
+	uᵢ₊₁ⱼₖ₊₁
+	uᵢ₊₁ⱼₖ₋₁
+	uᵢ₋₁ⱼ₊₁ₖ
+	uᵢ₋₁ⱼ₊₁ₖ₊₁
+	uᵢ₋₁ⱼ₊₁ₖ₋₁
+	uᵢ₋₁ⱼ₋₁ₖ
+	uᵢ₋₁ⱼ₋₁ₖ₊₁
+	uᵢ₋₁ⱼ₋₁ₖ₋₁
+	uᵢ₋₁ⱼₖ
+	uᵢ₋₁ⱼₖ₊₁
+	uᵢ₋₁ⱼₖ₋₁
+	uᵢⱼ₊₁ₖ
+	uᵢⱼ₊₁ₖ₊₁
+	uᵢⱼ₊₁ₖ₋₁
+	uᵢⱼ₋₁ₖ
+	uᵢⱼ₋₁ₖ₊₁
+	uᵢⱼ₋₁ₖ₋₁
+	uᵢⱼₖ₊₁
+	uᵢⱼₖ₋₁
+
+end
+
+# ╔═╡ ff10c7a4-1689-476b-92dd-f819fe750059
+@variables  begin
+    aᵢⱼₖ
+    aᵢ₊₁ⱼₖ
+    aᵢⱼ₊₁ₖ
+    aᵢⱼₖ₊₁
+    aᵢ₋₁ⱼₖ
+    aᵢⱼ₋₁ₖ
+    aᵢⱼₖ₋₁
+	Δt
+
+end
+
+# ╔═╡ 86a21176-6599-4bfb-a18e-9c9e8cd885f9
+# (uⁿ⁺¹ - uⁿ) / Δt = f(uⁿ⁺¹,....) 
+
+# ╔═╡ d8fb476f-4881-42ca-aac9-d98c1f392d12
+uⁿ = uᵢⱼₖ -
+	Δt * (
+	    f_ξ² * (aᵢ₊½ * (uᵢ₊₁ⱼₖ - uᵢⱼₖ) - aᵢ₋½ * (uᵢⱼₖ - uᵢ₋₁ⱼₖ)) +
+	    f_η² * (aⱼ₊½ * (uᵢⱼ₊₁ₖ - uᵢⱼₖ) - aⱼ₋½ * (uᵢⱼₖ - uᵢⱼ₋₁ₖ)) +
+	    f_ζ² * (aₖ₊½ * (uᵢⱼₖ₊₁ - uᵢⱼₖ) - aₖ₋½ * (uᵢⱼₖ - uᵢⱼₖ₋₁)) +
+	    
+		+f_ξη * (
+	      aᵢ₊₁ⱼₖ * (uᵢ₊₁ⱼ₊₁ₖ - uᵢ₊₁ⱼ₋₁ₖ) - # ∂u/∂η
+	      aᵢ₋₁ⱼₖ * (uᵢ₋₁ⱼ₊₁ₖ - uᵢ₋₁ⱼ₋₁ₖ)   # ∂u/∂η
+	    ) + # ∂/∂ξ
+	    +f_ξη * (
+	      aᵢⱼ₊₁ₖ * (uᵢ₊₁ⱼ₊₁ₖ - uᵢ₋₁ⱼ₊₁ₖ) - # ∂u/∂ξ
+	      aᵢⱼ₋₁ₖ * (uᵢ₊₁ⱼ₋₁ₖ - uᵢ₋₁ⱼ₋₁ₖ)   # ∂u/∂ξ
+	    ) + # ∂/∂η
+	    
+		+f_ζη * (
+	      aᵢⱼₖ₊₁ * (uᵢⱼ₊₁ₖ₊₁ - uᵢⱼ₋₁ₖ₊₁) - # ∂u/∂η
+	      aᵢⱼₖ₋₁ * (uᵢⱼ₊₁ₖ₋₁ - uᵢⱼ₋₁ₖ₋₁)   # ∂u/∂η
+	    ) + # ∂/∂ζ
+		+f_ζη * (
+	      aᵢⱼ₊₁ₖ * (uᵢⱼ₊₁ₖ₊₁ - uᵢⱼ₊₁ₖ₋₁) - # ∂u/∂ζ
+	      aᵢⱼ₋₁ₖ * (uᵢⱼ₋₁ₖ₊₁ - uᵢⱼ₋₁ₖ₋₁)   # ∂u/∂ζ
+	    ) + # ∂/∂η
+	    
+		+f_ζξ * (
+	      aᵢⱼₖ₊₁ * (uᵢ₊₁ⱼₖ₊₁ - uᵢ₋₁ⱼₖ₊₁) - # ∂u/∂ξ
+	      aᵢⱼₖ₋₁ * (uᵢ₊₁ⱼₖ₋₁ - uᵢ₋₁ⱼₖ₋₁)   # ∂u/∂ξ
+	    ) + # ∂/∂ζ
+	    +f_ζξ * (
+	      aᵢ₊₁ⱼₖ * (uᵢ₊₁ⱼₖ₊₁ - uᵢ₊₁ⱼₖ₋₁) - # ∂u/∂ζ
+	      aᵢ₋₁ⱼₖ * (uᵢ₋₁ⱼₖ₊₁ - uᵢ₋₁ⱼₖ₋₁)   # ∂u/∂ζ
+	    ) + # ∂/∂ξ
+		
+	    aᵢⱼₖ * α / 2 * (uᵢ₊₁ⱼₖ - uᵢ₋₁ⱼₖ) +
+	    aᵢⱼₖ * β / 2 * (uᵢⱼ₊₁ₖ - uᵢⱼ₋₁ₖ) +
+	    aᵢⱼₖ * γ / 2 * (uᵢⱼₖ₊₁ - uᵢⱼₖ₋₁)
+  	) 
+
+# ╔═╡ 98daf0da-5811-4a2f-adf6-936bcd8b0850
+vars = [
+  uᵢⱼₖ,
+  uᵢ₊₁ⱼₖ,
+  uᵢ₋₁ⱼₖ,
+  uᵢⱼ₊₁ₖ,
+  uᵢⱼ₋₁ₖ,
+  uᵢⱼₖ₋₁,
+  uᵢⱼₖ₊₁,
+  uᵢ₊₁ⱼₖ₋₁,
+  uᵢ₊₁ⱼₖ₊₁,
+  uᵢ₊₁ⱼ₋₁ₖ,
+  uᵢ₊₁ⱼ₊₁ₖ,
+  uᵢ₋₁ⱼₖ₋₁,
+  uᵢ₋₁ⱼₖ₊₁,
+  uᵢ₋₁ⱼ₋₁ₖ,
+  uᵢ₋₁ⱼ₊₁ₖ,
+  uᵢⱼ₋₁ₖ₋₁,
+  uᵢⱼ₋₁ₖ₊₁,
+  uᵢⱼ₊₁ₖ₋₁,
+  uᵢⱼ₊₁ₖ₊₁,
+]
+
+# ╔═╡ 6ff5aa23-1478-4b8a-9482-9d4a2e12ce10
+for v in vars
+  c = Symbolics.coeff(simplify(uⁿ; expand=true), v)
+  println("$v = $c")
+end
+
+# ╔═╡ a8a642bd-bc8f-4ab8-ab56-4f146995781d
+Symbolics.coeff(simplify(uⁿ; expand=true), s)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -913,13 +1090,27 @@ version = "17.4.0+2"
 """
 
 # ╔═╡ Cell order:
+# ╠═90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 # ╠═6ad7bf8e-f75f-11ee-0dec-efdffaa6e329
 # ╠═646847cf-b467-4f69-b843-b38181a9d91e
 # ╠═26c1f261-6587-4f3b-bfff-29747e410a6f
 # ╠═9f4c2ce5-75ae-4652-96d5-a50b8e9c8197
 # ╠═d35f9309-6543-4707-a1ad-80d3274103d1
 # ╠═11a118ad-43d5-4bd9-b6dd-35d1181cc92a
+# ╠═99f26e1e-f676-4e4c-bcb9-96de69a907b8
+# ╠═4b53b847-46e1-4805-8e33-7d86aee86935
+# ╠═00044dca-056c-4c0e-a49d-924e9591b552
+# ╠═d2a5d698-a0b7-4113-8eec-d1ba9e0aaea2
 # ╠═403d1615-aa9e-4b2b-af0f-cb52e858e881
-# ╠═b456d95f-ff23-4cae-98ef-f08b70a60310
+# ╠═61da9e46-2bbc-44c9-88a5-b553c9f96ca1
+# ╠═788c2865-05e3-4e02-bc72-8a55aab9fcc8
+# ╠═5a542599-21ab-4409-9f32-73b44a31248f
+# ╠═d33cf295-0179-4ea9-8dd2-4663032b0a6b
+# ╠═ff10c7a4-1689-476b-92dd-f819fe750059
+# ╠═86a21176-6599-4bfb-a18e-9c9e8cd885f9
+# ╠═d8fb476f-4881-42ca-aac9-d98c1f392d12
+# ╠═98daf0da-5811-4a2f-adf6-936bcd8b0850
+# ╠═6ff5aa23-1478-4b8a-9482-9d4a2e12ce10
+# ╠═a8a642bd-bc8f-4ab8-ab56-4f146995781d
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
