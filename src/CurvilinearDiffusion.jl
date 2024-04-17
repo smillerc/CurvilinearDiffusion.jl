@@ -4,7 +4,7 @@ using UnPack
 using CartesianDomains
 using KernelAbstractions
 
-include("implicit/ImplictSolver.jl")
+include("implicit_noncons/ImplictSolver.jl")
 using .ImplicitSchemeType
 export ImplicitScheme
 export solve!

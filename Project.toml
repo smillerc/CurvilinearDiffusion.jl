@@ -6,6 +6,7 @@ version = "0.1.0-DEV"
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
 BlockHaloArrays = "8029ca6b-11ad-4a59-88a2-2e6eee4ef8a2"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CartesianDomains = "31d3d393-e656-4614-8ab7-f376885a6db2"
 CurvilinearGrids = "58b19789-dd19-4aa2-839c-c763a7b10301"
 ILUZero = "88f59080-6952-5380-9ea5-54057fb9a43f"

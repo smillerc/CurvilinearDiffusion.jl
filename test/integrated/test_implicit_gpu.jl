@@ -50,39 +50,11 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   @info "Writing to $fn"
   ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
-  α = @views solver.α[ilo:ihi, jlo:jhi]
-  dens = @views ρ[ilo:ihi, jlo:jhi]
-  temp = @views T[ilo:ihi, jlo:jhi]
-  block = zeros(Int, size(dens))
-  q = @views solver.source_term[ilo:ihi, jlo:jhi]
-  kappa = α .* dens
-
-  # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxim1 = [m.ξxᵢ₋½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxip1 = [m.ξxᵢ₊½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξy = [m.ξy for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηx = [m.ηx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηy = [m.ηy for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # J = [m.J for m in solver.metrics[ilo:ihi, jlo:jhi]]
-
-  xy_n = CurvilinearGrids.coords(mesh)
-  vtk_grid(fn, xy_n) do vtk
+  temp = Array{Float32}(T)
+  xy_n = Array{Float32}.(CurvilinearGrids.coords(mesh))
+  @views vtk_grid(fn, xy_n) do vtk
     vtk["TimeValue"] = t
-    vtk["density"] = dens
-    vtk["temperature"] = temp
-    # vtk["diffusivity"] = α
-    vtk["conductivity"] = kappa
-    vtk["block"] = block
-    vtk["source_term"] = q
-
-    # vtk["xi_xim1"] = ξxim1
-    # vtk["xi_xip1"] = ξxip1
-    # vtk["xi_x"] = ξx
-    # vtk["xi_y"] = ξy
-    # vtk["eta_x"] = ηx
-    # vtk["eta_y"] = ηy
-    # vtk["J"] = @view solver.J[ilo:ihi, jlo:jhi]
-
+    vtk["temperature"] = temp[ilo:ihi, jlo:jhi]
     pvd[t] = vtk
   end
 end
@@ -144,7 +116,7 @@ function uniform_grid(nx, ny)
 end
 
 function initialize_mesh()
-  ni, nj = (1501, 1501)
+  ni, nj = (501, 501)
   nhalo = 6
   x, y = wavy_grid2(ni, nj)
   # x, y = uniform_grid(ni, nj)
@@ -155,7 +127,8 @@ end
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
+  mesh = initialize_mesh()
+  # mesh = adapt(ArrayT, initialize_mesh())
 
   T0 = 1.0
   bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
@@ -169,6 +142,7 @@ function init_state()
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
   source_term = similar(ρ)
+  fill!(source_term, 0)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -199,6 +173,7 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
+
 function run()
   solver, mesh, T, ρ, cₚ, κ = init_state()
   global Δt0 = 1e-4
@@ -206,7 +181,7 @@ function run()
   global t = 0.0
   global maxt = 0.2
   global iter = 0
-  global maxiter = 20
+  global maxiter = 1
   global io_interval = 5e-4
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
@@ -254,14 +229,37 @@ function run()
   return solver, T
 end
 
-begin
-  cd(@__DIR__)
-  const casename = "implicit_gauss_source"
-  rm.(glob("*.vts"))
+solver, mesh, T, ρ, cₚ, κ = init_state();
 
-  solver, temperature = run()
-  nothing
+using CUDA
+using CUDA.CUSPARSE: CuSparseMatrixCSR
+using TimerOutputs
+TimerOutputs.reset_timer!()
+begin
+  CurvilinearDiffusion.update_conductivity!(solver.α, T, ρ, κ, cₚ)
+  CurvilinearDiffusion.assemble_matrix!(solver, solver.A, mesh, T, 1e-5)
+
+  A_gpu = CuSparseMatrixCSR{Float64}(solver.A)
+  b_gpu = CuArray(solver.b)
+  P = kp_ilu0(A_gpu)
+  # P = ilu02(A_gpu)
+  solv = Krylov.GmresSolver(A_gpu, b_gpu)
+  @timeit "gpusolve" gmres!(solv, A_gpu, b_gpu; N=P, ldiv=true, history=true)
+  TimerOutputs.print_timer()
 end
+
+@timeit "gpusolve" gmres!(solv, A_gpu, b_gpu, solv.x; N=P, ldiv=true, history=true)
+
+# x_gpu, stats = gmres(A_gpu, b_gpu; N=P, ldiv=true, history=true)
+# CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, 1e-5)
+# begin
+#   cd(@__DIR__)
+#   const casename = "implicit_gauss_source"
+#   rm.(glob("*.vts"))
+
+#   solver, temperature = run()
+#   nothing
+# end
 
 # T_cpu = Array(temperature)
 # using Plots: heatmap
