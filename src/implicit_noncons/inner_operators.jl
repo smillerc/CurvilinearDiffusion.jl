@@ -46,10 +46,7 @@ using StaticArrays, OffsetArrays
 
 @kernel function inner_diffusion_op_kernel_2d!(
   A,
-  b,
-  α, # diffusivity
-  u,
-  source_term,
+  α,
   Δt,
   cell_center_metrics,
   edge_metrics,
@@ -62,12 +59,11 @@ using StaticArrays, OffsetArrays
 
   @inbounds begin
     grid_idx = grid_indices[idx]
+    mat_idx = matrix_indices[idx]
     i, j = grid_idx.I
 
     metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
 
-    uⁿᵢⱼ = u[i, j]
-    sⁿᵢⱼ = source_term[i, j]
     aᵢⱼ = α[i, j]
     aᵢ₊₁ⱼ = α[i + 1, j]
     aᵢ₋₁ⱼ = α[i - 1, j]
@@ -86,9 +82,8 @@ using StaticArrays, OffsetArrays
       aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
     )
 
-    stencil, rhs = inner_op_2d(metric_terms, diffusivity, uⁿᵢⱼ, Δt, sⁿᵢⱼ)
+    stencil = inner_op_2d(metric_terms, diffusivity, Δt)
 
-    mat_idx = matrix_indices[idx]
     #! format: off
     A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
     A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
@@ -101,7 +96,7 @@ using StaticArrays, OffsetArrays
     A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
     #! format: on
 
-    b[mat_idx] = rhs
+    # b[mat_idx] = rhs
   end
 end
 
@@ -208,12 +203,12 @@ end
 #   return OffsetMatrix(stencil, (-1:1, -1:1)), rhs
 # end
 
-function inner_op_2d(metric_terms, diffusivity, uⁿᵢⱼ::T, Δt::T, s::T) where {T}
+# function inner_op_2d(metric_terms, diffusivity, uⁿᵢⱼ::T, Δt::T, s::T) where {T}
+function inner_op_2d(metric_terms, diffusivity, Δt::T) where {T}
   @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
   @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½ = diffusivity
 
-  inv_dt = inv(Δt)
-  uⁿ⁺¹ᵢⱼ = inv_dt + (
+  uⁿ⁺¹ᵢⱼ = inv(Δt) + (
     (aᵢ₊½ + aᵢ₋½) * f_ξ² + #
     (aⱼ₊½ + aⱼ₋½) * f_η²   #
   )
@@ -226,8 +221,6 @@ function inner_op_2d(metric_terms, diffusivity, uⁿᵢⱼ::T, Δt::T, s::T) whe
   uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη
   uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη
 
-  rhs = s + uⁿᵢⱼ * inv_dt
-
   #! format: off
   stencil = @SMatrix [
     uⁿ⁺¹ᵢ₋₁ⱼ₋₁ uⁿ⁺¹ᵢⱼ₋₁ uⁿ⁺¹ᵢ₊₁ⱼ₋₁
@@ -236,7 +229,7 @@ function inner_op_2d(metric_terms, diffusivity, uⁿᵢⱼ::T, Δt::T, s::T) whe
   ]
   #! format: on
 
-  return OffsetMatrix(stencil, (-1:1, -1:1)), rhs
+  return OffsetMatrix(stencil, (-1:1, -1:1))
 end
 
 # # Generate a stencil for a single 3d cell in the interior

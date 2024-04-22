@@ -56,16 +56,13 @@ end
 
 @kernel function boundary_diffusion_op_kernel_2d!(
   A,
-  b,
   α,
-  u,
-  source_term,
   Δt,
   cell_center_metrics,
   edge_metrics,
   grid_indices,
   matrix_indices,
-  mean_func::F,
+  meanfunc::F,
   (ni, nj),
   loc::Int,
 ) where {F}
@@ -76,18 +73,29 @@ end
   begin
     grid_idx = grid_indices[idx]
     mat_idx = matrix_indices[idx]
-
     i, j = grid_idx.I
-    edge_diffusivity = (
-      αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
-      αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
-      αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
-      αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
+
+    metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
+
+    aᵢⱼ = α[i, j]
+    aᵢ₊₁ⱼ = α[i + 1, j]
+    aᵢ₋₁ⱼ = α[i - 1, j]
+    aᵢⱼ₊₁ = α[i, j + 1]
+    aᵢⱼ₋₁ = α[i, j - 1]
+
+    diffusivity = (;
+      aᵢⱼ,
+      aᵢ₊₁ⱼ,
+      aᵢ₋₁ⱼ,
+      aᵢⱼ₊₁,
+      aᵢⱼ₋₁,
+      aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
+      aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
+      aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
+      aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
     )
 
-    stencil, rhs = _neumann_boundary_diffusion_operator(
-      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
-    )
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, loc)
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
 
@@ -116,7 +124,6 @@ end
     if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
     #! format: on
 
-    b[mat_idx] = rhs
   end
 end
 
@@ -168,79 +175,42 @@ end
 
 # Generate a stencil for a 2D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  u::AbstractArray{T,2},
-  source_term::AbstractArray{T,2},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
-  loc,
+  metric_terms, diffusivity, Δt::T, loc
 ) where {T}
-
-  #
-  Jᵢⱼ = cell_center_metrics.J[idx]
-  sᵢⱼ = source_term[idx]
-  uᵢⱼ = u[idx]
-
-  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metrics, idx
-  )
+  @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
+  @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½ = diffusivity
 
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
   if loc == 1 # :ilo
-    fᵢ₋½ = zero(T)
-    gᵢ₋½ = zero(T)
+    aᵢ₋½ = zero(T)
   elseif loc == 2 # :ihi
-    fᵢ₊½ = zero(T)
-    gᵢ₊½ = zero(T)
+    aᵢ₊½ = zero(T)
   elseif loc == 3 # :jlo
-    fⱼ₋½ = zero(T)
-    gⱼ₋½ = zero(T)
+    aⱼ₋½ = zero(T)
   elseif loc == 4 # :jhi
-    fⱼ₊½ = zero(T)
-    gⱼ₊½ = zero(T)
-  else
-    error("bad boundary location")
+    aⱼ₊½ = zero(T)
   end
 
-  A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
-  B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
-  C = -gᵢ₊½ - gⱼ₋½                             # (i+1,j-1)
-  D = fᵢ₋½ - gⱼ₊½ + gⱼ₋½                       # (i-1,j)
-  F = fᵢ₊½ + gⱼ₊½ - gⱼ₋½                       # (i+1,j)
-  G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
-  H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
-  I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-  RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
+  uⁿ⁺¹ᵢⱼ = inv(Δt) + (
+    (aᵢ₊½ + aᵢ₋½) * f_ξ² + #
+    (aⱼ₊½ + aⱼ₋½) * f_η²   #
+  )
+  uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢⱼ * (α / 2) - aᵢ₊½ * f_ξ²)
+  uⁿ⁺¹ᵢ₋₁ⱼ = (+aᵢⱼ * (α / 2) - aᵢ₋½ * f_ξ²)
+  uⁿ⁺¹ᵢⱼ₊₁ = (-aᵢⱼ * (β / 2) - aⱼ₊½ * f_η²)
+  uⁿ⁺¹ᵢⱼ₋₁ = (+aᵢⱼ * (β / 2) - aⱼ₋½ * f_η²)
+  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη
+  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη
+  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη
+  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη
 
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
+  #! format: off
+  stencil = @SMatrix [
+    uⁿ⁺¹ᵢ₋₁ⱼ₋₁ uⁿ⁺¹ᵢⱼ₋₁ uⁿ⁺¹ᵢ₊₁ⱼ₋₁
+    uⁿ⁺¹ᵢ₋₁ⱼ   uⁿ⁺¹ᵢⱼ   uⁿ⁺¹ᵢ₊₁ⱼ
+    uⁿ⁺¹ᵢ₋₁ⱼ₊₁ uⁿ⁺¹ᵢⱼ₊₁ uⁿ⁺¹ᵢ₊₁ⱼ₊₁
+  ]
+  #! format: on
 
-  stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
-
-  # if any(isnan.(stencil))
-  #   @show idx
-  #   @show edge_diffusivity
-  #   @show stencil
-  #   @show Jᵢⱼ sᵢⱼ uᵢⱼ
-  #   @show fᵢ₊½ fᵢ₋½ fⱼ₊½ fⱼ₋½ gᵢ₊½ gᵢ₋½ gⱼ₊½ gⱼ₋½
-
-  #   idim, jdim = (1, 2)
-  #   ᵢ₋₁ = shift(idx, idim, -1)
-  #   ⱼ₋₁ = shift(idx, jdim, -1)
-
-  #   @show edge_metrics.i₊½.η̂[idx]
-  #   @show edge_metrics.i₊½.η̂[ⱼ₋₁]
-  #   @show edge_metrics.i₊½.ξ̂[idx]
-  #   @show edge_metrics.i₊½.ξ̂[ᵢ₋₁]
-  #   error("done")
-  # end
-
-  # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
-
-  return offset_stencil, RHS
+  return OffsetMatrix(stencil, (-1:1, -1:1))
 end
