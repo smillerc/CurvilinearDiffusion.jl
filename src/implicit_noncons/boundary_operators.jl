@@ -202,24 +202,20 @@ end
   if (jlo) aⱼ₋½ = zero(T) end
   if (jhi) aⱼ₊½ = zero(T) end
   
-  uⁿ⁺¹ᵢⱼ = 1.0 + ((aᵢ₊½ + aᵢ₋½) * f_ξ² + (aⱼ₊½ + aⱼ₋½) * f_η²) * Δt
+  # current cell
+  uⁿ⁺¹ᵢⱼ = one(T) + ((aᵢ₊½ + aᵢ₋½) * f_ξ² + (aⱼ₊½ + aⱼ₋½) * f_η²) * Δt
+
+  # cardinal terms
   if (!ihi) uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢ₊½ * f_ξ² - aᵢⱼ * (α/2)) * Δt end
   if (!ilo) uⁿ⁺¹ᵢ₋₁ⱼ = (-aᵢ₋½ * f_ξ² + aᵢⱼ * (α/2)) * Δt end
   if (!jhi) uⁿ⁺¹ᵢⱼ₊₁ = (-aⱼ₊½ * f_η² - aᵢⱼ * (β/2)) * Δt end
   if (!jlo) uⁿ⁺¹ᵢⱼ₋₁ = (-aⱼ₋½ * f_η² + aᵢⱼ * (β/2)) * Δt end
+
+  # cross terms
   if (!ihi && !jlo) uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (+aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη * Δt end
   if (!ihi && !jhi) uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη * Δt end
   if (!ilo && !jlo) uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη * Δt end
   if (!ilo && !jhi) uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (+aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη * Δt end
-
-  # if (!ihi) uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢⱼ * (α / 2) - aᵢ₊½ * f_ξ²) end
-  # if (!ilo) uⁿ⁺¹ᵢ₋₁ⱼ = ( aᵢⱼ * (α / 2) - aᵢ₋½ * f_ξ²) end
-  # if (!jhi) uⁿ⁺¹ᵢⱼ₊₁ = (-aᵢⱼ * (β / 2) - aⱼ₊½ * f_η²) end
-  # if (!jlo) uⁿ⁺¹ᵢⱼ₋₁ = ( aᵢⱼ * (β / 2) - aⱼ₋½ * f_η²) end
-  # if (!ihi && !jlo) uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = ( aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη end
-  # if (!ilo && !jhi) uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = ( aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη end
-  # if (!ihi && !jhi) uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη end
-  # if (!ilo && !jlo) uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη end
   
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
   stencil = @SMatrix [
