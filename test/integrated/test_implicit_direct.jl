@@ -91,8 +91,8 @@ end
 function initialize_mesh()
   ni, nj = (501, 501)
   nhalo = 6
-  # x, y = wavy_grid2(ni, nj)
-  x, y = uniform_grid(ni, nj)
+  x, y = wavy_grid2(ni, nj)
+  # x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
@@ -162,7 +162,8 @@ function run(maxiter, params)
   @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
     solver.α, T, ρ, κ, cₚ
   )
-  while true
+
+  @profview while true
     if iter == 1
       reset_timer!()
     end
