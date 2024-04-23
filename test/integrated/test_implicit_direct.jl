@@ -89,23 +89,23 @@ function uniform_grid(nx, ny)
 end
 
 function initialize_mesh()
-  ni, nj = (101, 101)
+  ni, nj = (501, 501)
   nhalo = 6
-  x, y = wavy_grid2(ni, nj)
-  # x, y = uniform_grid(ni, nj)
+  # x, y = wavy_grid2(ni, nj)
+  x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
-function init_state()
+function init_state(; direct_solve=true)
   mesh = adapt(ArrayT, initialize_mesh())
 
   T0 = 1.0
   bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-  solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
+  solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=direct_solve)
   CFL = 100 # 1/2 is the explicit stability limit
 
   # Temperature and density
@@ -114,6 +114,7 @@ function init_state()
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
   source_term = similar(ρ)
+  fill!(source_term, 0)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -144,8 +145,10 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run(maxiter)
-  solver, mesh, T, ρ, cₚ, κ = init_state()
+function run(maxiter, params)
+  solver, mesh, T, ρ, cₚ, κ = params
+
+  casename = "diffusion123"
   global Δt0 = 1e-4
   global Δt = 1e-5
   global t = 0.0
@@ -159,9 +162,8 @@ function run(maxiter)
   @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
     solver.α, T, ρ, κ, cₚ
   )
-  # @profview 
   while true
-    if iter == 0
+    if iter == 1
       reset_timer!()
     end
 
@@ -182,16 +184,16 @@ function run(maxiter)
       global io_next += io_interval
     end
 
-    if iter >= maxiter - 1
+    global iter += 1
+    global t += Δt
+
+    if iter >= maxiter
       break
     end
 
     if t >= maxt
       break
     end
-
-    global iter += 1
-    global t += Δt
   end
 
   save_vtk(solver, T, mesh, iter, t, casename)
@@ -202,30 +204,9 @@ end
 
 begin
   cd(@__DIR__)
-  const casename = "implicit_gauss_source"
   rm.(glob("*.vts"))
+  solver, mesh, T, ρ, cₚ, κ = init_state(; direct_solve=false)
 
-  solver, temperature, _mesh = run(10)
+  run(50, (solver, mesh, T, ρ, cₚ, κ))
   nothing
 end
-
-# # T_cpu = Array(temperature)
-# # using Plots: heatmap
-
-# # heatmap(T_cpu)
-# # solver, mesh, T, ρ, cₚ, κ = init_state();
-# # using CUDA, CUDSS, CUDA.CUSPARSE
-# Agpu = CuSparseMatrixCSR(solver.linear_problem.A)
-# bgpu = solver.linear_problem.b |> CuVector
-# xgpu = similar(bgpu)
-# gpusolver = CudssSolver(Agpu, "G", 'F');
-# @timeit "analyze" cudss("analysis", gpusolver, xgpu, bgpu);
-
-# @timeit "factorize" cudss("factorization", gpusolver, xgpu, bgpu)
-# @timeit "solve" cudss("solve", gpusolver, xgpu, bgpu)
-# print_timer()
-
-# using LinearOperators
-
-# function my_mul!(y, A, x) # -> y
-# end
