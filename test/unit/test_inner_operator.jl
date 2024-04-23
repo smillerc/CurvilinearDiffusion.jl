@@ -15,10 +15,8 @@ using UnPack
 #   display(stencil)
 # end
 
-# @testset "2D inner operator" 
-begin
-  using StaticArrays
-  include("../../src/implicit_noncons/inner_operators.jl")
+@testset "2D inner operator" begin
+  using CurvilinearDiffusion.ImplicitSchemeType: inner_op_2d
 
   α, β, f_ξ², f_η², f_ξη = [0, 0, 1, 1, 0]
   aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁ = ones(5)
@@ -33,11 +31,19 @@ begin
   diffusivity = (; aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½)
   u = 1.0
   s = 0.0
-  Δt = Inf
-  stencil, rhs = inner_op_2d(metric_terms, diffusivity, u, Δt, s)
-  display(stencil)
+  Δt = 1.0
+  stencil = inner_op_2d(metric_terms, diffusivity, Δt)
 
-  @code_warntype inner_op_2d(metric_terms, diffusivity, u, Δt, s)
+  s = @SMatrix [
+    -0.0 -1.0 0.0
+    -1.0 5.0 -1.0
+    0.0 -1.0 -0.0
+  ]
+
+  @test stencil ≈ s
+
+  bm = @benchmark inner_op_2d($metric_terms, $diffusivity, $Δt)
+  @test bm.allocs == 0
 end
 
 # @testset "3D inner operator" begin
