@@ -78,6 +78,7 @@ diff2d |> simplify
 
 # ╔═╡ d33cf295-0179-4ea9-8dd2-4663032b0a6b
 @variables  begin
+	u_BC
 	uⁿᵢⱼ
     uⁿ⁺¹ᵢⱼ
 	uⁿ⁺¹ᵢ₊₁ⱼ
@@ -147,6 +148,7 @@ rhs = s*Δt + uⁿᵢⱼ
 
 # ╔═╡ 98daf0da-5811-4a2f-adf6-936bcd8b0850
 vars = [
+	u_BC,
   uⁿ⁺¹ᵢⱼ,
   uⁿ⁺¹ᵢ₊₁ⱼ,
   uⁿ⁺¹ᵢ₋₁ⱼ,
@@ -163,6 +165,57 @@ for v in vars
   c = Symbolics.coeff(simplify(A_coeff; expand=true), v)
   println("$v = $c")
 end
+
+# ╔═╡ 578b5df5-7a52-496b-ae74-482231f6b721
+md"""
+# Boundary Conditions 
+- for given T, or dirichlet type conditions)
+"""
+
+# ╔═╡ 6f9b01ba-4f49-4fad-b0b6-e7545ded67f9
+md"## `ihi`"
+
+# ╔═╡ c4fad02d-09ba-40e7-a1f1-eee45d7dd345
+begin
+	A_coeff_ihi = substitute(A_coeff, 
+		Dict(
+			uⁿ⁺¹ᵢ₊₁ⱼ=> u_BC,
+			uⁿ⁺¹ᵢ₊₁ⱼ₋₁=> u_BC,
+			uⁿ⁺¹ᵢ₊₁ⱼ₊₁=> u_BC,
+		)
+	)
+	
+	for v in vars
+	  c = Symbolics.coeff(simplify(A_coeff_ihi; expand=true), v)
+	  println("$v = $c")
+	end
+
+	A_coeff_ihi
+end
+
+# ╔═╡ 7bb3473f-72a4-4df9-97f6-e1afadea0a9c
+md"## `jhi`"
+
+# ╔═╡ 6c584db5-6365-4713-b54d-6eaac46335b6
+begin
+	A_coeff_jhi = substitute(A_coeff, 
+		Dict(
+			uⁿ⁺¹ᵢⱼ₊₁ => u_BC,
+			uⁿ⁺¹ᵢ₊₁ⱼ₊₁=> u_BC,
+			uⁿ⁺¹ᵢ₋₁ⱼ₊₁=> u_BC,
+		)
+	)
+	
+	for v in vars
+	  c = Symbolics.coeff(simplify(A_coeff_jhi; expand=true), v)
+	  println("$v = $c")
+	end
+
+	A_coeff_jhi
+end
+
+# ╔═╡ 68793f72-c426-4117-ba8a-edf2b596df83
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1045,5 +1098,11 @@ version = "17.4.0+2"
 # ╠═81f5a905-867c-47c1-b5b4-683585641d22
 # ╠═98daf0da-5811-4a2f-adf6-936bcd8b0850
 # ╠═6ff5aa23-1478-4b8a-9482-9d4a2e12ce10
+# ╠═578b5df5-7a52-496b-ae74-482231f6b721
+# ╠═6f9b01ba-4f49-4fad-b0b6-e7545ded67f9
+# ╠═c4fad02d-09ba-40e7-a1f1-eee45d7dd345
+# ╠═7bb3473f-72a4-4df9-97f6-e1afadea0a9c
+# ╠═6c584db5-6365-4713-b54d-6eaac46335b6
+# ╠═68793f72-c426-4117-ba8a-edf2b596df83
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
