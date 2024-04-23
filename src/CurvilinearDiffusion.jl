@@ -4,7 +4,7 @@ using UnPack
 using CartesianDomains
 using KernelAbstractions
 
-include("implicit_noncons/ImplictSolver.jl")
+include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
 export ImplicitScheme
 export initialize_coefficient_matrix
