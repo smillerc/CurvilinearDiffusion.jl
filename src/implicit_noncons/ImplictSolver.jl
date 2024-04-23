@@ -79,7 +79,7 @@ function ImplicitScheme(
   #   A_cache = nothing
   # else
   #   A_cache = initialize_coefficient_matrix(mesh, CPU())
-  #   Pl = kp_ilu0(A)
+  #   
   # end
 
   b = KernelAbstractions.zeros(backend, T, len)
@@ -97,9 +97,14 @@ function ImplicitScheme(
     end
 
   else
-
-    # Pl = preconditioner(A, backend)
-    linear_problem = init(LinearProblem(A, b), KrylovJL_GMRES(; history=true))
+    Pl = preconditioner(A, backend)
+    # Pl = kp_ilu0(A)
+    linear_problem = init(
+      LinearProblem(A, b),
+      # KrylovJL_GMRES(; history=true, N=Pl, ldiv=false); # krylov solver
+      KrylovJL_GMRES(; history=true, ldiv=false); # krylov solver
+      Pl=Pl,
+    )
   end
 
   implicit_solver = ImplicitScheme(
@@ -410,8 +415,9 @@ end
   return ILUZero.ilu0(A)
 end
 
-@inline function preconditioner(A, ::GPU, τ=0.1)
-  return KrylovPreconditioners.kp_ilu0(A)
+@inline function preconditioner(A, backend::GPU, τ=0.1)
+  # return KrylovPreconditioners.kp_ilu0(A)
+  return KrylovPreconditioners.BlockJacobiPreconditioner(A; device=backend)
 end
 
 end
