@@ -177,34 +177,51 @@ end
 @inline function _neumann_boundary_diffusion_operator(
   metric_terms, diffusivity, Δt::T, loc
 ) where {T}
+
+  #
   @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
   @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½ = diffusivity
 
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-  if loc == 1 # :ilo
-    aᵢ₋½ = zero(T)
-  elseif loc == 2 # :ihi
-    aᵢ₊½ = zero(T)
-  elseif loc == 3 # :jlo
-    aⱼ₋½ = zero(T)
-  elseif loc == 4 # :jhi
-    aⱼ₊½ = zero(T)
-  end
+  ilo = loc == 1 || loc == 5 || loc == 6 # :ilo, (:ilo,:jlo), (:ilo,:jhi)
+  ihi = loc == 2 || loc == 7 || loc == 8 # :ihi, (:ihi,:jlo), (:ihi,:jhi)
+  jlo = loc == 3 || loc == 5 || loc == 7 # :jlo, (:ilo,:jlo), (:ihi,:jlo)
+  jhi = loc == 4 || loc == 6 || loc == 8 # :jhi, (:ilo,:jhi), (:ihi,:jhi)
 
-  uⁿ⁺¹ᵢⱼ = inv(Δt) + (
-    (aᵢ₊½ + aᵢ₋½) * f_ξ² + #
-    (aⱼ₊½ + aⱼ₋½) * f_η²   #
-  )
-  uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢⱼ * (α / 2) - aᵢ₊½ * f_ξ²)
-  uⁿ⁺¹ᵢ₋₁ⱼ = (+aᵢⱼ * (α / 2) - aᵢ₋½ * f_ξ²)
-  uⁿ⁺¹ᵢⱼ₊₁ = (-aᵢⱼ * (β / 2) - aⱼ₊½ * f_η²)
-  uⁿ⁺¹ᵢⱼ₋₁ = (+aᵢⱼ * (β / 2) - aⱼ₋½ * f_η²)
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη
+  uⁿ⁺¹ᵢ₊₁ⱼ = zero(T)
+  uⁿ⁺¹ᵢ₋₁ⱼ = zero(T)
+  uⁿ⁺¹ᵢⱼ₊₁ = zero(T)
+  uⁿ⁺¹ᵢⱼ₋₁ = zero(T)
+  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = zero(T)
+  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = zero(T)
+  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = zero(T)
+  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = zero(T)
 
   #! format: off
+  if (ilo) aᵢ₋½ = zero(T) end
+  if (ihi) aᵢ₊½ = zero(T) end
+  if (jlo) aⱼ₋½ = zero(T) end
+  if (jhi) aⱼ₊½ = zero(T) end
+  
+  uⁿ⁺¹ᵢⱼ = 1.0 + ((aᵢ₊½ + aᵢ₋½) * f_ξ² + (aⱼ₊½ + aⱼ₋½) * f_η²) * Δt
+  if (!ihi) uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢ₊½ * f_ξ² - aᵢⱼ * (α/2)) * Δt end
+  if (!ilo) uⁿ⁺¹ᵢ₋₁ⱼ = (-aᵢ₋½ * f_ξ² + aᵢⱼ * (α/2)) * Δt end
+  if (!jhi) uⁿ⁺¹ᵢⱼ₊₁ = (-aⱼ₊½ * f_η² - aᵢⱼ * (β/2)) * Δt end
+  if (!jlo) uⁿ⁺¹ᵢⱼ₋₁ = (-aⱼ₋½ * f_η² + aᵢⱼ * (β/2)) * Δt end
+  if (!ihi && !jlo) uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (+aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη * Δt end
+  if (!ihi && !jhi) uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη * Δt end
+  if (!ilo && !jlo) uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη * Δt end
+  if (!ilo && !jhi) uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (+aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη * Δt end
+
+  # if (!ihi) uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢⱼ * (α / 2) - aᵢ₊½ * f_ξ²) end
+  # if (!ilo) uⁿ⁺¹ᵢ₋₁ⱼ = ( aᵢⱼ * (α / 2) - aᵢ₋½ * f_ξ²) end
+  # if (!jhi) uⁿ⁺¹ᵢⱼ₊₁ = (-aᵢⱼ * (β / 2) - aⱼ₊½ * f_η²) end
+  # if (!jlo) uⁿ⁺¹ᵢⱼ₋₁ = ( aᵢⱼ * (β / 2) - aⱼ₋½ * f_η²) end
+  # if (!ihi && !jlo) uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = ( aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη end
+  # if (!ilo && !jhi) uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = ( aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη end
+  # if (!ihi && !jhi) uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη end
+  # if (!ilo && !jlo) uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη end
+  
+  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
   stencil = @SMatrix [
     uⁿ⁺¹ᵢ₋₁ⱼ₋₁ uⁿ⁺¹ᵢⱼ₋₁ uⁿ⁺¹ᵢ₊₁ⱼ₋₁
     uⁿ⁺¹ᵢ₋₁ⱼ   uⁿ⁺¹ᵢⱼ   uⁿ⁺¹ᵢ₊₁ⱼ

@@ -90,7 +90,6 @@ function ImplicitScheme(
 
   if direct_solve
     if backend isa CUDABackend
-      x = similar(b)
       linear_problem = (A=A, b=b, x=x, solver=CudssSolver(A, "G", 'F'))
     else
       linear_problem = init(LinearProblem(A, b))
@@ -98,8 +97,9 @@ function ImplicitScheme(
     end
 
   else
+
     # Pl = preconditioner(A, backend)
-    linear_problem = init(LinearProblem(A, b), KrylovJL_GMRES())
+    linear_problem = init(LinearProblem(A, b), KrylovJL_GMRES(; history=true))
   end
 
   implicit_solver = ImplicitScheme(
@@ -187,6 +187,8 @@ function solve!(
   else
     if scheme.direct_solve
       _gpu_direct_solve!(scheme, mesh, u, Δt)
+    else
+      _gpu_iterative_solve!(scheme, mesh, u, Δt)
     end
   end
 
@@ -290,12 +292,10 @@ function _gpu_direct_solve!(
   scheme::ImplicitScheme, mesh::CurvilinearGrids.AbstractCurvilinearGrid, u, Δt;
 )
   @timeit "assemble_rhs!" assemble_rhs!(scheme, u, Δt)
-
   @timeit "assemble_matrix!" assemble_matrix!(scheme, scheme.linear_problem.A, mesh, Δt)
+  KernelAbstractions.synchronize(scheme.backend)
 
-  return nothing
-  cudss_set(scheme.linear_problem.solver, scheme.linear_problem.A)
-
+  @timeit "cudss_set" cudss_set(scheme.linear_problem.solver, scheme.linear_problem.A)
   if !warmedup(scheme)
     @info "Performing the first factorization and solve (cold), after this the factorization will be re-used"
 
@@ -334,9 +334,73 @@ function _gpu_direct_solve!(
     )
   end
 
-  # update u to the solution
   @views begin
     copyto!(u[scheme.halo_aware_indices], scheme.linear_problem.x)
+  end
+
+  return nothing
+end
+
+function _gpu_iterative_solve!(
+  scheme::ImplicitScheme,
+  mesh::CurvilinearGrids.AbstractCurvilinearGrid,
+  u,
+  Δt;
+  maxiter=500,
+  show_hist=true,
+)
+  domain_LI = LinearIndices(scheme.domain_indices)
+
+  @timeit "assemble_rhs!" assemble_rhs!(scheme, u, Δt)
+  @timeit "assemble_matrix!" assemble_matrix!(scheme, scheme.linear_problem.A, mesh, Δt)
+  KernelAbstractions.synchronize(scheme.backend)
+  # @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
+
+  if !warmedup(scheme)
+    @info "Performing the first solve (cold)"
+    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem)
+    warmup!(scheme)
+  else
+    @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
+  end
+
+  # # precondition
+  # @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, scheme.A)
+
+  # n = size(scheme.A, 1)
+  # precond_op = LinearOperator(
+  #   eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
+  # )
+
+  # if !warmedup(scheme)
+  # @timeit "dqgmres! (linear solve)" dqgmres!(
+  #   scheme.solver, scheme.A, scheme.b; N=precond_op, history=true, itmax=maxiter
+  # )
+  #   warmedup!(scheme)
+  # else
+  #   @timeit "dqgmres! (linear solve)" dqgmres!(
+  #     scheme.solver,
+  #     scheme.A,
+  #     scheme.b,
+  #     scheme.solver.x; # use last step as a starting point
+  #     N=precond_op,
+  #     itmax=maxiter,
+  #     history=true,
+  #   )
+  # end
+
+  # resids = last(scheme.solver.stats.residuals)
+  # niter = scheme.solver.stats.niter
+
+  # update u to the solution
+  @views begin
+    copyto!(u[scheme.halo_aware_indices], scheme.linear_problem.u[domain_LI])
+  end
+
+  residual = last(scheme.linear_problem.cacheval.stats.residuals)
+  niter = scheme.linear_problem.cacheval.stats.niter
+  if show_hist
+    @printf "\tConvergence L₂norm : %.1e, solver iterations: %i\n" residual niter
   end
 
   return nothing

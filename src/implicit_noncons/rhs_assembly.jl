@@ -7,9 +7,8 @@ function assemble_rhs!(scheme, u, Δt)
   grid_indices = scheme.halo_aware_indices
 
   backend = scheme.backend
-  workgroup = (64,)
 
-  rhs_kernel!(backend, workgroup)(
+  rhs_kernel!(backend)(
     scheme.linear_problem.b, # rhs
     u,
     scheme.source_term,
@@ -25,10 +24,10 @@ end
 @kernel function rhs_kernel!(rhs, u, source_term, Δt, grid_indices, matrix_indices)
   idx = @index(Global, Linear)
 
-  # @inbounds
-  begin
+  @inbounds begin
     grid_idx = grid_indices[idx]
     mat_idx = matrix_indices[idx]
-    rhs[mat_idx] = source_term[grid_idx] + u[grid_idx] * inv(Δt)
+    # rhs[mat_idx] = source_term[grid_idx] + u[grid_idx] * inv(Δt)
+    rhs[mat_idx] = source_term[grid_idx] * Δt + u[grid_idx]
   end
 end

@@ -3,6 +3,7 @@ include("inner_operators.jl")
 include("boundary_operators.jl")
 include("metric_terms.jl")
 
+using UnPack
 using CUDA.CUSPARSE: CSRIterator, _getindex
 
 """
@@ -119,69 +120,40 @@ to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 function assemble_matrix!(
   scheme::ImplicitScheme{2,T,BE}, A::CuSparseMatrixCSR{Tv,Ti}, mesh, Δt
 ) where {Tv,Ti,T,BE}
-  # nrows, ncols = A.dims
-  # _assemble(scheme, A.rowPtr, A.nzVal, nrows, mesh, Δt)
-  _assemble(scheme, mesh, Δt)
-end
-
-# function _assemble(
-#   scheme::ImplicitScheme{2,T,BE}, rowptr, nzval, nrows, mesh, Δt
-# ) where {T,BE}
-#   backend = scheme.backend
-
-#   nhalo = 1
-#   inner_domain = @view scheme.halo_aware_indices[
-#     (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-#   ]
-
-#   workgroup = (64,)
-#   assemble_csr_kernel!(backend)(
-#     rowptr,
-#     nzval,
-#     scheme.α,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     scheme.halo_aware_indices,
-#     scheme.mean_func;
-#     ndrange=nrows,
-#   )
-#   return KernelAbstractions.synchronize(backend)
-# end
-
-function _assemble(scheme::ImplicitScheme{2,T,BE}, mesh, Δt) where {T,BE}
 
   #
-  m, _ = size(scheme.linear_problem.A)
+  m, _ = size(A)
+  mesh_limits = mesh.domain_limits.cell
 
-  kernel = @cuda launch = false assemble_csr_cuda!(
-    scheme.linear_problem.A,
+  kernel = @cuda launch = false assemble_2d_csr_cuda!(
+    A,
     scheme.α,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
     scheme.halo_aware_indices,
+    mesh_limits,
     scheme.mean_func,
   )
 
   config = launch_configuration(kernel.fun)
   threads = min(m, config.threads)
+
   blocks = cld(m, threads)
 
   kernel(
-    scheme.linear_problem.A,
+    A,
     scheme.α,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
     scheme.halo_aware_indices,
+    mesh_limits,
     scheme.mean_func;
     threads,
     blocks,
   )
-
-  CUDA.synchronize()
-
+  # CUDA.synchronize()
   return nothing
 end
 
@@ -237,70 +209,146 @@ end
   # end
 end
 
-function assemble_csr_cuda!(
-  A, α, Δt, cell_center_metrics, edge_metrics, grid_indices, meanfunc::F
+function assemble_2d_csr_cuda!(
+  A, α, Δt, cell_center_metrics, edge_metrics, grid_indices, mesh_limits, meanfunc::F
 ) where {F}
   # every thread processes an entire row
   row = threadIdx().x + (blockIdx().x - 1) * blockDim().x
-  iter = @inbounds CSRIterator{Int}(row, A)
 
-  @inbounds begin
-    grid_idx = grid_indices[row]
-    i, j = grid_idx.I
-    metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
+  nrows = size(A, 1)
+  middle_row = nrows ÷ 2
 
-    aᵢⱼ = α[i, j]
-    aᵢ₊₁ⱼ = α[i + 1, j]
-    aᵢ₋₁ⱼ = α[i - 1, j]
-    aᵢⱼ₊₁ = α[i, j + 1]
-    aᵢⱼ₋₁ = α[i, j - 1]
+  row > nrows && return nothing
 
-    diffusivity = (;
-      aᵢⱼ,
-      aᵢ₊₁ⱼ,
-      aᵢ₋₁ⱼ,
-      aᵢⱼ₊₁,
-      aᵢⱼ₋₁,
-      aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
-      aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
-      aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
-      aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
-    )
+  @unpack ilo, ihi, jlo, jhi = mesh_limits
+  # @inbounds begin
+  grid_idx = grid_indices[row]
+  i, j = grid_idx.I
+  metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
 
+  aᵢⱼ = α[i, j]
+  aᵢ₊₁ⱼ = α[i + 1, j]
+  aᵢ₋₁ⱼ = α[i - 1, j]
+  aᵢⱼ₊₁ = α[i, j + 1]
+  aᵢⱼ₋₁ = α[i, j - 1]
+
+  diffusivity = (;
+    aᵢⱼ,
+    aᵢ₊₁ⱼ,
+    aᵢ₋₁ⱼ,
+    aᵢⱼ₊₁,
+    aᵢⱼ₋₁,
+    aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
+    aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
+    aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
+    aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
+  )
+
+  cfirst = A.rowPtr[row]
+  clast = A.rowPtr[row + 1] - 1
+  ncols = clast - cfirst + 1
+
+  # The matrix will look something like this:
+  # ⎡⠻⣦⡙⢷⣄⠀⠀⠀⠀⠀⠀⠀⠀⎤
+  # ⎢⢷⣌⠻⣦⡙⢷⣄⠀⠀⠀⠀⠀⠀⎥
+  # ⎢⠀⠙⢷⣌⠻⣦⡙⢷⣄⠀⠀⠀⠀⎥
+  # ⎢⠀⠀⠀⠙⢷⣌⠻⣦⡙⢷⣄⠀⠀⎥
+  # ⎢⠀⠀⠀⠀⠀⠙⢷⣌⠻⣦⡙⢷⡄⎥
+  # ⎢⠀⠀⠀⠀⠀⠀⠀⠙⢷⣌⠻⣦⡁⎥
+  # ⎣⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⠈⠁⎦
+
+  upper_half = row < middle_row # are we in the upper half of the matrix?
+
+  # For stencils in the upper half of the matrix (row < middle_row), the nzVals
+  # start at 
+  starting_col = 9 - ncols
+
+  if i == ilo && j == jlo
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 5)
+  elseif i == ilo && j == jhi
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 6)
+  elseif i == ihi && j == jlo
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 7)
+  elseif i == ihi && j == jhi
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 8)
+  elseif i == ilo
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 1)
+  elseif i == ihi
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 2)
+  elseif j == jlo
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 3)
+  elseif j == jhi
+    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, 4)
+  else
     stencil = inner_op_2d(metric_terms, diffusivity, Δt)
   end
 
-  # loop through the colums
-  # col_iter = A.rowPtr[row]:(A.rowPtr[row + 1] - 1)
-  # c = rowPtr[row]
-  # ncols = length(col_iter)
-
-  # # if ncols == 9
-  # #   nzVal[c + 0] = stencil[-1, -1] # (i-1, j-1)
-  # #   nzVal[c + 1] = stencil[+0, -1] # (i  , j-1)
-  # #   nzVal[c + 2] = stencil[+1, -1] # (i+1, j-1)
-  # #   nzVal[c + 3] = stencil[-1, +0] # (i-1, j  )
-  # #   nzVal[c + 4] = stencil[+0, +0] # (i  , j  )
-  # #   nzVal[c + 5] = stencil[+1, +0] # (i+1, j  )
-  # #   nzVal[c + 6] = stencil[-1, +1] # (i-1, j+1)
-  # #   nzVal[c + 7] = stencil[+0, +1] # (i  , j+1)
-  # #   nzVal[c + 8] = stencil[+1, +1] # (i+1, j+1)
-  # # end
-
-  # ncols = zero(Int32, 0)
-  # for (col, ptr) in iter
-  #   ncols += 1
-  # end
-  # # reduce the values for this row
-  for (col, ptr) in iter
-    I = CartesianIndex(row, col)
-    # c = _getindex(A, I, ptr)
-    # vals = ntuple(Val(length(args))) do i
-    #   arg = @inbounds args[i]
-    # end
+  if ncols == 9 # inner cells
+    @inbounds for c in 1:9
+      zidx = cfirst + c - 1
+      A.nzVal[zidx] = stencil[c]
+    end
+  else
+    if upper_half
+      @inbounds for c in 1:ncols
+        zidx = cfirst + c - 1
+        A.nzVal[zidx] = stencil[starting_col + c]
+      end
+    else # lower half of the matrix
+      @inbounds for c in 1:ncols
+        zidx = cfirst + c - 1
+        A.nzVal[zidx] = stencil[c]
+      end
+    end
   end
+
+  # example; we're on row # 2, so ncols = 8, since the first col is chopped off...
+  # starting_col = 9 - 8 = 1
+  # we're in the upper_half, so we loop 
+  # for c in 1:8
+  #   A.nzVal[c-1] = stencil[1 + c]
+  # end
+  # or 
+  # A.nzVal[0] = stencil[1 + 1 = 2]
+  # A.nzVal[1] = stencil[1 + 2 = 3]
+  # A.nzVal[2] = stencil[1 + 3 = 4]
+  # A.nzVal[3] = stencil[1 + 4 = 5]
+  # A.nzVal[4] = stencil[1 + 5 = 6]
+  # A.nzVal[5] = stencil[1 + 6 = 7]
+  # A.nzVal[6] = stencil[1 + 7 = 8]
+  # A.nzVal[7] = stencil[1 + 8 = 9]
+
+  # starting col is 
+
+  # if ncols == 5
+  #   if i == ilo
+  #     @inbounds for c in 1:5
+  #       A.nzVal[c - 1] = stencil[4 + c]
+  #     end
+  #   else # i == ihi
+  #     @inbounds for c in 1:5
+  #       A.nzVal[c - 1] = stencil[c]
+  #     end
+  #   end
+  # elseif ncols == 6
+  # elseif ncols == 7
+  # elseif ncols == 8
+  # elseif ncols == 9 # inner cells
+  #   @inbounds for c in 1:9
+  #     A.nzVal[c - 1] = stencil[c]
+  #   end
+
+  # A.nzVal[cfirst + 0] = stencil[1] or [-1, -1] # (i-1, j-1)
+  # A.nzVal[cfirst + 1] = stencil[2] or [+0, -1] # (i  , j-1)
+  # A.nzVal[cfirst + 2] = stencil[3] or [+1, -1] # (i+1, j-1)
+  # A.nzVal[cfirst + 3] = stencil[4] or [-1, +0] # (i-1, j  )
+  # A.nzVal[cfirst + 4] = stencil[5] or [+0, +0] # (i  , j  )
+  # A.nzVal[cfirst + 5] = stencil[6] or [+1, +0] # (i+1, j  )
+  # A.nzVal[cfirst + 6] = stencil[7] or [-1, +1] # (i-1, j+1)
+  # A.nzVal[cfirst + 7] = stencil[8] or [+0, +1] # (i  , j+1)
+  # A.nzVal[cfirst + 8] = stencil[9] or [+1, +1] # (i+1, j+1)
+
+  # end
 
   return nothing
 end
-
-# function nzval
