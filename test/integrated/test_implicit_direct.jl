@@ -18,7 +18,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :GPU
+dev = :CPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -109,7 +109,7 @@ function init_state(; direct_solve=true)
   CFL = 100 # 1/2 is the explicit stability limit
 
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e4
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
@@ -155,18 +155,18 @@ function run(maxiter, params)
   global maxt = 0.2
   global iter = 0
   # global maxiter = 2
-  global io_interval = 5e-4
+  global io_interval = 5e-3
   global io_next = io_interval
   @timeit "save_vtk" save_vtk(solver, T, mesh, iter, t, casename)
 
-  @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-    solver.α, T, ρ, κ, cₚ
-  )
-
-  @profview while true
+  while true
     if iter == 1
       reset_timer!()
     end
+
+    @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
+      solver.α, T, ρ, κ, cₚ
+    )
 
     # dt = CurvilinearDiffusion.max_dt(solver, mesh)
     # dt = max(1e-10, min(Δt0, dt))
@@ -206,8 +206,8 @@ end
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
-  solver, mesh, T, ρ, cₚ, κ = init_state(; direct_solve=false)
+  solver, mesh, T, ρ, cₚ, κ = init_state(; direct_solve=true)
 
-  run(50, (solver, mesh, T, ρ, cₚ, κ))
+  run(Inf, (solver, mesh, T, ρ, cₚ, κ))
   nothing
 end

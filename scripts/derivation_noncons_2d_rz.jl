@@ -13,6 +13,11 @@ using LinearAlgebra
 # ╔═╡ 26c1f261-6587-4f3b-bfff-29747e410a6f
 using Latexify
 
+# ╔═╡ aca1d1f3-bfe6-4106-b658-99506d9bc698
+md"""
+### Derivation of the diffusion equation in curvilinear coordinates for an RZ cylindrical system
+"""
+
 # ╔═╡ 90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 html"""<style>
 main {
@@ -71,7 +76,7 @@ end
 diff2d |> simplify
 
 # ╔═╡ 788c2865-05e3-4e02-bc72-8a55aab9fcc8
-@variables aᵢ₊½ aᵢ₋½ aⱼ₊½ aⱼ₋½ aₖ₊½ aₖ₋½ α β γ Δt⁻¹
+@variables aᵢ₊½ aᵢ₋½ aⱼ₊½ aⱼ₋½ aₖ₊½ aₖ₋½ α β γ Δt⁻¹ r r⁻¹
 
 # ╔═╡ 5a542599-21ab-4409-9f32-73b44a31248f
 @variables f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ
@@ -104,8 +109,8 @@ end
 
 # ╔═╡ d8fb476f-4881-42ca-aac9-d98c1f392d12
 ∂u∂t = (
-	    f_ξ² * (aᵢ₊½ * (uⁿ⁺¹ᵢ₊₁ⱼ - uⁿ⁺¹ᵢⱼ) - aᵢ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢ₋₁ⱼ)) +
-	    f_η² * (aⱼ₊½ * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ) - aⱼ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢⱼ₋₁)) +
+	    f_ξ² * r⁻¹ * (aᵢ₊½ * (uⁿ⁺¹ᵢ₊₁ⱼ - uⁿ⁺¹ᵢⱼ) - aᵢ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢ₋₁ⱼ)) + #r⁻¹ ∂/∂ξ(r ∂u/∂ξ)
+	    f_η² * (aⱼ₊½ * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ) - aⱼ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢⱼ₋₁)) +       #    ∂/∂η(∂u/∂η)
 	    
 		+f_ξη * (
 	      aᵢ₊₁ⱼ * (uⁿ⁺¹ᵢ₊₁ⱼ₊₁ - uⁿ⁺¹ᵢ₊₁ⱼ₋₁) - # ∂u/∂η
@@ -117,8 +122,8 @@ end
 	    ) + # ∂/∂η
 	    
 	    aᵢⱼ * α / 2.0 * (uⁿ⁺¹ᵢ₊₁ⱼ - uⁿ⁺¹ᵢ₋₁ⱼ) +
-	    aᵢⱼ * β / 2.0 * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ₋₁) + s
-  	) 
+	    aᵢⱼ * β / 2.0 * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ₋₁)
+  	) + s
 
 # ╔═╡ a793b86f-de3c-408e-8b87-2d2c42634999
 md"""
@@ -1074,7 +1079,8 @@ version = "17.4.0+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═90b35e26-c0c0-45f1-82a3-858fe4f38c8f
+# ╠═aca1d1f3-bfe6-4106-b658-99506d9bc698
+# ╟─90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 # ╠═6ad7bf8e-f75f-11ee-0dec-efdffaa6e329
 # ╠═646847cf-b467-4f69-b843-b38181a9d91e
 # ╠═26c1f261-6587-4f3b-bfff-29747e410a6f
@@ -1087,12 +1093,12 @@ version = "17.4.0+2"
 # ╠═61da9e46-2bbc-44c9-88a5-b553c9f96ca1
 # ╠═788c2865-05e3-4e02-bc72-8a55aab9fcc8
 # ╠═5a542599-21ab-4409-9f32-73b44a31248f
-# ╠═d33cf295-0179-4ea9-8dd2-4663032b0a6b
+# ╟─d33cf295-0179-4ea9-8dd2-4663032b0a6b
 # ╟─ff10c7a4-1689-476b-92dd-f819fe750059
 # ╠═d8fb476f-4881-42ca-aac9-d98c1f392d12
 # ╟─a793b86f-de3c-408e-8b87-2d2c42634999
 # ╠═2ec9da95-eadd-470a-ac24-5fa693b53f79
-# ╠═aef9517f-82b9-4b57-ace6-bc47e6874071
+# ╟─aef9517f-82b9-4b57-ace6-bc47e6874071
 # ╠═8f3cadd0-b343-4d62-98f6-84dc744a9ad5
 # ╠═23fbf92c-b625-45a0-9cf5-0617c05a97cb
 # ╠═81f5a905-867c-47c1-b5b4-683585641d22

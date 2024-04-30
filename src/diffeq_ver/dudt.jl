@@ -7,7 +7,13 @@ using Printf
 using BenchmarkTools
 using TimerOutputs
 using Polyester
+using LinearAlgebra
+using LinearAlgebra.BLAS
+using MKL
+using Glob
 using IncompleteLU
+
+BLAS.get_config()
 
 include("non_cons_terms.jl")
 
@@ -25,6 +31,7 @@ function save_vtk(T, mesh, iteration, t, name, pvd)
   @info "Writing to $fn"
   ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
+  @info "t: $t"
   #   α = @views solver.α[ilo:ihi, jlo:jhi]
   #   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
@@ -122,10 +129,10 @@ function uniform_grid(nx, ny)
 end
 
 function initialize_mesh()
-  ni, nj = (1501, 1501)
+  ni, nj = (501, 501)
   nhalo = 6
   x, y = wavy_grid(ni, nj)
-  #   x, y = uniform_grid(ni, nj)
+  # x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
@@ -155,7 +162,7 @@ function du!(dudt, u::AbstractArray{T,N}, params, t) where {T,N}
   @unpack mesh, density, diffusivity, source_term, meanfunc, κ, cₚ = params
 
   #   update_conductivity!(diffusivity, u, density, κ, cₚ)
-
+  # println("diffusivity extrema: $(extrema(diffusivity))")
   @batch for idx in mesh.iterators.cell.domain
     @unpack α, β, f_ξ², f_η², f_ξη = non_cons_terms(
       mesh.cell_center_metrics, mesh.edge_metrics, idx
@@ -173,13 +180,6 @@ function du!(dudt, u::AbstractArray{T,N}, params, t) where {T,N}
     uᵢ₊₁ⱼ₊₁ = u[i + 1, j + 1]
     uᵢ₋₁ⱼ₋₁ = u[i - 1, j - 1]
 
-    # k0 = 1e12
-    # aᵢⱼ = k0 * uᵢⱼ^3
-    # aᵢ₊₁ⱼ = k0 * uᵢ₊₁ⱼ^3
-    # aᵢ₋₁ⱼ = k0 * uᵢ₋₁ⱼ^3
-    # aᵢⱼ₊₁ = k0 * uᵢⱼ₊₁^3
-    # aᵢⱼ₋₁ = k0 * uᵢⱼ₋₁^3
-
     aᵢⱼ = diffusivity[i, j]
     aᵢ₊₁ⱼ = diffusivity[i + 1, j]
     aᵢ₋₁ⱼ = diffusivity[i - 1, j]
@@ -194,11 +194,11 @@ function du!(dudt, u::AbstractArray{T,N}, params, t) where {T,N}
     dudt[i, j] =
       f_ξ² * (aᵢ₊½ * (uᵢ₊₁ⱼ - uᵢⱼ) - aᵢ₋½ * (uᵢⱼ - uᵢ₋₁ⱼ)) +
       f_η² * (aⱼ₊½ * (uᵢⱼ₊₁ - uᵢⱼ) - aⱼ₋½ * (uᵢⱼ - uᵢⱼ₋₁)) +
-      +f_ξη * (
+      f_ξη * (
         aᵢ₊₁ⱼ * (uᵢ₊₁ⱼ₊₁ - uᵢ₊₁ⱼ₋₁) - # ∂u/∂η
         aᵢ₋₁ⱼ * (uᵢ₋₁ⱼ₊₁ - uᵢ₋₁ⱼ₋₁)   # ∂u/∂η
       ) + # ∂/∂ξ
-      +f_ξη * (
+      f_ξη * (
         aᵢⱼ₊₁ * (uᵢ₊₁ⱼ₊₁ - uᵢ₋₁ⱼ₊₁) - # ∂u/∂ξ
         aᵢⱼ₋₁ * (uᵢ₊₁ⱼ₋₁ - uᵢ₋₁ⱼ₋₁)   # ∂u/∂ξ
       ) + # ∂/∂η
@@ -215,17 +215,36 @@ end
   #   if !isfinite(T)
   #     return 0.0
   #   else
-  κ0 = 1.0
-  return κ0 * T^3
+  κ0 = 10.0
+  return κ0 #* T^3
   #   end
 end
 
 # thermal_conduction_2d = ODEProblem(du!, T, (0.0, 0.1), params);
 
+function get_sparsity(mesh)
+  ni, nj = cellsize_withhalo(mesh)
+  len = ni * nj
+
+  A = spdiagm(
+    -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
+    -ni => zeros(len - ni),     # (i  , j-1)
+    -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
+    -1 => zeros(len - 1),      # (i-1, j  )
+    0 => ones(len),           # (i  , j  )
+    1 => zeros(len - 1),      # (i+1, j  )
+    ni - 1 => zeros(len - ni + 1), # (i-1, j+1)
+    ni => zeros(len - ni),     # (i  , j+1)
+    ni + 1 => zeros(len - ni - 1), # (i+1, j+1)
+  )
+  return A
+end
+
 function init_prob()
+  @info "Initializing"
   mesh = initialize_mesh()
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e2
   T_cold = 1e-2
   u0 = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
@@ -244,7 +263,7 @@ function init_prob()
     for i in ilo:ihi
       c_loc = centroid(mesh, (i, j))
 
-      source_term[i, j] =
+      u0[i, j] =
         T_hot * exp(-(((x0 - c_loc.x)^2) / fwhm + ((y0 - c_loc.y)^2) / fwhm)) + T_cold
     end
   end
@@ -253,95 +272,56 @@ function init_prob()
   params = (; mesh, density=ρ, diffusivity, source_term, meanfunc=harmonic_mean, κ, cₚ)
 
   # set up sparsity
-  du0 = copy(u0)
-  jac_sparsity = Symbolics.jacobian_sparsity((du, u) -> du!(du, u0, params, 0.0), du0, u0)
-
+  # du0 = copy(u0)
+  # jac_sparsity = Symbolics.jacobian_sparsity((du, u) -> du!(du, u, params, 0.0), du0, u0)
+  jac_sparsity = get_sparsity(mesh)
   f = ODEFunction{true}(du!; jac_prototype=jac_sparsity)
-  prob = ODEProblem(f, u0, (0.0, 1.0), params)
+  prob = ODEProblem{true}(f, u0, (0.0, 1.0), params)
+  # # prob = ODEProblem{true}(du!, u0, (0.0, 1.0), params)
 
-  #   alg = Trapezoid(; linsolve=KrylovJL_GMRES(), precs=incompletelu, concrete_jac=true)
-  alg = Trapezoid(; linsolve=UMFPACKFactorization())
-  integrator = init(prob, alg; save_everystep=false)
+  # #   alg = Trapezoid(; linsolve=KrylovJL_GMRES(), precs=incompletelu, concrete_jac=true)
 
-  #   prob = ODEProblem(du!, u0, (0.0, 1.0), params)
-  #   integrator = init(prob, Trapezoid(; linsolve=linsolver); save_everystep=false)
+  # # ImplicitMidpoint, TRBDF2
 
-  #   integrator = init(
-  #     prob,
-  #     Trapezoid(; linsolve=KrylovJL_GMRES(), precs=algebraicmultigrid, concrete_jac=true);
-  #     save_everystep=false,
-  #   )
+  alg = Trapezoid(;
+    # linsolve=UMFPACKFactorization(),
+    # linsolve=MKLLUFactorization(),
+    linsolve=KrylovJL_GMRES(; history=true),
+    # concrete_jac=true,
+    # precs=algebraicmultigrid,
+  )
+  dt = 1e-4
+  integrator = init(prob, alg; dt=dt, save_everystep=false)
 
-  # integrator = init(prob, Trapezoid(; linsolve=KLUFactorization()); save_everystep=false)
-  #   integrator = init(
-  #     prob, Trapezoid(; linsolve=UMFPACKFactorization()); save_everystep=false
-  #   )
-  #   integrator = init(prob, KenCarp47(; linsolve=KLUFactorization()); save_everystep=false)
+  @info "Done initializing"
   return integrator
-  #   return nothing
 end
 
-# @code_warntype init_prob();
-# alg = ImplicitEuler(; linsolve=KrylovJL_GMRES())
-# integrator = init(prob, alg);
-# @code_warntype init(prob, alg)
-# prob = init_prob();
-
-# dt = 1e-8
-# step!(prob, dt, true)
-# # begin
-#   @info "Initializing"
-#   prob = init_prob()
-#   #   @info "update conductivity"
-#   #   update_conductivity!(diffusivity, T, ρ, κ, cₚ)
-#   #   @info "step!"
-#   #   step!(prob, dt, true)
-#   #   @info "benchmarking"
-#   #   @btime step!($prob, $dt, $true)
-# end
-
-# update_conductivity!(prob.p.diffusivity, prob.u, prob.p.density, κ, prob.p.cₚ)
-# prob.p.diffusivity |> extrema
-
-# begin
-#   global t = 0
-#   global iter = 0
-#   while true
-#     println("iter: $iter")
-#     iter += 1
-#     dt = 1e-8
-#     t += dt
-#     # update_conductivity!(prob.p.diffusivity, prob.u, prob.p.density, κ, prob.p.cₚ)
-#     step!(prob, dt, true)
-#     pvd = paraview_collection("full_sim")
-#     if iter
-#       save_vtk(prob.u, prob.p.mesh, iter, prob.t, "diffeq_ver", pvd)
-#       if iter >= 100
-#         break
-#       end
-#     end
-#   end
-
-begin
-  prob = init_prob()
-  global Δt = 1e-4
+function runme(prob, maxiter=Inf)
+  global Δt = 1e-5
   global t = 0.0
-  global maxt = 0.2
+  global maxt = 0.05
   global iter = 0
-  global maxiter = 100
-  global io_interval = 1e-3
+  global io_interval = 5e-4
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
   #   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
   save_vtk(prob.u, prob.p.mesh, iter, prob.t, "diffeq_ver", pvd)
 
-  reset_timer!()
   while true
-    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
+    if iter == 1
+      @info "reseting"
+      reset_timer!()
+    end
+    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter prob.t prob.dt
 
     # fill!(prob.p.diffusivity, iter)
-    # update_conductivity!(prob.p.diffusivity, prob.u, prob.p.density, κ, prob.p.cₚ)
-    @timeit "step!" step!(prob, Δt, true)
+    # @info "conductivity"
+    # @timeit "update_conductivity!"
+    update_conductivity!(prob.p.diffusivity, prob.u, prob.p.density, κ, prob.p.cₚ)
+    # @info "step"
+    # @timeit "step!" 
+    step!(prob, Δt, true)
     # prob.p.diffusivity .= iter #.^ 3
 
     if t + Δt > io_next
@@ -362,10 +342,13 @@ begin
   end
 
   print_timer()
+  return prob
 end
 
-# @profview step!(integrator, dt, true)
+cd(@__DIR__)
+rm.(glob("*.vts"))
 
-# # for (i, ut) in enumerate(prob.sol.u)
-# @show prob.stats
-# # end
+prob = init_prob();
+@profview begin
+  p = runme(prob, 15)
+end

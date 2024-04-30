@@ -67,6 +67,8 @@ end
 function inner_op_3d(
   metric_terms, diffusivity, uⁿᵢⱼₖ::T, Δt::T, s::T, meanfunc::F
 ) where {T,F<:Function}
+
+  #
   @unpack α, β, f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ = metric_terms
   @unpack aᵢⱼₖ, aᵢ₊₁ⱼₖ, aᵢ₋₁ⱼₖ, aᵢⱼ₊₁ₖ, aᵢⱼ₋₁ₖ, aᵢⱼₖ₊₁, aᵢⱼₖ₋₁ = diffusivity
 

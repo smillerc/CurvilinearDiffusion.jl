@@ -144,7 +144,7 @@ function uniform_grid(nx, ny)
 end
 
 function initialize_mesh()
-  ni, nj = (1501, 1501)
+  ni, nj = (101, 101)
   nhalo = 6
   x, y = wavy_grid2(ni, nj)
   # x, y = uniform_grid(ni, nj)
@@ -160,11 +160,11 @@ function init_state()
   T0 = 1.0
   bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
 
-  solver = ImplicitScheme(mesh, bcs; backend=backend)
+  solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
   CFL = 100 # 1/2 is the explicit stability limit
 
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e2
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
@@ -172,11 +172,11 @@ function init_state()
   cₚ = 1.0
 
   # Define the conductivity model
-  @inline function κ(ρ, temperature, κ0=1.0)
+  @inline function κ(ρ, temperature, κ0=10.0)
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 #* temperature^3
     end
   end
 
@@ -187,11 +187,14 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
 
-    source_term[idx] =
-      T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    # source_term[idx] =
+    #   T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
 
+  fill!(source_term, 0)
   copy!(solver.source_term, source_term) # move to gpu (if need be)
+  # copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -199,36 +202,37 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run()
+function run(maxiter=Inf)
   solver, mesh, T, ρ, cₚ, κ = init_state()
-  global Δt0 = 1e-4
+
   global Δt = 1e-5
   global t = 0.0
-  global maxt = 0.2
+  global maxt = 0.015
   global iter = 0
-  global maxiter = 20
   global io_interval = 5e-4
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 
-  @profview while true
+  @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
+    solver.α, T, ρ, κ, cₚ
+  )
+
+  while true
     if iter == 0
       reset_timer!()
     end
 
-    @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-      solver.α, T, ρ, κ, cₚ
-    )
     # dt = CurvilinearDiffusion.max_dt(solver, mesh)
     # dt = max(1e-10, min(Δt0, dt))
     # global Δt = CFL * dt
     # @show Δt, CFL, dt
 
-    @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
-      solver, mesh, T, Δt
-    )
-    @printf "cycle: %i t: %.4e, L2: %.1e, iterations: %i Δt: %.3e\n" iter t L₂ ncycles Δt
+    # @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
+    #   solver, mesh, T, Δt
+    # )
+    @timeit "solve!" CurvilinearDiffusion.ImplicitSchemeType.solve!(solver, mesh, T, Δt)
+    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next
       @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
@@ -259,7 +263,7 @@ begin
   const casename = "implicit_gauss_source"
   rm.(glob("*.vts"))
 
-  solver, temperature = run()
+  solver, temperature = run(1500)
   nothing
 end
 

@@ -25,12 +25,8 @@ using CUDA.CUSPARSE: CuSparseMatrixCSR
 export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
 
 # struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,SM2,V,ST,PL,F,BC,CI1,CI2}
-struct ImplicitScheme{N,T,BE,AA<:AbstractArray{T,N},ST,F,BC,CI1,CI2}
-  # A::SM # sparse matrix
-  # _A_cache::SM2
-  # b::V # RHS vector
+struct ImplicitScheme{N,T,BE,AA<:AbstractArray{T,N},ST,F,BC,CI1,CI2,SCL}
   linear_problem::ST # linear solver
-  # Pl::PL # preconditioner
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
   mean_func::F
@@ -41,6 +37,7 @@ struct ImplicitScheme{N,T,BE,AA<:AbstractArray{T,N},ST,F,BC,CI1,CI2}
   backend::BE # GPU / CPU
   warmed_up::Vector{Bool}
   direct_solve::Bool
+  stencil_col_lookup::SCL
 end
 
 warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
@@ -49,8 +46,9 @@ function warmup!(scheme::ImplicitScheme)
 end
 
 include("../averaging.jl")
-include("../edge_terms.jl")
+# include("../edge_terms.jl")
 include("matrix_assembly.jl")
+include("init_matrix.jl")
 include("rhs_assembly.jl")
 
 function ImplicitScheme(
@@ -73,14 +71,7 @@ function ImplicitScheme(
 
   @assert length(domain_CI) == length(halo_aware_CI)
 
-  A = initialize_coefficient_matrix(mesh, backend)
-
-  # if backend isa CPU
-  #   A_cache = nothing
-  # else
-  #   A_cache = initialize_coefficient_matrix(mesh, CPU())
-  #   
-  # end
+  A, stencil_col_lookup = initialize_coefficient_matrix(mesh, backend)
 
   b = KernelAbstractions.zeros(backend, T, len)
   x = KernelAbstractions.zeros(backend, T, len)
@@ -98,21 +89,19 @@ function ImplicitScheme(
 
   else
     Pl = preconditioner(A, backend)
-    # Pl = kp_ilu0(A)
-    linear_problem = init(
-      LinearProblem(A, b),
-      # KrylovJL_GMRES(; history=true, N=Pl, ldiv=false); # krylov solver
-      KrylovJL_GMRES(; history=true, ldiv=false); # krylov solver
-      Pl=Pl,
-    )
+    linear_problem = (A=A, b=b, x=x, solver=Krylov.GmresSolver(A, b), Pl=Pl)
+    # # Pl = kp_ilu0(A)
+    # linear_problem = init(
+    #   LinearProblem(A, b),
+    #   # KrylovJL_GMRES(; history=true, N=Pl, ldiv=false); # krylov solver
+    #   KrylovJL_GMRES(; history=true); # krylov solver
+    #   # Pl=Pl,
+    # )
+
   end
 
   implicit_solver = ImplicitScheme(
-    # A,
-    # A_cache,
-    # b,
     linear_problem,
-    # Pl,
     diffusivity,
     source_term,
     mean_func,
@@ -123,6 +112,7 @@ function ImplicitScheme(
     backend,
     [false],
     direct_solve,
+    stencil_col_lookup,
   )
 
   @info "Done"
@@ -162,18 +152,14 @@ function initialize_coefficient_matrix(mesh::CurvilinearGrid2D, ::CPU)
   # I, J, V, mmax, nmax = SparseArrays.spdiagm_internal(kv...)
   # A = sparsecsr(I, J, V, mmax, nmax)
 
-  return A
+  return A, nothing
 end
 
-function initialize_coefficient_matrix(mesh::CurvilinearGrid1D, ::CPU)
-  len, = cellsize(mesh)
-  A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
-  return A
-end
-
-function initialize_coefficient_matrix(mesh::CurvilinearGrid2D, ::CUDABackend)
-  return CuSparseMatrixCSR(initialize_coefficient_matrix(mesh, CPU()))
-end
+# function initialize_coefficient_matrix(mesh::CurvilinearGrid1D, ::CPU)
+#   len, = cellsize(mesh)
+#   A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
+#   return A
+# end
 
 function solve!(
   scheme::ImplicitScheme,
@@ -208,64 +194,60 @@ function _cpu_iterative_solve!(
   maxiter=500,
   show_hist=true,
 )
+  A = scheme.linear_problem.A
+  b = scheme.linear_problem.b
+  x = scheme.linear_problem.x
+  Pl = scheme.linear_problem.Pl
+  solver = scheme.linear_problem.solver
   domain_LI = LinearIndices(scheme.domain_indices)
 
-  @timeit "assemble_rhs!" assemble_rhs!(scheme, u, Δt)
-  @timeit "assemble_matrix!" assemble_matrix!(scheme, scheme.linear_problem.A, mesh, Δt)
+  @timeit "assemble_rhs!" assemble_rhs!(b, scheme, u, Δt)
+  @timeit "assemble_matrix!" assemble_matrix!(scheme, A, mesh, Δt)
 
   # # error("done")
+  # if !warmedup(scheme)
+  #   @info "Performing the first factorization and solve (cold), after this the factorization will be re-used"
+  #   @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem)
+  #   warmup!(scheme)
+  # else
+  #   @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
+  # end
+
+  # precondition
+  @timeit "ilu0! (preconditioner)" ilu0!(Pl, A)
+
+  n = size(A, 1)
+  precond_op = LinearOperator(eltype(A), n, n, false, false, (y, v) -> ldiv!(y, Pl, v))
+
   if !warmedup(scheme)
-    @info "Performing the first factorization and solve (cold), after this the factorization will be re-used"
-    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem)
+    @timeit "linear solve (cold)" gmres!(
+      solver, A, b; N=precond_op, history=true, itmax=maxiter
+    )
     warmup!(scheme)
   else
-    @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
+    @timeit "linear solve (warm)" gmres!(
+      solver,
+      A,
+      b,
+      x; # use last step as a starting point
+      N=precond_op,
+      itmax=maxiter,
+      history=true,
+    )
   end
 
-  # domain_LI = LinearIndices(scheme.domain_indices)
+  @views begin
+    copyto!(u[scheme.halo_aware_indices], solver.x[domain_LI])
+    # copyto!(u[scheme.halo_aware_indices], scheme.linear_problem.u[domain_LI])
+  end
 
-  # # update the A matrix
-  # @timeit "assemble_rhs!" assemble_rhs!(scheme, u, Δt)
-  # @timeit "assemble_matrix!" assemble_matrix!(scheme, scheme.A, mesh, Δt)
-
-  # # precondition
-  # @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, scheme.A)
-
-  # n = size(scheme.A, 1)
-  # precond_op = LinearOperator(
-  #   eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
-  # )
-
-  # if !warmedup(scheme)
-  #   @timeit "dqgmres! (linear solve)" dqgmres!(
-  #     scheme.solver, scheme.A, scheme.b; N=precond_op, history=true, itmax=maxiter
-  #   )
-  #   warmedup!(scheme)
-  # else
-  #   @timeit "dqgmres! (linear solve)" dqgmres!(
-  #     scheme.solver,
-  #     scheme.A,
-  #     scheme.b,
-  #     scheme.solver.x; # use last step as a starting point
-  #     N=precond_op,
-  #     itmax=maxiter,
-  #     history=true,
-  #   )
-  # end
-
-  # resids = last(scheme.solver.stats.residuals)
-  # niter = scheme.solver.stats.niter
-
-  # # update u to the solution
-  # @views begin
-  #   copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
-  # end
-
-  # # if show_hist
-  # #   @printf "Convergence: %.1e, iterations: %i Δt: %.3e\n" resids niter Δt
-  # # end
-
-  # return resids, niter, issolved(scheme.solver)
+  # residual = last(scheme.linear_problem.cacheval.stats.residuals)
+  # niter = scheme.linear_problem.cacheval.stats.niter
+  residual = last(solver.stats.residuals)
+  niter = solver.stats.niter
+  if show_hist
+    @printf "\tConvergence L₂norm : %.1e, solver iterations: %i\n" residual niter
+  end
 end
 
 function _cpu_direct_solve!(
@@ -273,7 +255,7 @@ function _cpu_direct_solve!(
 )
   domain_LI = LinearIndices(scheme.domain_indices)
 
-  @timeit "assemble_rhs!" assemble_rhs!(scheme, u, Δt)
+  @timeit "assemble_rhs!" assemble_rhs!(scheme.linear_problem.b, scheme, u, Δt)
   @timeit "assemble_matrix!" assemble_matrix!(scheme, scheme.linear_problem.A, mesh, Δt)
 
   # # error("done")
@@ -285,10 +267,10 @@ function _cpu_direct_solve!(
     @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
   end
 
-  # # update u to the solution
-  # @views begin
-  #   copyto!(u[scheme.halo_aware_indices], scheme.linear_problem.u[domain_LI])
-  # end
+  # update u to the solution
+  @views begin
+    copyto!(u[scheme.halo_aware_indices], scheme.linear_problem.u[domain_LI])
+  end
 
   return nothing
 end
@@ -416,8 +398,8 @@ end
 end
 
 @inline function preconditioner(A, backend::GPU, τ=0.1)
-  # return KrylovPreconditioners.kp_ilu0(A)
-  return KrylovPreconditioners.BlockJacobiPreconditioner(A; device=backend)
+  return KrylovPreconditioners.kp_ilu0(A)
+  # return KrylovPreconditioners.BlockJacobiPreconditioner(A; device=backend)
 end
 
 end
