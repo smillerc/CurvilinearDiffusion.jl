@@ -45,8 +45,6 @@ end
 @kernel function inner_diffusion_op_kernel_2d!(
   A,
   α,
-  u,
-  source_term,
   Δt,
   cell_center_metrics,
   edge_metrics,
@@ -69,26 +67,10 @@ end
     )
 
     stencil = _inner_diffusion_operator(
-      # u, source_term, 
-      edge_diffusivity,
-      Δt,
-      cell_center_metrics,
-      edge_metrics,
-      grid_idx,
+      edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx
     )
 
     row = matrix_indices[idx]
-    # #! format: off
-    # A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
-    # A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
-    # A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
-    # A[mat_idx, mat_idx - 1]      = stencil[-1, +0] # (i-1, j  )
-    # A[mat_idx, mat_idx]          = stencil[+0, +0] # (i  , j  )
-    # A[mat_idx, mat_idx + 1]      = stencil[+1, +0] # (i+1, j  )
-    # A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] # (i-1, j+1)
-    # A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
-    # A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
-    # #! format: on
 
     #! format: off
     colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
@@ -101,18 +83,16 @@ end
     colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
     colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
 
-    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]  #[-1, -1] # (i-1, j-1)
-    A[row, colᵢⱼ₋₁  ] = stencil[2]  #[+0, -1] # (i  , j-1)
-    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]  #[+1, -1] # (i+1, j-1)
-    A[row, colᵢ₋₁ⱼ  ] = stencil[4]  #[-1, +0] # (i-1, j  )
-    A[row, colᵢⱼ    ] = stencil[5]  #[+0, +0] # (i  , j  )
-    A[row, colᵢ₊₁ⱼ  ] = stencil[6]  #[+1, +0] # (i+1, j  )
-    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]  #[-1, +1] # (i-1, j+1)
-    A[row, colᵢⱼ₊₁  ] = stencil[8]  #[ 0, +1] # (i  , j+1)
-    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]  #[+1, +1] # (i+1, j+1)
+    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] 
+    A[row, colᵢⱼ₋₁  ] = stencil[2] 
+    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] 
+    A[row, colᵢ₋₁ⱼ  ] = stencil[4] 
+    A[row, colᵢⱼ    ] = stencil[5] 
+    A[row, colᵢ₊₁ⱼ  ] = stencil[6] 
+    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] 
+    A[row, colᵢⱼ₊₁  ] = stencil[8] 
+    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] 
     #! format: on
-
-    # b[mat_idx] = rhs
   end
 end
 
@@ -212,52 +192,11 @@ end
 
 # Generate a stencil for a single 2d cell in the interior
 @inline function _inner_diffusion_operator(
-  # u::AbstractArray{T,2},
-  # source_term::AbstractArray{T,2},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
+  edge_diffusivity, Δτ, cell_center_metrics, edge_metrics, idx
 )
-
-  #
   Jᵢⱼ = cell_center_metrics.J[idx]
-  # sᵢⱼ = source_term[idx]
-  # uᵢⱼ = u[idx]
-
-  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metrics, idx
-  )
-
-  A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
-  B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
-  C = -gᵢ₊½ - gⱼ₋½                             # (i+1,j-1)
-  D = fᵢ₋½ - gⱼ₊½ + gⱼ₋½                       # (i-1,j)
-  F = fᵢ₊½ + gⱼ₊½ - gⱼ₋½                       # (i+1,j)
-  G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
-  H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
-  I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-  # RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
-
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
-
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-
-  # Don't use an offset matrix here b/c benchmarking showed it was
-  # ~3x slower. It makes the indexing here more of a pain,
-  # but 3x slower is a big deal for this performance critical section
-
-  stencil = @SVector [A, B, C, D, E, F, G, H, I]
-  # stencil = SMatrix{3,3,Float64}(A, B, C, D, E, F, G, H, I)
-
-  # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  # offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
-
-  # return offset_stencil
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_2d(edge_terms, Jᵢⱼ, Δτ)
   return stencil
 end
 

@@ -71,9 +71,7 @@ end
 ) where {F}
   idx = @index(Global, Linear)
 
-  # len = ni * nj
-
-  nrows, ncols = size(A)
+  _, ncols = size(A)
   begin
     grid_idx = grid_indices[idx]
     row = matrix_indices[idx]
@@ -87,16 +85,8 @@ end
     )
 
     stencil = _neumann_boundary_diffusion_operator(
-      # u, source_term, 
-      edge_diffusivity,
-      Δt,
-      cell_center_metrics,
-      edge_metrics,
-      grid_idx,
-      loc,
+      edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
     )
-
-    # A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
 
     ip1 = true
     jp1 = true
@@ -111,17 +101,6 @@ end
     elseif loc == 4 # :jhi
       jp1 = false
     end
-
-    # #! format: off
-    # if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    # if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    # if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    # if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    # if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    # if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    # if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    # if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    # #! format: on
 
     #! format: off
     colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
@@ -262,20 +241,10 @@ end
 
 # Generate a stencil for a 2D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  # u::AbstractArray{T,2},
-  # source_term::AbstractArray{T,2},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
-  loc,
+  edge_diffusivity, Δτ, cell_center_metrics, edge_metrics, idx, loc
 )
-  T = Float64
-  #
+  T = eltype(edge_diffusivity)
   Jᵢⱼ = cell_center_metrics.J[idx]
-  # sᵢⱼ = source_term[idx]
-  # uᵢⱼ = u[idx]
 
   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
     edge_diffusivity, edge_metrics, idx
@@ -298,43 +267,8 @@ end
     error("bad boundary location")
   end
 
-  A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
-  B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
-  C = -gᵢ₊½ - gⱼ₋½                             # (i+1,j-1)
-  D = fᵢ₋½ - gⱼ₊½ + gⱼ₋½                       # (i-1,j)
-  F = fᵢ₊½ + gⱼ₊½ - gⱼ₋½                       # (i+1,j)
-  G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
-  H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
-  I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-  # RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
+  edge_terms = (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
+  stencil = stencil_2d(edge_terms, Jᵢⱼ, Δτ)
 
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
-
-  stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
-
-  # if any(isnan.(stencil))
-  #   @show idx
-  #   @show edge_diffusivity
-  #   @show stencil
-  #   @show Jᵢⱼ sᵢⱼ uᵢⱼ
-  #   @show fᵢ₊½ fᵢ₋½ fⱼ₊½ fⱼ₋½ gᵢ₊½ gᵢ₋½ gⱼ₊½ gⱼ₋½
-
-  #   idim, jdim = (1, 2)
-  #   ᵢ₋₁ = shift(idx, idim, -1)
-  #   ⱼ₋₁ = shift(idx, jdim, -1)
-
-  #   @show edge_metrics.i₊½.η̂[idx]
-  #   @show edge_metrics.i₊½.η̂[ⱼ₋₁]
-  #   @show edge_metrics.i₊½.ξ̂[idx]
-  #   @show edge_metrics.i₊½.ξ̂[ᵢ₋₁]
-  #   error("done")
-  # end
-
-  # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
-
-  return offset_stencil #, RHS
+  return stencil
 end

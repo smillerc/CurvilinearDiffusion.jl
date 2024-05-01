@@ -1,4 +1,5 @@
 
+include("stencils.jl")
 include("inner_operators.jl")
 include("boundary_operators.jl")
 
@@ -29,8 +30,6 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
   inner_diffusion_op_kernel_2d!(backend, workgroup)(
     A,
     scheme.α,
-    u,
-    scheme.source_term,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
@@ -47,10 +46,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
   ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
     A,
-    # scheme.b,
     scheme.α,
-    # u,
-    # scheme.source_term,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
@@ -67,10 +63,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
   ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
     A,
-    # scheme.b,
     scheme.α,
-    # u,
-    # scheme.source_term,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
@@ -87,10 +80,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
   jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
     A,
-    # scheme.b,
     scheme.α,
-    # u,
-    # scheme.source_term,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
@@ -107,10 +97,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
   jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
     A,
-    # scheme.b,
     scheme.α,
-    # u,
-    # scheme.source_term,
     Δt,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
