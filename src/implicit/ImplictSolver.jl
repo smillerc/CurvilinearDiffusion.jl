@@ -29,7 +29,6 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2,SCL}
   mean_func::F
   bcs::BC
   nhalo::Int
-  conservative::Bool # uses the conservative form
   domain_indices::CI1
   halo_aware_indices::CI2
   backend # GPU / CPU
@@ -49,9 +48,8 @@ include("rhs_assembly.jl")
 include("init_matrix.jl")
 
 function ImplicitScheme(
-  mesh::CurvilinearGrid2D,
+  mesh,
   bcs;
-  form=:conservative,
   mean_func=arithmetic_mean,
   T=Float64,
   # solver=KrylovJL_GMRES(),
@@ -59,15 +57,12 @@ function ImplicitScheme(
 )
   celldims = cellsize_withhalo(mesh)
 
-  ni, nj = cellsize(mesh)
-  len = ni * nj
+  len = prod(cellsize(mesh))
 
   halo_aware_CI = mesh.iterators.cell.domain
   domain_CI = CartesianIndices(size(halo_aware_CI))
 
   @assert length(domain_CI) == length(halo_aware_CI)
-
-  conservative = form === :conservative
 
   A, stencil_col_lookup = initialize_coefficient_matrix(mesh, backend)
   Pl = preconditioner(A, backend)
@@ -77,9 +72,9 @@ function ImplicitScheme(
 
   diffusivity = KernelAbstractions.zeros(backend, T, celldims)
   source_term = KernelAbstractions.zeros(backend, T, celldims)
-  memory = 50
-  solver = Krylov.DqgmresSolver(A, b, memory)
-  # solver = Krylov.GmresSolver(A, b)
+  # memory = 50
+  # solver = Krylov.DqgmresSolver(A, b, memory)
+  solver = Krylov.GmresSolver(A, b)
 
   implicit_solver = ImplicitScheme(
     A,
@@ -92,7 +87,6 @@ function ImplicitScheme(
     mean_func,
     bcs,
     mesh.nhalo,
-    conservative,
     domain_CI,
     halo_aware_CI,
     backend,
@@ -103,56 +97,16 @@ function ImplicitScheme(
   return implicit_solver
 end
 
-# function init_A_matrix(mesh::CurvilinearGrid2D, ::CPU)
-#   ni, nj = cellsize(mesh)
-#   len = ni * nj
-
-#   #! format: off
-#   A = spdiagm(
-#     -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
-#     -ni     => zeros(len - ni),     # (i  , j-1)
-#     -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
-#     -1      => zeros(len - 1),      # (i-1, j  )
-#     0       => ones(len),           # (i  , j  )
-#     1       => zeros(len - 1),      # (i+1, j  )
-#     ni - 1  => zeros(len - ni + 1), # (i-1, j+1)
-#     ni      => zeros(len - ni),     # (i  , j+1)
-#     ni + 1  => zeros(len - ni - 1), # (i+1, j+1)
-#   )
-#   #! format: on
-
-#   # kv = (
-#   #   -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
-#   #   -ni => zeros(len - ni),     # (i  , j-1)
-#   #   -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
-#   #   -1 => zeros(len - 1),      # (i-1, j  )
-#   #   0 => ones(len),           # (i  , j  )
-#   #   1 => zeros(len - 1),      # (i+1, j  )
-#   #   ni - 1 => zeros(len - ni + 1), # (i-1, j+1)
-#   #   ni => zeros(len - ni),     # (i  , j+1)
-#   #   ni + 1 => zeros(len - ni - 1), # (i+1, j+1)
-#   # )
-
-#   # I, J, V, mmax, nmax = SparseArrays.spdiagm_internal(kv...)
-#   # B = sparsecsr(I, J, V, mmax, nmax)
-
-#   return A
-# end
-
-# function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
-#   len, = cellsize(mesh)
-#   A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
-#   return A
-# end
-
 function solve!(
-  scheme::ImplicitScheme,
+  scheme::ImplicitScheme{N,T},
   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
   u,
   Δt;
+  atol::T=√eps(T),
+  rtol::T=√eps(T),
   maxiter=500,
   show_hist=true,
-)
+) where {N,T}
   domain_LI = LinearIndices(scheme.domain_indices)
 
   A = scheme.A
@@ -160,8 +114,8 @@ function solve!(
   x = scheme.solver.x
 
   # update the A matrix
-  @timeit "assemble_matrix" assemble_matrix!(A, scheme, mesh, u, Δt)
-  @timeit "assemble_matrix" assemble_rhs!(b, scheme, mesh, u, Δt)
+  @timeit "assemble_matrix" assemble_matrix!(A, scheme, mesh, Δt)
+  @timeit "assemble_rhs" assemble_rhs!(b, scheme, mesh, u, Δt)
 
   # precondition
   @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, A)
@@ -172,23 +126,25 @@ function solve!(
   )
 
   if !warmedup(scheme)
-    @timeit "dqgmres! (linear solve)" dqgmres!(
-      scheme.solver, A, b; N=precond_op, history=true, itmax=maxiter
+    @timeit "linear solve (cold)" gmres!(
+      scheme.solver, A, b; atol=atol, rtol=rtol, N=precond_op, history=true, itmax=maxiter
     )
     warmedup!(scheme)
   else
-    @timeit "dqgmres! (linear solve)" dqgmres!(
+    @timeit "linear solve (warm)" gmres!(
       scheme.solver,
       A,
       b,
-      x; # use last step as a starting point
+      x;
+      atol=atol,
+      rtol=rtol,
       N=precond_op,
       itmax=maxiter,
       history=true,
     )
   end
 
-  resids = last(scheme.solver.stats.residuals)
+  L₂norm = last(scheme.solver.stats.residuals)
   niter = scheme.solver.stats.niter
 
   # update u to the solution
@@ -196,15 +152,15 @@ function solve!(
     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
   end
 
-  # if show_hist
-  #   @printf "Convergence: %.1e, iterations: %i Δt: %.3e\n" resids niter Δt
-  # end
-
-  if !issolved(scheme.solver)
-    error("not solved!")
+  if show_hist
+    @printf "\t Krylov stats: L₂norm: %.1e, iterations: %i\n" L₂norm niter
   end
 
-  return resids, niter, issolved(scheme.solver)
+  if !issolved(scheme.solver)
+    @warn "The iterative solver didn't converge in the number of max iterations $(maxiter)"
+  end
+
+  return L₂norm, niter, issolved(scheme.solver)
 end
 
 # function working_solve!(

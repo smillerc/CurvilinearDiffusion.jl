@@ -66,9 +66,8 @@ end
       αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
     )
 
-    stencil = _inner_diffusion_operator(
-      edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx
-    )
+    J = cell_center_metrics.J[grid_idx]
+    stencil = _inner_diffusion_operator(edge_diffusivity, Δt, J, edge_metrics, grid_idx)
 
     row = matrix_indices[idx]
 
@@ -93,6 +92,73 @@ end
     A[row, colᵢⱼ₊₁  ] = stencil[8] 
     A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] 
     #! format: on
+  end
+end
+
+@kernel function inner_diffusion_op_kernel_3d!(
+  A,
+  α,
+  Δt,
+  cell_center_metrics,
+  edge_metrics,
+  grid_indices,
+  matrix_indices,
+  mean_func::F,
+  stencil_col_lookup,
+) where {F}
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    grid_idx = grid_indices[idx]
+
+    i, j, k = grid_idx.I
+    edge_diffusivity = (
+      αᵢ₊½=mean_func(α[i, j, k], α[i + 1, j, k]),
+      αᵢ₋½=mean_func(α[i, j, k], α[i - 1, j, k]),
+      αⱼ₊½=mean_func(α[i, j, k], α[i, j + 1, k]),
+      αⱼ₋½=mean_func(α[i, j, k], α[i, j - 1, k]),
+      αₖ₊½=mean_func(α[i, j, k], α[i, j, k + 1]),
+      αₖ₋½=mean_func(α[i, j, k], α[i, j, k - 1]),
+    )
+
+    J = cell_center_metrics.J[grid_idx]
+    stencil = _inner_diffusion_operator(edge_diffusivity, Δt, J, edge_metrics, grid_idx)
+
+    row = matrix_indices[idx]
+
+    cols = (
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁ₖ₋₁), # colᵢ₋₁ⱼ₋₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢⱼ₋₁ₖ₋₁),   # colᵢⱼ₋₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁ₖ₋₁), # colᵢ₊₁ⱼ₋₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼₖ₋₁),   # colᵢ₋₁ⱼₖ₋₁
+      row + first(stencil_col_lookup.ᵢⱼₖ₋₁),     # colᵢⱼₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼₖ₋₁),   # colᵢ₊₁ⱼₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁ₖ₋₁), # colᵢ₋₁ⱼ₊₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢⱼ₊₁ₖ₋₁),   # colᵢⱼ₊₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ₋₁), # colᵢ₊₁ⱼ₊₁ₖ₋₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁ₖ),   # colᵢ₋₁ⱼ₋₁ₖ
+      row + first(stencil_col_lookup.ᵢⱼ₋₁ₖ),     # colᵢⱼ₋₁ₖ
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁ₖ),   # colᵢ₊₁ⱼ₋₁ₖ
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼₖ),     # colᵢ₋₁ⱼₖ
+      row + first(stencil_col_lookup.ᵢⱼₖ),       # colᵢⱼₖ
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼₖ),     # colᵢ₊₁ⱼₖ
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁ₖ),   # colᵢ₋₁ⱼ₊₁ₖ
+      row + first(stencil_col_lookup.ᵢⱼ₊₁ₖ),     # colᵢⱼ₊₁ₖ
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ),   # colᵢ₊₁ⱼ₊₁ₖ
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁ₖ₊₁), # colᵢ₋₁ⱼ₋₁ₖ₊₁
+      row + first(stencil_col_lookup.ᵢⱼ₋₁ₖ₊₁),   # colᵢⱼ₋₁ₖ₊₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁ₖ₊₁), # colᵢ₊₁ⱼ₋₁ₖ₊₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼₖ₊₁),   # colᵢ₋₁ⱼₖ₊₁
+      row + first(stencil_col_lookup.ᵢⱼₖ₊₁),     # colᵢⱼₖ₊₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼₖ₊₁),   # colᵢ₊₁ⱼₖ₊₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁ₖ₊₁), # colᵢ₋₁ⱼ₊₁ₖ₊₁
+      row + first(stencil_col_lookup.ᵢⱼ₊₁ₖ₊₁),   # colᵢⱼ₊₁ₖ₊₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ₊₁), # colᵢ₊₁ⱼ₊₁ₖ₊₁
+    )
+
+    @inbounds for (c, col) in enumerate(cols)
+      A[row, col] = stencil[c]
+    end
   end
 end
 
@@ -148,55 +214,28 @@ end
 #  Operators
 # ---------------------------------------------------------------------------
 
-# Generate a stencil for a single 1d cell in the interior
-@inline function _inner_diffusion_operator(
-  u::AbstractArray{T,1},
-  source_term::AbstractArray{T,1},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
-) where {T}
-
-  #
-  Jᵢ = cell_center_metrics.J[idx]
-  sᵢ = source_term[idx]
-  uᵢ = u[idx]
-
-  @unpack fᵢ₊½, fᵢ₋½ = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
-
-  #------------------------------------------------------------------------------
-  # Equations 3.43 and 3.44
-  #------------------------------------------------------------------------------
-  # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2) / Jᵢ₊½
-  # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2) / Jᵢ₋½
-
-  A = fᵢ₋½                       # (i-1)
-  B = -(fᵢ₋½ + fᵢ₊½ + Jᵢ / Δτ)  # (i)
-  C = fᵢ₊½                       # (i+1)
-  RHS = -(Jᵢ * sᵢ + uᵢ * Jᵢ / Δτ)
-
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
-  # Create a stencil matrix to hold the coefficients for u[i±1]
-
-  stencil = SVector{3,T}(A, B, C)
-
-  # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  offset_stencil = OffsetVector(stencil, -1:1)
-
-  return offset_stencil, RHS
-end
-
 # Generate a stencil for a single 2d cell in the interior
 @inline function _inner_diffusion_operator(
-  edge_diffusivity, Δτ, cell_center_metrics, edge_metrics, idx
+  edge_diffusivity, Δτ, J, edge_metrics, idx::CartesianIndex{1}
 )
-  Jᵢⱼ = cell_center_metrics.J[idx]
   edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
-  stencil = stencil_2d(edge_terms, Jᵢⱼ, Δτ)
+  stencil = stencil_1d(edge_terms, J, Δτ)
+  return stencil
+end
+
+@inline function _inner_diffusion_operator(
+  edge_diffusivity, Δτ, J, edge_metrics, idx::CartesianIndex{2}
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_2d(edge_terms, J, Δτ)
+  return stencil
+end
+
+@inline function _inner_diffusion_operator(
+  edge_diffusivity, Δτ, J, edge_metrics, idx::CartesianIndex{3}
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_3d(edge_terms, J, Δτ)
   return stencil
 end
 
@@ -247,67 +286,3 @@ end
 
 #   return offset_stencil, RHS
 # end
-
-# Generate a stencil for a single 3d cell in the interior
-@inline function _inner_diffusion_operator(
-  u::AbstractArray{T,3},
-  source_term::AbstractArray{T,3},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
-) where {T}
-
-  #
-  Jᵢⱼₖ = cell_center_metrics.J[idx]
-  sᵢⱼₖ = source_term[idx]
-  uᵢⱼₖ = u[idx]
-
-  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, fₖ₊½, fₖ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½, gₖ₊½, gₖ₋½ = conservative_edge_terms(
-    edge_diffusivity, edge_metrics, idx
-  )
-
-  # #------------------------------------------------------------------------------
-  # # Equations 3.43 and 3.44
-  # #------------------------------------------------------------------------------
-  # fᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
-  # fᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
-  # fⱼ₊½ = a_ⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
-  # fⱼ₋½ = a_ⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
-
-  # #------------------------------------------------------------------------------
-  # # cross terms (Equations 3.45 and 3.46)
-  # #------------------------------------------------------------------------------
-  # gᵢ₊½ = a_ᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
-  # gᵢ₋½ = a_ᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
-  # gⱼ₊½ = a_ⱼ₊½ * (Jξx_ⱼ₊½ * Jηx_ⱼ₊½ + Jξy_ⱼ₊½ * Jηy_ⱼ₊½) / (4Jⱼ₊½)
-  # gⱼ₋½ = a_ⱼ₋½ * (Jξx_ⱼ₋½ * Jηx_ⱼ₋½ + Jξy_ⱼ₋½ * Jηy_ⱼ₋½) / (4Jⱼ₋½)
-
-  A = gᵢ₋½ + gⱼ₋½                              # (i-1,j-1)
-  B = fⱼ₋½ - gᵢ₊½ + gᵢ₋½                       # (i  ,j-1)
-  C = -gᵢ₊½ - gⱼ₋½                             # (i+1,j-1)
-  D = fᵢ₋½ - gⱼ₊½ + gⱼ₋½                       # (i-1,j)
-  F = fᵢ₊½ + gⱼ₊½ - gⱼ₋½                       # (i+1,j)
-  G = -gᵢ₋½ - gⱼ₊½                             # (i-1,j+1)
-  H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
-  I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
-  E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼₖ / Δτ)  # (i,j)
-  RHS = -(Jᵢⱼₖ * sᵢⱼₖ + uᵢⱼₖ * Jᵢⱼₖ / Δτ)
-
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
-
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-
-  # Don't use an offset matrix here b/c benchmarking showed it was
-  # ~3x slower. It makes the indexing here more of a pain,
-  # but 3x slower is a big deal for this performance critical section
-  stencil = SMatrix{3,3,T}(A, B, C, D, E, F, G, H, I)
-
-  # use an offset so we can index via [+1, -1, +1] for (i+1, j-1, k+1)
-  offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
-
-  return offset_stencil, RHS
-end
