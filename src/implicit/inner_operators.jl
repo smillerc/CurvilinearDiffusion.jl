@@ -53,7 +53,7 @@ end
   grid_indices,
   matrix_indices,
   mean_func::F,
-  (ni, nj),
+  stencil_col_lookup,
 ) where {F}
   idx = @index(Global, Linear)
 
@@ -77,17 +77,39 @@ end
       grid_idx,
     )
 
-    mat_idx = matrix_indices[idx]
+    row = matrix_indices[idx]
+    # #! format: off
+    # A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
+    # A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
+    # A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
+    # A[mat_idx, mat_idx - 1]      = stencil[-1, +0] # (i-1, j  )
+    # A[mat_idx, mat_idx]          = stencil[+0, +0] # (i  , j  )
+    # A[mat_idx, mat_idx + 1]      = stencil[+1, +0] # (i+1, j  )
+    # A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] # (i-1, j+1)
+    # A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
+    # A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
+    # #! format: on
+
     #! format: off
-    A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] # (i-1, j-1)
-    A[mat_idx, mat_idx - ni]     = stencil[+0, -1] # (i  , j-1)
-    A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] # (i+1, j-1)
-    A[mat_idx, mat_idx - 1]      = stencil[-1, +0] # (i-1, j  )
-    A[mat_idx, mat_idx]          = stencil[+0, +0] # (i  , j  )
-    A[mat_idx, mat_idx + 1]      = stencil[+1, +0] # (i+1, j  )
-    A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] # (i-1, j+1)
-    A[mat_idx, mat_idx + ni]     = stencil[ 0, +1] # (i  , j+1)
-    A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] # (i+1, j+1)
+    colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
+    colᵢⱼ₋₁ =   row + first(stencil_col_lookup.ᵢⱼ₋₁)
+    colᵢ₊₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁)
+    colᵢ₋₁ⱼ =   row + first(stencil_col_lookup.ᵢ₋₁ⱼ)
+    colᵢⱼ =     row + first(stencil_col_lookup.ᵢⱼ)
+    colᵢ₊₁ⱼ =   row + first(stencil_col_lookup.ᵢ₊₁ⱼ)
+    colᵢ₋₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁)
+    colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
+    colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
+
+    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]  #[-1, -1] # (i-1, j-1)
+    A[row, colᵢⱼ₋₁  ] = stencil[2]  #[+0, -1] # (i  , j-1)
+    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]  #[+1, -1] # (i+1, j-1)
+    A[row, colᵢ₋₁ⱼ  ] = stencil[4]  #[-1, +0] # (i-1, j  )
+    A[row, colᵢⱼ    ] = stencil[5]  #[+0, +0] # (i  , j  )
+    A[row, colᵢ₊₁ⱼ  ] = stencil[6]  #[+1, +0] # (i+1, j  )
+    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]  #[-1, +1] # (i-1, j+1)
+    A[row, colᵢⱼ₊₁  ] = stencil[8]  #[ 0, +1] # (i  , j+1)
+    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]  #[+1, +1] # (i+1, j+1)
     #! format: on
 
     # b[mat_idx] = rhs
@@ -229,12 +251,14 @@ end
   # ~3x slower. It makes the indexing here more of a pain,
   # but 3x slower is a big deal for this performance critical section
 
-  stencil = SMatrix{3,3,Float64}(A, B, C, D, E, F, G, H, I)
+  stencil = @SVector [A, B, C, D, E, F, G, H, I]
+  # stencil = SMatrix{3,3,Float64}(A, B, C, D, E, F, G, H, I)
 
   # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
+  # offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
 
-  return offset_stencil
+  # return offset_stencil
+  return stencil
 end
 
 # @inline function working_inner_diffusion_operator(

@@ -66,16 +66,17 @@ end
   grid_indices,
   matrix_indices,
   mean_func::F,
-  (ni, nj),
+  stencil_col_lookup,
   loc::Int,
 ) where {F}
   idx = @index(Global, Linear)
 
-  len = ni * nj
+  # len = ni * nj
 
+  nrows, ncols = size(A)
   begin
     grid_idx = grid_indices[idx]
-    mat_idx = matrix_indices[idx]
+    row = matrix_indices[idx]
 
     i, j = grid_idx.I
     edge_diffusivity = (
@@ -95,7 +96,7 @@ end
       loc,
     )
 
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
+    # A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
 
     ip1 = true
     jp1 = true
@@ -111,18 +112,40 @@ end
       jp1 = false
     end
 
+    # #! format: off
+    # if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+    # if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+    # if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+    # if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+    # if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+    # if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+    # if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+    # if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    # #! format: on
+
     #! format: off
-    if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+    colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
+    colᵢⱼ₋₁ =   row + first(stencil_col_lookup.ᵢⱼ₋₁)
+    colᵢ₊₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁)
+    colᵢ₋₁ⱼ =   row + first(stencil_col_lookup.ᵢ₋₁ⱼ)
+    colᵢⱼ =     row + first(stencil_col_lookup.ᵢⱼ)
+    colᵢ₊₁ⱼ =   row + first(stencil_col_lookup.ᵢ₊₁ⱼ)
+    colᵢ₋₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁)
+    colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
+    colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
+
+    A[row, colᵢⱼ] = stencil[5]  #[+0, +0] # (i  , j  )
+
+    if ((im1 && jm1) && (1 <= colᵢ₋₁ⱼ₋₁ <= ncols)) A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] end # (i-1, j-1)
+    if ((       jm1) && (1 <= colᵢⱼ₋₁   <= ncols)) A[row, colᵢⱼ₋₁  ] = stencil[2] end # (i  , j-1)
+    if ((im1       ) && (1 <= colᵢ₊₁ⱼ₋₁ <= ncols)) A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] end # (i+1, j-1)
+    if ((im1 && jp1) && (1 <= colᵢ₋₁ⱼ   <= ncols)) A[row, colᵢ₋₁ⱼ  ] = stencil[4] end # (i-1, j  )
+    if ((       jp1) && (1 <= colᵢ₊₁ⱼ   <= ncols)) A[row, colᵢ₊₁ⱼ  ] = stencil[6] end # (i+1, j  )
+    if ((ip1 && jm1) && (1 <= colᵢ₋₁ⱼ₊₁ <= ncols)) A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] end # (i-1, j+1)
+    if ((ip1       ) && (1 <= colᵢⱼ₊₁   <= ncols)) A[row, colᵢⱼ₊₁  ] = stencil[8] end # (i  , j+1)
+    if ((ip1 && jp1) && (1 <= colᵢ₊₁ⱼ₊₁ <= ncols)) A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] end # (i+1, j+1)
     #! format: on
 
-    # b[mat_idx] = rhs
   end
 end
 # @kernel function boundary_diffusion_op_kernel_2d!(

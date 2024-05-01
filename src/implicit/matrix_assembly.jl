@@ -10,7 +10,7 @@ to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 """
 
 function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
-  ni, nj = size(scheme.domain_indices)
+  # ni, nj = size(scheme.domain_indices)
 
   nhalo = 1
   matrix_domain_LI = LinearIndices(scheme.domain_indices)
@@ -37,7 +37,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
     inner_domain,
     matrix_indices,
     scheme.mean_func,
-    (ni, nj);
+    scheme.stencil_col_lookup;
     ndrange=size(inner_domain),
   )
 
@@ -57,7 +57,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
     ilo_domain,
     ilo_matrix_indices,
     scheme.mean_func,
-    (ni, nj),
+    scheme.stencil_col_lookup,
     bc_locs.ilo;
     ndrange=size(ilo_domain),
   )
@@ -77,7 +77,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
     ihi_domain,
     ihi_matrix_indices,
     scheme.mean_func,
-    (ni, nj),
+    scheme.stencil_col_lookup,
     bc_locs.ihi;
     ndrange=size(ihi_domain),
   )
@@ -97,7 +97,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
     jlo_domain,
     jlo_matrix_indices,
     scheme.mean_func,
-    (ni, nj),
+    scheme.stencil_col_lookup,
     bc_locs.jlo;
     ndrange=size(jlo_domain),
   )
@@ -117,7 +117,7 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, u, Δt)
     jhi_domain,
     jhi_matrix_indices,
     scheme.mean_func,
-    (ni, nj),
+    scheme.stencil_col_lookup,
     bc_locs.jhi;
     ndrange=size(jhi_domain),
   )
