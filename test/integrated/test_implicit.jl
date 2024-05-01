@@ -199,7 +199,7 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run()
+function run(maxiter=Inf)
   casename = "implicit_gauss_source"
 
   solver, mesh, T, ρ, cₚ, κ = init_state()
@@ -208,7 +208,7 @@ function run()
   global t = 0.0
   global maxt = 0.2
   global iter = 0
-  global maxiter = 1500
+  # global maxiter = 1500
   global io_interval = 0.01
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
@@ -260,7 +260,7 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  solver, temperature = run()
+  solver, temperature = run(Inf)
   nothing
 end
 
