@@ -246,29 +246,64 @@ end
   T = eltype(edge_diffusivity)
   Jᵢⱼ = cell_center_metrics.J[idx]
 
-  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
+  @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½, a_Jη²ⱼ₊½, a_Jη²ⱼ₋½, a_Jξηᵢ₊½, a_Jξηᵢ₋½, a_Jηξⱼ₊½, a_Jηξⱼ₋½ = conservative_edge_terms(
     edge_diffusivity, edge_metrics, idx
   )
 
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
   if loc == 1 # :ilo
-    fᵢ₋½ = zero(T)
-    gᵢ₋½ = zero(T)
+    a_Jξ²ᵢ₋½ = zero(T)
+    a_Jξηᵢ₋½ = zero(T)
   elseif loc == 2 # :ihi
-    fᵢ₊½ = zero(T)
-    gᵢ₊½ = zero(T)
+    a_Jξ²ᵢ₊½ = zero(T)
+    a_Jξηᵢ₊½ = zero(T)
   elseif loc == 3 # :jlo
-    fⱼ₋½ = zero(T)
-    gⱼ₋½ = zero(T)
+    a_Jη²ⱼ₋½ = zero(T)
+    a_Jηξⱼ₋½ = zero(T)
   elseif loc == 4 # :jhi
-    fⱼ₊½ = zero(T)
-    gⱼ₊½ = zero(T)
+    a_Jη²ⱼ₊½ = zero(T)
+    a_Jηξⱼ₊½ = zero(T)
   else
     error("bad boundary location")
   end
 
-  edge_terms = (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
+  edge_terms = (;
+    a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½, a_Jη²ⱼ₊½, a_Jη²ⱼ₋½, a_Jξηᵢ₊½, a_Jξηᵢ₋½, a_Jηξⱼ₊½, a_Jηξⱼ₋½
+  )
   stencil = stencil_2d(edge_terms, Jᵢⱼ, Δτ)
 
   return stencil
 end
+
+# @inline function _neumann_boundary_diffusion_operator(
+#   edge_diffusivity, Δτ, cell_center_metrics, edge_metrics, idx, loc
+# )
+#   T = eltype(edge_diffusivity)
+#   Jᵢⱼ = cell_center_metrics.J[idx]
+
+#   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
+#     edge_diffusivity, edge_metrics, idx
+#   )
+
+#   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
+#   if loc == 1 # :ilo
+#     fᵢ₋½ = zero(T)
+#     gᵢ₋½ = zero(T)
+#   elseif loc == 2 # :ihi
+#     fᵢ₊½ = zero(T)
+#     gᵢ₊½ = zero(T)
+#   elseif loc == 3 # :jlo
+#     fⱼ₋½ = zero(T)
+#     gⱼ₋½ = zero(T)
+#   elseif loc == 4 # :jhi
+#     fⱼ₊½ = zero(T)
+#     gⱼ₊½ = zero(T)
+#   else
+#     error("bad boundary location")
+#   end
+
+#   edge_terms = (; fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½)
+#   stencil = stencil_2d(edge_terms, Jᵢⱼ, Δτ)
+
+#   return stencil
+# end

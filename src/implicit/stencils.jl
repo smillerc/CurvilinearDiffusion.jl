@@ -6,87 +6,109 @@ function stencil_1d(edge_terms, J, Δt)
   uᵢ₊₁ = fᵢ₊½ * Δt
   uᵢ₋₁ = fᵢ₋½ * Δt
 
-  stencil = @SVector [uᵢ₋₁, uᵢ, uᵢ₊₁]
+  stencil = SVector(uᵢ₋₁, uᵢ, uᵢ₊₁)
 
   return stencil
 end
 
+# function stencil_2d(edge_terms, J, Δt)
+#   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = edge_terms
+#   uᵢⱼ = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½) * Δt - J
+
+#   # cardinal terms
+#   uᵢ₊₁ⱼ = (fᵢ₊½ + gⱼ₊½ - gⱼ₋½) * Δt
+#   uᵢ₋₁ⱼ = (fᵢ₋½ - gⱼ₊½ + gⱼ₋½) * Δt
+#   uᵢⱼ₊₁ = (fⱼ₊½ + gᵢ₊½ - gᵢ₋½) * Δt
+#   uᵢⱼ₋₁ = (fⱼ₋½ - gᵢ₊½ + gᵢ₋½) * Δt
+
+#   # corner terms
+#   uᵢ₊₁ⱼ₋₁ = (-gᵢ₊½ - gⱼ₋½) * Δt
+#   uᵢ₊₁ⱼ₊₁ = (gᵢ₊½ + gⱼ₊½) * Δt
+#   uᵢ₋₁ⱼ₋₁ = (gᵢ₋½ + gⱼ₋½) * Δt
+#   uᵢ₋₁ⱼ₊₁ = (-gᵢ₋½ - gⱼ₊½) * Δt
+#   stencil = SVector(uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁)
+#   return stencil
+# end
+
 function stencil_2d(edge_terms, J, Δt)
-  @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = edge_terms
+  a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
+  a_Jξ²ᵢ₋½ = edge_terms.a_Jξ²ᵢ₋½
+  a_Jη²ⱼ₊½ = edge_terms.a_Jη²ⱼ₊½
+  a_Jη²ⱼ₋½ = edge_terms.a_Jη²ⱼ₋½
+  a_Jξηᵢ₊½ = edge_terms.a_Jξηᵢ₊½
+  a_Jξηᵢ₋½ = edge_terms.a_Jξηᵢ₋½
+  a_Jηξⱼ₊½ = edge_terms.a_Jηξⱼ₊½
+  a_Jηξⱼ₋½ = edge_terms.a_Jηξⱼ₋½
 
-  uᵢⱼ = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½) * Δt - J
+  uᵢⱼ = J + (a_Jη²ⱼ₊½ + a_Jη²ⱼ₋½ + a_Jξ²ᵢ₊½ + a_Jξ²ᵢ₋½) * Δt
 
-  # cardinal terms
-  uᵢ₊₁ⱼ = (fᵢ₊½ + gⱼ₊½ - gⱼ₋½) * Δt
-  uᵢ₋₁ⱼ = (fᵢ₋½ - gⱼ₊½ + gⱼ₋½) * Δt
-  uᵢⱼ₊₁ = (fⱼ₊½ + gᵢ₊½ - gᵢ₋½) * Δt
-  uᵢⱼ₋₁ = (fⱼ₋½ - gᵢ₊½ + gᵢ₋½) * Δt
+  uᵢ₊₁ⱼ₋₁ = (a_Jηξⱼ₋½ + a_Jξηᵢ₊½) * Δt
+  uᵢ₋₁ⱼ₊₁ = (a_Jηξⱼ₊½ + a_Jξηᵢ₋½) * Δt
+  uᵢ₋₁ⱼ₋₁ = (-a_Jηξⱼ₋½ - a_Jξηᵢ₋½) * Δt
+  uᵢ₊₁ⱼ₊₁ = (-a_Jηξⱼ₊½ - a_Jξηᵢ₊½) * Δt
 
-  # corner terms
-  uᵢ₊₁ⱼ₋₁ = (-gᵢ₊½ - gⱼ₋½) * Δt
-  uᵢ₊₁ⱼ₊₁ = (gᵢ₊½ + gⱼ₊½) * Δt
-  uᵢ₋₁ⱼ₋₁ = (gᵢ₋½ + gⱼ₋½) * Δt
-  uᵢ₋₁ⱼ₊₁ = (-gᵢ₋½ - gⱼ₊½) * Δt
-
-  stencil = @SVector [uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁]
-
+  uᵢ₊₁ⱼ = (-a_Jηξⱼ₊½ + a_Jηξⱼ₋½ - a_Jξ²ᵢ₊½) * Δt
+  uᵢ₋₁ⱼ = (a_Jηξⱼ₊½ - a_Jηξⱼ₋½ - a_Jξ²ᵢ₋½) * Δt
+  uᵢⱼ₊₁ = (-a_Jη²ⱼ₊½ - a_Jξηᵢ₊½ + a_Jξηᵢ₋½) * Δt
+  uᵢⱼ₋₁ = (-a_Jη²ⱼ₋½ + a_Jξηᵢ₊½ - a_Jξηᵢ₋½) * Δt
+  stencil = SVector(uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁)
   return stencil
 end
 
 function stencil_3d(edge_terms, J::T, Δt) where {T}
-  fᵢ₊½ = edge_terms.fᵢ₊½
-  fᵢ₋½ = edge_terms.fᵢ₋½
-  fⱼ₊½ = edge_terms.fⱼ₊½
-  fⱼ₋½ = edge_terms.fⱼ₋½
-  fₖ₊½ = edge_terms.fₖ₊½
-  fₖ₋½ = edge_terms.fₖ₋½
+  a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
+  a_Jξ²ᵢ₋½ = edge_terms.a_Jξ²ᵢ₋½
+  a_Jξηᵢ₊½ = edge_terms.a_Jξηᵢ₊½
+  a_Jξηᵢ₋½ = edge_terms.a_Jξηᵢ₋½
+  a_Jξζᵢ₊½ = edge_terms.a_Jξζᵢ₊½
+  a_Jξζᵢ₋½ = edge_terms.a_Jξζᵢ₋½
+  a_Jηξⱼ₊½ = edge_terms.a_Jηξⱼ₊½
+  a_Jηξⱼ₋½ = edge_terms.a_Jηξⱼ₋½
+  a_Jη²ⱼ₊½ = edge_terms.a_Jη²ⱼ₊½
+  a_Jη²ⱼ₋½ = edge_terms.a_Jη²ⱼ₋½
+  a_Jηζⱼ₊½ = edge_terms.a_Jηζⱼ₊½
+  a_Jηζⱼ₋½ = edge_terms.a_Jηζⱼ₋½
+  a_Jζξₖ₊½ = edge_terms.a_Jζξₖ₊½
+  a_Jζξₖ₋½ = edge_terms.a_Jζξₖ₋½
+  a_Jζηₖ₊½ = edge_terms.a_Jζηₖ₊½
+  a_Jζηₖ₋½ = edge_terms.a_Jζηₖ₋½
+  a_Jζ²ₖ₊½ = edge_terms.a_Jζ²ₖ₊½
+  a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
 
-  gᵢ₊½ = edge_terms.gᵢ₊½
-  gᵢ₋½ = edge_terms.gᵢ₋½
-  gⱼ₊½ = edge_terms.gⱼ₊½
-  gⱼ₋½ = edge_terms.gⱼ₋½
-  gₖ₊½ = edge_terms.gₖ₊½
-  gₖ₋½ = edge_terms.gₖ₋½
-
-  hᵢ₊½ = edge_terms.hᵢ₊½
-  hᵢ₋½ = edge_terms.hᵢ₋½
-  hⱼ₊½ = edge_terms.hⱼ₊½
-  hⱼ₋½ = edge_terms.hⱼ₋½
-  hₖ₊½ = edge_terms.hₖ₊½
-  hₖ₋½ = edge_terms.hₖ₋½
-
-  uᵢⱼₖ = -(fᵢ₋½ + fⱼ₋½ + fₖ₋½ + fᵢ₊½ + fⱼ₊½ + fₖ₊½) * Δt - J
-
-  uᵢ₊₁ⱼₖ = zero(T) * Δt
-  uᵢ₋₁ⱼₖ = zero(T) * Δt
-  uᵢⱼ₊₁ₖ = zero(T) * Δt
-  uᵢⱼ₋₁ₖ = zero(T) * Δt
-  uᵢⱼₖ₋₁ = zero(T) * Δt
-  uᵢⱼₖ₊₁ = zero(T) * Δt
-
-  uᵢ₋₁ⱼ₊₁ₖ = zero(T)
-  uᵢ₊₁ⱼ₋₁ₖ = zero(T)
-  uᵢ₊₁ⱼ₊₁ₖ = zero(T)
-  uᵢ₋₁ⱼ₋₁ₖ = zero(T)
-  uᵢ₊₁ⱼₖ₋₁ = zero(T)
-  uᵢ₋₁ⱼₖ₊₁ = zero(T)
-  uᵢ₊₁ⱼₖ₊₁ = zero(T)
-  uᵢ₋₁ⱼₖ₋₁ = zero(T)
-  uᵢⱼ₊₁ₖ₋₁ = zero(T)
-  uᵢⱼ₋₁ₖ₊₁ = zero(T)
-  uᵢⱼ₊₁ₖ₊₁ = zero(T)
-  uᵢⱼ₋₁ₖ₋₁ = zero(T)
-
-  uᵢ₊₁ⱼ₊₁ₖ₋₁ = zero(T)
-  uᵢ₊₁ⱼ₊₁ₖ₊₁ = zero(T)
-  uᵢ₊₁ⱼ₋₁ₖ₋₁ = zero(T)
-  uᵢ₊₁ⱼ₋₁ₖ₊₁ = zero(T)
-  uᵢ₋₁ⱼ₊₁ₖ₋₁ = zero(T)
-  uᵢ₋₁ⱼ₊₁ₖ₊₁ = zero(T)
   uᵢ₋₁ⱼ₋₁ₖ₋₁ = zero(T)
+  uᵢ₊₁ⱼ₋₁ₖ₋₁ = zero(T)
+  uᵢ₋₁ⱼ₊₁ₖ₋₁ = zero(T)
+  uᵢ₊₁ⱼ₊₁ₖ₋₁ = zero(T)
   uᵢ₋₁ⱼ₋₁ₖ₊₁ = zero(T)
+  uᵢ₊₁ⱼ₋₁ₖ₊₁ = zero(T)
+  uᵢ₊₁ⱼ₊₁ₖ₊₁ = zero(T)
+  uᵢ₋₁ⱼ₊₁ₖ₊₁ = zero(T)
 
-  stencil = @SVector [
+  uᵢⱼ₋₁ₖ₋₁ = (-a_Jζηₖ₋½ - a_Jηζⱼ₋½) * Δt
+  uᵢ₋₁ⱼₖ₋₁ = (-a_Jζξₖ₋½ - a_Jξζᵢ₋½) * Δt
+  uᵢ₊₁ⱼₖ₋₁ = (a_Jζξₖ₋½ + a_Jξζᵢ₊½) * Δt
+  uᵢⱼ₊₁ₖ₋₁ = (a_Jζηₖ₋½ + a_Jηζⱼ₊½) * Δt
+  uᵢ₋₁ⱼ₋₁ₖ = (-a_Jηξⱼ₋½ - a_Jξηᵢ₋½) * Δt
+  uᵢ₊₁ⱼ₋₁ₖ = (a_Jηξⱼ₋½ + a_Jξηᵢ₊½) * Δt
+  uᵢ₋₁ⱼ₊₁ₖ = (a_Jηξⱼ₊½ + a_Jξηᵢ₋½) * Δt
+  uᵢ₊₁ⱼ₊₁ₖ = (-a_Jηξⱼ₊½ - a_Jξηᵢ₊½) * Δt
+  uᵢⱼ₋₁ₖ₊₁ = (a_Jζηₖ₊½ + a_Jηζⱼ₋½) * Δt
+  uᵢ₋₁ⱼₖ₊₁ = (a_Jζξₖ₊½ + a_Jξζᵢ₋½) * Δt
+  uᵢ₊₁ⱼₖ₊₁ = (-a_Jζξₖ₊½ - a_Jξζᵢ₊½) * Δt
+  uᵢⱼ₊₁ₖ₊₁ = (-a_Jζηₖ₊½ - a_Jηζⱼ₊½) * Δt
+
+  uᵢⱼₖ = J + (a_Jζ²ₖ₊½ + a_Jζ²ₖ₋½ + a_Jη²ⱼ₊½ + a_Jη²ⱼ₋½ + a_Jξ²ᵢ₊½ + a_Jξ²ᵢ₋½) * Δt
+
+  uᵢ₋₁ⱼₖ = (+a_Jζξₖ₊½ - a_Jζξₖ₋½ + a_Jηξⱼ₊½ - a_Jηξⱼ₋½ - a_Jξ²ᵢ₋½) * Δt
+  uᵢ₊₁ⱼₖ = (-a_Jζξₖ₊½ + a_Jζξₖ₋½ - a_Jηξⱼ₊½ + a_Jηξⱼ₋½ - a_Jξ²ᵢ₊½) * Δt
+
+  uᵢⱼ₊₁ₖ = (-a_Jζηₖ₊½ + a_Jζηₖ₋½ - a_Jη²ⱼ₊½ - a_Jξηᵢ₊½ + a_Jξηᵢ₋½) * Δt
+  uᵢⱼₖ₊₁ = (-a_Jζ²ₖ₊½ - a_Jηζⱼ₊½ + a_Jηζⱼ₋½ - a_Jξζᵢ₊½ + a_Jξζᵢ₋½) * Δt
+
+  uᵢⱼₖ₋₁ = (-a_Jζ²ₖ₋½ + a_Jηζⱼ₊½ - a_Jηζⱼ₋½ + a_Jξζᵢ₊½ - a_Jξζᵢ₋½) * Δt
+  uᵢⱼ₋₁ₖ = (+a_Jζηₖ₊½ - a_Jζηₖ₋½ - a_Jη²ⱼ₋½ + a_Jξηᵢ₊½ - a_Jξηᵢ₋½) * Δt
+
+  stencil = SVector(
     uᵢ₋₁ⱼ₋₁ₖ₋₁,
     uᵢⱼ₋₁ₖ₋₁,
     uᵢ₊₁ⱼ₋₁ₖ₋₁,
@@ -114,7 +136,6 @@ function stencil_3d(edge_terms, J::T, Δt) where {T}
     uᵢ₋₁ⱼ₊₁ₖ₊₁,
     uᵢⱼ₊₁ₖ₊₁,
     uᵢ₊₁ⱼ₊₁ₖ₊₁,
-  ]
-
+  )
   return stencil
 end
