@@ -260,7 +260,7 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  solver, temperature = run(Inf)
+  solver, temperature = run(101)
   nothing
 end
 
