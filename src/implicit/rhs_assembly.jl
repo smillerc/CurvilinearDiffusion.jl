@@ -29,6 +29,6 @@ end
     grid_idx = grid_indices[idx]
     mat_idx = matrix_indices[idx]
     # rhs[mat_idx] = -(J[grid_idx] * source_term[grid_idx] + u[grid_idx] * J[grid_idx] / Δt)
-    rhs[mat_idx] = -(J[grid_idx] * source_term[grid_idx] * Δt + u[grid_idx] * J[grid_idx])
+    rhs[mat_idx] = (source_term[grid_idx] * Δt + u[grid_idx]) * J[grid_idx]
   end
 end
