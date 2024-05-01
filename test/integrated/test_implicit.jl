@@ -89,65 +89,66 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
+
+function wavy_grid(nx, ny)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
+  a0 = 0.1
+
+  function x(i, j)
+    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+    return x1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+  end
+
+  function y(i, j)
+    x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+    y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+    return y1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
+  end
+
+  return (x, y)
+end
+
+function wavy_grid2(ni, nj)
+  Lx = 12
+  Ly = 12
+  n_xy = 6
+  n_yx = 6
+
+  xmin = -Lx / 2
+  ymin = -Ly / 2
+
+  Δx0 = Lx / (ni - 1)
+  Δy0 = Ly / (nj - 1)
+
+  Ax = 0.4 / Δx0
+  Ay = 0.8 / Δy0
+  # Ax = 0.2 / Δx0
+  # Ay = 0.4 / Δy0
+
+  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+
+  return (x, y)
+end
+
+function uniform_grid(nx, ny)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
+
+  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+
+  return (x, y)
+end
+
 function initialize_mesh()
-  function wavy_grid(nx, ny)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
-    a0 = 0.1
-
-    function x(i, j)
-      x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-      y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-      return x1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
-    end
-
-    function y(i, j)
-      x1d = x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-      y1d = y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-      return y1d + a0 * sin(2 * pi * x1d) * sin(2 * pi * y1d)
-    end
-
-    return (x, y)
-  end
-
-  function wavy_grid2(ni, nj)
-    Lx = 12
-    Ly = 12
-    n_xy = 6
-    n_yx = 6
-
-    xmin = -Lx / 2
-    ymin = -Ly / 2
-
-    Δx0 = Lx / (ni - 1)
-    Δy0 = Ly / (nj - 1)
-
-    Ax = 0.4 / Δx0
-    Ay = 0.8 / Δy0
-    # Ax = 0.2 / Δx0
-    # Ay = 0.4 / Δy0
-
-    x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-    y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-    return (x, y)
-  end
-
-  function uniform_grid(nx, ny)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
-
-    x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-    return (x, y)
-  end
-
   ni, nj = (101, 101)
   nhalo = 6
-  # x, y = wavy_grid2(ni, nj)
+  x, y = wavy_grid2(ni, nj)
   # x, y = wavy_grid(ni, nj)
-  x, y = uniform_grid(ni, nj)
+  # x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
@@ -162,7 +163,6 @@ function init_state()
 
   solver = ImplicitScheme(mesh, bcs; backend=backend)
   CFL = 100 # 1/2 is the explicit stability limit
-  casename = "implicit_gauss_source"
 
   # Temperature and density
   T_hot = 1e3
@@ -173,11 +173,11 @@ function init_state()
   cₚ = 1.0
 
   # Define the conductivity model
-  @inline function κ(ρ, temperature, κ0=1.0)
+  @inline function κ(ρ, temperature, κ0=10.0)
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 # * temperature^3
     end
   end
 
@@ -188,11 +188,10 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
 
-    source_term[idx] =
-      T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
 
-  copy!(solver.source_term, source_term) # move to gpu (if need be)
+  # copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -201,17 +200,19 @@ end
 # Solve
 # ------------------------------------------------------------
 function run()
+  casename = "implicit_gauss_source"
+
   solver, mesh, T, ρ, cₚ, κ = init_state()
   global Δt0 = 1e-4
   global Δt = 1e-4
   global t = 0.0
   global maxt = 0.2
   global iter = 0
-  global maxiter = 50
+  global maxiter = 1500
   global io_interval = 0.01
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
-  # @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+  @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
 
   while true
     if iter == 0
@@ -231,10 +232,10 @@ function run()
     )
     @printf "cycle: %i t: %.4e, L2: %.1e, iterations: %i Δt: %.3e\n" iter t L₂ ncycles Δt
 
-    # if t + Δt > io_next
-    #   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-    #   global io_next += io_interval
-    # end
+    if t + Δt > io_next
+      @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+      global io_next += io_interval
+    end
 
     if iter >= maxiter - 1
       break
@@ -256,14 +257,15 @@ function run()
 end
 
 begin
+  cd(@__DIR__)
   rm.(glob("*.vts"))
 
   solver, temperature = run()
   nothing
 end
 
-T_cpu = Array(temperature)
-using Plots: heatmap
+# T_cpu = Array(temperature)
+# using Plots: heatmap
 
-heatmap(T_cpu)
+# heatmap(T_cpu)
 # solver, mesh, T, ρ, cₚ, κ = init_state();
