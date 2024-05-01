@@ -18,7 +18,7 @@ using Printf
 
 export ImplicitScheme, solve!, assemble_matrix!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2,SCL}
   A::SM # sparse matrix
   x::V # solution vector
   b::V # RHS vector
@@ -34,6 +34,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2}
   halo_aware_indices::CI2
   backend # GPU / CPU
   warmed_up::Vector{Bool}
+  stencil_col_lookup::SCL
 end
 
 warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
@@ -44,6 +45,7 @@ end
 include("../averaging.jl")
 include("../edge_terms.jl")
 include("matrix_assembly.jl")
+include("init_matrix.jl")
 
 function ImplicitScheme(
   mesh::CurvilinearGrid2D,
@@ -66,7 +68,7 @@ function ImplicitScheme(
 
   conservative = form === :conservative
 
-  A = init_A_matrix(mesh, backend)
+  A, stencil_col_lookup = initialize_coefficient_matrix(mesh, backend)
   Pl = preconditioner(A, backend)
 
   b = KernelAbstractions.zeros(backend, T, len)
@@ -94,52 +96,53 @@ function ImplicitScheme(
     halo_aware_CI,
     backend,
     [false],
+    stencil_col_lookup,
   )
 
   return implicit_solver
 end
 
-function init_A_matrix(mesh::CurvilinearGrid2D, ::CPU)
-  ni, nj = cellsize(mesh)
-  len = ni * nj
+# function init_A_matrix(mesh::CurvilinearGrid2D, ::CPU)
+#   ni, nj = cellsize(mesh)
+#   len = ni * nj
 
-  #! format: off
-  A = spdiagm(
-    -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
-    -ni     => zeros(len - ni),     # (i  , j-1)
-    -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
-    -1      => zeros(len - 1),      # (i-1, j  )
-    0       => ones(len),           # (i  , j  )
-    1       => zeros(len - 1),      # (i+1, j  )
-    ni - 1  => zeros(len - ni + 1), # (i-1, j+1)
-    ni      => zeros(len - ni),     # (i  , j+1)
-    ni + 1  => zeros(len - ni - 1), # (i+1, j+1)
-  )
-  #! format: on
+#   #! format: off
+#   A = spdiagm(
+#     -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
+#     -ni     => zeros(len - ni),     # (i  , j-1)
+#     -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
+#     -1      => zeros(len - 1),      # (i-1, j  )
+#     0       => ones(len),           # (i  , j  )
+#     1       => zeros(len - 1),      # (i+1, j  )
+#     ni - 1  => zeros(len - ni + 1), # (i-1, j+1)
+#     ni      => zeros(len - ni),     # (i  , j+1)
+#     ni + 1  => zeros(len - ni - 1), # (i+1, j+1)
+#   )
+#   #! format: on
 
-  # kv = (
-  #   -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
-  #   -ni => zeros(len - ni),     # (i  , j-1)
-  #   -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
-  #   -1 => zeros(len - 1),      # (i-1, j  )
-  #   0 => ones(len),           # (i  , j  )
-  #   1 => zeros(len - 1),      # (i+1, j  )
-  #   ni - 1 => zeros(len - ni + 1), # (i-1, j+1)
-  #   ni => zeros(len - ni),     # (i  , j+1)
-  #   ni + 1 => zeros(len - ni - 1), # (i+1, j+1)
-  # )
+#   # kv = (
+#   #   -ni - 1 => zeros(len - ni - 1), # (i-1, j-1)
+#   #   -ni => zeros(len - ni),     # (i  , j-1)
+#   #   -ni + 1 => zeros(len - ni + 1), # (i+1, j-1)
+#   #   -1 => zeros(len - 1),      # (i-1, j  )
+#   #   0 => ones(len),           # (i  , j  )
+#   #   1 => zeros(len - 1),      # (i+1, j  )
+#   #   ni - 1 => zeros(len - ni + 1), # (i-1, j+1)
+#   #   ni => zeros(len - ni),     # (i  , j+1)
+#   #   ni + 1 => zeros(len - ni - 1), # (i+1, j+1)
+#   # )
 
-  # I, J, V, mmax, nmax = SparseArrays.spdiagm_internal(kv...)
-  # B = sparsecsr(I, J, V, mmax, nmax)
+#   # I, J, V, mmax, nmax = SparseArrays.spdiagm_internal(kv...)
+#   # B = sparsecsr(I, J, V, mmax, nmax)
 
-  return A
-end
+#   return A
+# end
 
-function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
-  len, = cellsize(mesh)
-  A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
-  return A
-end
+# function init_A_matrix(mesh::CurvilinearGrid1D, ::CPU)
+#   len, = cellsize(mesh)
+#   A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
+#   return A
+# end
 
 function solve!(
   scheme::ImplicitScheme,
