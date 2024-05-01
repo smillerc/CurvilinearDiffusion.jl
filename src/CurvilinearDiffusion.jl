@@ -16,4 +16,8 @@ include("max_dt.jl")
 using .TimeStepControl
 export max_dt
 
+include("vtk.jl")
+using .VTKOutput
+export save_vtk
+
 end
