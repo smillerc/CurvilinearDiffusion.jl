@@ -56,10 +56,10 @@ end
 
 @kernel function boundary_diffusion_op_kernel_2d!(
   A,
-  b,
+  # b,
   α,
-  u,
-  source_term,
+  # u,
+  # source_term,
   Δt,
   cell_center_metrics,
   edge_metrics,
@@ -85,8 +85,14 @@ end
       αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
     )
 
-    stencil, rhs = _neumann_boundary_diffusion_operator(
-      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
+    stencil = _neumann_boundary_diffusion_operator(
+      # u, source_term, 
+      edge_diffusivity,
+      Δt,
+      cell_center_metrics,
+      edge_metrics,
+      grid_idx,
+      loc,
     )
 
     A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
@@ -116,9 +122,74 @@ end
     if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
     #! format: on
 
-    b[mat_idx] = rhs
+    # b[mat_idx] = rhs
   end
 end
+# @kernel function boundary_diffusion_op_kernel_2d!(
+#   A,
+#   b,
+#   α,
+#   u,
+#   source_term,
+#   Δt,
+#   cell_center_metrics,
+#   edge_metrics,
+#   grid_indices,
+#   matrix_indices,
+#   mean_func::F,
+#   (ni, nj),
+#   loc::Int,
+# ) where {F}
+#   idx = @index(Global, Linear)
+
+#   len = ni * nj
+
+#   begin
+#     grid_idx = grid_indices[idx]
+#     mat_idx = matrix_indices[idx]
+
+#     i, j = grid_idx.I
+#     edge_diffusivity = (
+#       αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
+#       αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
+#       αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
+#       αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
+#     )
+
+#     stencil, rhs = _neumann_boundary_diffusion_operator(
+#       u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
+#     )
+
+#     A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
+
+#     ip1 = true
+#     jp1 = true
+#     im1 = true
+#     jm1 = true
+#     if loc == 1 # :ilo
+#       im1 = false
+#     elseif loc == 2 # :ihi
+#       ip1 = false
+#     elseif loc == 3 # :jlo
+#       jm1 = false
+#     elseif loc == 4 # :jhi
+#       jp1 = false
+#     end
+
+#     #! format: off
+#     if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
+#     if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
+#     if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
+#     if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
+#     if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
+#     if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
+#     if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
+#     if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
+#     #! format: on
+
+#     b[mat_idx] = rhs
+#   end
+# end
 
 # ---------------------------------------------------------------------------
 #  Operators
@@ -168,20 +239,20 @@ end
 
 # Generate a stencil for a 2D neumann boundary condition
 @inline function _neumann_boundary_diffusion_operator(
-  u::AbstractArray{T,2},
-  source_term::AbstractArray{T,2},
+  # u::AbstractArray{T,2},
+  # source_term::AbstractArray{T,2},
   edge_diffusivity,
   Δτ,
   cell_center_metrics,
   edge_metrics,
   idx,
   loc,
-) where {T}
-
+)
+  T = Float64
   #
   Jᵢⱼ = cell_center_metrics.J[idx]
-  sᵢⱼ = source_term[idx]
-  uᵢⱼ = u[idx]
+  # sᵢⱼ = source_term[idx]
+  # uᵢⱼ = u[idx]
 
   @unpack fᵢ₊½, fᵢ₋½, fⱼ₊½, fⱼ₋½, gᵢ₊½, gᵢ₋½, gⱼ₊½, gⱼ₋½ = conservative_edge_terms(
     edge_diffusivity, edge_metrics, idx
@@ -213,7 +284,7 @@ end
   H = fⱼ₊½ + gᵢ₊½ - gᵢ₋½                       # (i  ,j+1)
   I = gᵢ₊½ + gⱼ₊½                              # (i+1,j+1)
   E = -(fᵢ₋½ + fⱼ₋½ + fᵢ₊½ + fⱼ₊½ + Jᵢⱼ / Δτ)  # (i,j)
-  RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
+  # RHS = -(Jᵢⱼ * sᵢⱼ + uᵢⱼ * Jᵢⱼ / Δτ)
 
   #------------------------------------------------------------------------------
   # Assemble the stencil
@@ -242,5 +313,5 @@ end
   # use an offset so we can index via [+1, -1] for (i+1, j-1)
   offset_stencil = OffsetMatrix(SMatrix{3,3}(stencil), -1:1, -1:1)
 
-  return offset_stencil, RHS
+  return offset_stencil #, RHS
 end
