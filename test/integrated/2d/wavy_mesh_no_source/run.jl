@@ -116,7 +116,7 @@ end
 # Solve
 # ------------------------------------------------------------
 function run(maxiter=Inf)
-  casename = "wavy_mesh_no_source"
+  casename = "wavy_mesh_2d_no_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
   global Δt = 1e-4
@@ -137,9 +137,9 @@ function run(maxiter=Inf)
     )
 
     @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
-      scheme, mesh, T, Δt
+      scheme, mesh, T, Δt;
     )
-    @printf "cycle: %i t: %.4e, L2: %.1e, iterations: %i Δt: %.3e\n" iter t L₂ ncycles Δt
+    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next
       @timeit "save_vtk" save_vtk(scheme, T, mesh, iter, t, casename)
