@@ -6,8 +6,8 @@ using KernelAbstractions
 
 include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
-export ImplicitScheme
-export solve!
+export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
+export DirichletBC, NeumannBC
 
 include("conductivity.jl")
 export update_conductivity!

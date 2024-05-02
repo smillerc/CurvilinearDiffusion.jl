@@ -1,98 +1,97 @@
 
+abstract type AbstractBC end
+
+struct DirichletBC{T} <: AbstractBC
+  val::T
+end
+
+struct NeumannBC <: AbstractBC end
+
+bc_operator(::NeumannBC) = _neumann_boundary_diffusion_operator, nothing
+bc_operator(bc::DirichletBC) = _dirichlet_boundary_diffusion_operator, bc.val
+
+# struct RobinBC <: AbstractBC end
+
 # ---------------------------------------------------------------------------
 #  Kernels
 # ---------------------------------------------------------------------------
 
-@kernel function boundary_diffusion_op_kernel_1d!(
-  A,
-  b,
-  @Const(α),
-  @Const(u),
-  @Const(source_term),
-  @Const(Δt),
-  @Const(cell_center_metrics),
-  @Const(edge_metrics),
-  @Const(grid_indices),
-  @Const(matrix_indices),
-  @Const(mean_func::F),
-  @Const((ni, nj)),
-  @Const(loc::Symbol)
-) where {F}
-  idx = @index(Global, Linear)
+# @kernel function boundary_diffusion_op_kernel_1d!(
+#   A,
+#   b,
+#   @Const(α),
+#   @Const(u),
+#   @Const(source_term),
+#   @Const(Δt),
+#   @Const(cell_center_metrics),
+#   @Const(edge_metrics),
+#   @Const(grid_indices),
+#   @Const(matrix_indices),
+#   @Const(mean_func::F),
+#   @Const((ni, nj)),
+#   @Const(loc::Symbol)
+# ) where {F}
+#   idx = @index(Global, Linear)
 
-  begin
-    grid_idx = grid_indices[idx]
-    mat_idx = matrix_indices[idx]
+#   begin
+#     grid_idx = grid_indices[idx]
+#     mat_idx = matrix_indices[idx]
 
-    i, = grid_idx.I
-    edge_diffusivity = (αᵢ₊½=mean_func(α[i], α[i + 1]), αᵢ₋½=mean_func(α[i], α[i - 1]))
+#     i, = grid_idx.I
+#     edge_diffusivity = (αᵢ₊½=mean_func(α[i], α[i + 1]), αᵢ₋½=mean_func(α[i], α[i - 1]))
 
-    stencil, rhs = _neumann_boundary_diffusion_operator(
-      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
-    )
+#     stencil, rhs = _neumann_boundary_diffusion_operator(
+#       u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
+#     )
 
-    A[mat_idx, mat_idx] = stencil[0] # (i)
+#     A[mat_idx, mat_idx] = stencil[0] # (i)
 
-    ip1 = true
-    im1 = true
+#     ip1 = true
+#     im1 = true
 
-    if loc === :ilo
-      im1 = false
-    elseif loc === :ihi
-      ip1 = false
-    end
+#     if loc === :ilo
+#       im1 = false
+#     elseif loc === :ihi
+#       ip1 = false
+#     end
 
-    if (im1 && (1 <= (mat_idx - 1) <= ni))
-      A[mat_idx, mat_idx - 1] = stencil[-1] # i-1
-    end
+#     if (im1 && (1 <= (mat_idx - 1) <= ni))
+#       A[mat_idx, mat_idx - 1] = stencil[-1] # i-1
+#     end
 
-    if (ip1 && (1 <= (mat_idx + 1) <= ni))
-      A[mat_idx, mat_idx + 1] = stencil[+1] # i+1
-    end
+#     if (ip1 && (1 <= (mat_idx + 1) <= ni))
+#       A[mat_idx, mat_idx + 1] = stencil[+1] # i+1
+#     end
 
-    b[mat_idx] = rhs
-  end
-end
+#     b[mat_idx] = rhs
+#   end
+# end
 
 @kernel function boundary_diffusion_op_kernel_2d!(
   A,
-  # b,
   α,
-  # u,
-  # source_term,
   Δt,
   cell_center_metrics,
   edge_metrics,
   grid_indices,
   matrix_indices,
-  mean_func::F,
+  mean_func::F1,
   stencil_col_lookup,
+  boundary_operator::F2,
   loc::Int,
-) where {F}
+) where {F1<:Function,F2<:Function}
   idx = @index(Global, Linear)
 
   _, ncols = size(A)
-  begin
+  @inbounds begin
     grid_idx = grid_indices[idx]
     row = matrix_indices[idx]
 
-    i, j = grid_idx.I
-    edge_diffusivity = (
-      αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
-      αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
-      αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
-      αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
-    )
-
+    edge_α = edge_diffusivity(α, grid_idx, mean_func)
     J = cell_center_metrics.J[grid_idx]
-    stencil = _neumann_boundary_diffusion_operator(
-      edge_diffusivity, Δt, J, edge_metrics, grid_idx, loc
-    )
+    stencil = boundary_operator(edge_α, Δt, J, edge_metrics, grid_idx, loc)
 
-    ip1 = true
-    jp1 = true
-    im1 = true
-    jm1 = true
+    ip1 = jp1 = im1 = jm1 = true
     if loc == 1 # :ilo
       im1 = false
     elseif loc == 2 # :ihi
@@ -114,12 +113,13 @@ end
     colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
     colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
 
-    A[row, colᵢⱼ] = stencil[5]  #[+0, +0] # (i  , j  )
-
     if ((im1 && jm1) && (1 <= colᵢ₋₁ⱼ₋₁ <= ncols)) A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] end # (i-1, j-1)
     if ((       jm1) && (1 <= colᵢⱼ₋₁   <= ncols)) A[row, colᵢⱼ₋₁  ] = stencil[2] end # (i  , j-1)
     if ((im1       ) && (1 <= colᵢ₊₁ⱼ₋₁ <= ncols)) A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] end # (i+1, j-1)
     if ((im1 && jp1) && (1 <= colᵢ₋₁ⱼ   <= ncols)) A[row, colᵢ₋₁ⱼ  ] = stencil[4] end # (i-1, j  )
+    
+    A[row, colᵢⱼ] = stencil[5]  #[+0, +0] # (i  , j  )
+
     if ((       jp1) && (1 <= colᵢ₊₁ⱼ   <= ncols)) A[row, colᵢ₊₁ⱼ  ] = stencil[6] end # (i+1, j  )
     if ((ip1 && jm1) && (1 <= colᵢ₋₁ⱼ₊₁ <= ncols)) A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] end # (i-1, j+1)
     if ((ip1       ) && (1 <= colᵢⱼ₊₁   <= ncols)) A[row, colᵢⱼ₊₁  ] = stencil[8] end # (i  , j+1)
@@ -137,30 +137,21 @@ end
   edge_metrics,
   grid_indices,
   matrix_indices,
-  mean_func::F,
+  mean_func::F1,
   stencil_col_lookup,
+  boundary_operator::F2,
   loc::Int,
-) where {F}
+) where {F1<:Function,F2<:Function}
   idx = @index(Global, Linear)
 
   _, ncols = size(A)
   @inbounds begin
     grid_idx = grid_indices[idx]
-
-    i, j, k = grid_idx.I
-    edge_diffusivity = (
-      αᵢ₊½=mean_func(α[i, j, k], α[i + 1, j, k]),
-      αᵢ₋½=mean_func(α[i, j, k], α[i - 1, j, k]),
-      αⱼ₊½=mean_func(α[i, j, k], α[i, j + 1, k]),
-      αⱼ₋½=mean_func(α[i, j, k], α[i, j - 1, k]),
-      αₖ₊½=mean_func(α[i, j, k], α[i, j, k + 1]),
-      αₖ₋½=mean_func(α[i, j, k], α[i, j, k - 1]),
-    )
-
-    J = cell_center_metrics.J[grid_idx]
-    stencil = _inner_diffusion_operator(edge_diffusivity, Δt, J, edge_metrics, grid_idx)
-
     row = matrix_indices[idx]
+
+    edge_α = edge_diffusivity(α, grid_idx, mean_func)
+    J = cell_center_metrics.J[grid_idx]
+    stencil = boundary_operator(edge_α, Δt, J, edge_metrics, grid_idx, loc)
 
     ip1 = jp1 = kp1 = im1 = jm1 = km1 = true
 
@@ -207,8 +198,7 @@ end
     colᵢⱼ₊₁ₖ₊₁   = row + first(stencil_col_lookup.ᵢⱼ₊₁ₖ₊₁)
     colᵢ₊₁ⱼ₊₁ₖ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ₊₁)
 
-    A[row, colᵢⱼₖ] = stencil[14]
-
+    
     if ((im1 && jm1 && km1) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₋₁ ]  = stencil[1] end
     if ((       jm1 && km1) && (1 <= colᵢⱼ₋₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₋₁   ]  = stencil[2] end
     if ((ip1 && jm1 && km1) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₋₁ ]  = stencil[3] end
@@ -222,7 +212,9 @@ end
     if ((       jm1       ) && (1 <= colᵢⱼ₋₁ₖ <= ncols))        A[row, colᵢⱼ₋₁ₖ     ]  = stencil[11] end
     if ((ip1 && jm1       ) && (1 <= colᵢ₊₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₋₁ₖ   ]  = stencil[12] end
     if ((im1              ) && (1 <= colᵢ₋₁ⱼₖ <= ncols))        A[row, colᵢ₋₁ⱼₖ     ]  = stencil[13] end
- 
+    
+    A[row, colᵢⱼₖ] = stencil[14]
+
     if ((ip1              ) && (1 <= colᵢ₊₁ⱼₖ <= ncols))        A[row, colᵢ₊₁ⱼₖ     ]  = stencil[15] end
     if ((im1 && jp1       ) && (1 <= colᵢ₋₁ⱼ₊₁ₖ <= ncols))      A[row, colᵢ₋₁ⱼ₊₁ₖ   ]  = stencil[16] end
     if ((       jp1       ) && (1 <= colᵢⱼ₊₁ₖ <= ncols))        A[row, colᵢⱼ₊₁ₖ     ]  = stencil[17] end
@@ -241,72 +233,6 @@ end
 
   end
 end
-
-# @kernel function boundary_diffusion_op_kernel_2d!(
-#   A,
-#   b,
-#   α,
-#   u,
-#   source_term,
-#   Δt,
-#   cell_center_metrics,
-#   edge_metrics,
-#   grid_indices,
-#   matrix_indices,
-#   mean_func::F,
-#   (ni, nj),
-#   loc::Int,
-# ) where {F}
-#   idx = @index(Global, Linear)
-
-#   len = ni * nj
-
-#   begin
-#     grid_idx = grid_indices[idx]
-#     mat_idx = matrix_indices[idx]
-
-#     i, j = grid_idx.I
-#     edge_diffusivity = (
-#       αᵢ₊½=mean_func(α[i, j], α[i + 1, j]),
-#       αᵢ₋½=mean_func(α[i, j], α[i - 1, j]),
-#       αⱼ₊½=mean_func(α[i, j], α[i, j + 1]),
-#       αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
-#     )
-
-#     stencil, rhs = _neumann_boundary_diffusion_operator(
-#       u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
-#     )
-
-#     A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
-
-#     ip1 = true
-#     jp1 = true
-#     im1 = true
-#     jm1 = true
-#     if loc == 1 # :ilo
-#       im1 = false
-#     elseif loc == 2 # :ihi
-#       ip1 = false
-#     elseif loc == 3 # :jlo
-#       jm1 = false
-#     elseif loc == 4 # :jhi
-#       jp1 = false
-#     end
-
-#     #! format: off
-#     if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-#     if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-#     if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-#     if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-#     if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-#     if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-#     if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-#     if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-#     #! format: on
-
-#     b[mat_idx] = rhs
-#   end
-# end
 
 # ---------------------------------------------------------------------------
 #  Operators
