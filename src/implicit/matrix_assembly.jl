@@ -10,9 +10,7 @@ Assemble the `A` matrix and right-hand side vector `b` for the solution
 to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
 """
 
-function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, Δt)
-  # ni, nj = size(scheme.domain_indices)
-
+function assemble_matrix!(A::SparseMatrixCSC, scheme::ImplicitScheme{2}, mesh, Δt)
   nhalo = 1
   matrix_domain_LI = LinearIndices(scheme.domain_indices)
 
@@ -40,81 +38,48 @@ function assemble_matrix!(A, scheme::ImplicitScheme{2}, mesh, Δt)
     ndrange=size(inner_domain),
   )
 
-  bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4)
-  # ilo
-  ilo_domain = @view scheme.halo_aware_indices[begin, :]
-  ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    A,
-    scheme.α,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    ilo_domain,
-    ilo_matrix_indices,
-    scheme.mean_func,
-    scheme.stencil_col_lookup,
-    bc_locs.ilo;
-    ndrange=size(ilo_domain),
+  bc_ops = (
+    bc_operator(scheme.bcs.ilo),
+    bc_operator(scheme.bcs.ihi),
+    bc_operator(scheme.bcs.jlo),
+    bc_operator(scheme.bcs.jhi),
   )
 
-  # ihi
-  ihi_domain = @view scheme.halo_aware_indices[end, :]
-  ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    A,
-    scheme.α,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    ihi_domain,
-    ihi_matrix_indices,
-    scheme.mean_func,
-    scheme.stencil_col_lookup,
-    bc_locs.ihi;
-    ndrange=size(ihi_domain),
+  bc_domains = (
+    @view(scheme.halo_aware_indices[begin, :]), # ilo
+    @view(scheme.halo_aware_indices[end, :]),   # ihi
+    @view(scheme.halo_aware_indices[:, begin]), # jlo
+    @view(scheme.halo_aware_indices[:, end]),   # jhi
   )
 
-  # jlo
-  jlo_domain = @view scheme.halo_aware_indices[:, begin]
-  jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    A,
-    scheme.α,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    jlo_domain,
-    jlo_matrix_indices,
-    scheme.mean_func,
-    scheme.stencil_col_lookup,
-    bc_locs.jlo;
-    ndrange=size(jlo_domain),
+  DI = LinearIndices(scheme.domain_indices)
+  bc_matrix_indices = (
+    @view(DI[begin, :]), @view(DI[end, :]), @view(DI[:, begin]), @view(DI[:, end])
   )
 
-  # jhi
-  jhi_domain = @view scheme.halo_aware_indices[:, end]
-  jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
-  boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-    A,
-    scheme.α,
-    Δt,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    jhi_domain,
-    jhi_matrix_indices,
-    scheme.mean_func,
-    scheme.stencil_col_lookup,
-    bc_locs.jhi;
-    ndrange=size(jhi_domain),
-  )
+  for bc in 1:4
+    boundary_diffusion_op_kernel_2d!(backend, workgroup)(
+      A,
+      scheme.α,
+      Δt,
+      mesh.cell_center_metrics,
+      mesh.edge_metrics,
+      bc_domains[bc],
+      bc_matrix_indices[bc],
+      scheme.mean_func,
+      scheme.stencil_col_lookup,
+      bc_ops[bc],
+      bc;
+      ndrange=size(bc_domains[bc]),
+    )
+  end
 
   KernelAbstractions.synchronize(backend)
 
   return nothing
 end
 
-function assemble_matrix!(A, scheme::ImplicitScheme{3}, mesh, Δt)
+function assemble_matrix!(A::SparseMatrixCSC, scheme::ImplicitScheme{3}, mesh, Δt)
   nhalo = 1
   matrix_domain_LI = LinearIndices(scheme.domain_indices)
 
@@ -142,229 +107,52 @@ function assemble_matrix!(A, scheme::ImplicitScheme{3}, mesh, Δt)
     ndrange=size(inner_domain),
   )
 
-  # bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4, klo=5, khi=6)
-  # # ilo
-  # ilo_domain = @view scheme.halo_aware_indices[begin, :, :]
-  # ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :, :]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   ilo_domain,
-  #   ilo_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.ilo;
-  #   ndrange=size(ilo_domain),
-  # )
+  bc_ops = (
+    bc_operator(scheme.bcs.ilo),
+    bc_operator(scheme.bcs.ihi),
+    bc_operator(scheme.bcs.jlo),
+    bc_operator(scheme.bcs.jhi),
+    bc_operator(scheme.bcs.klo),
+    bc_operator(scheme.bcs.khi),
+  )
 
-  # # ihi
-  # ihi_domain = @view scheme.halo_aware_indices[end, :, :]
-  # ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :, :]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   ihi_domain,
-  #   ihi_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.ihi;
-  #   ndrange=size(ihi_domain),
-  # )
+  bc_domains = (
+    @view(scheme.halo_aware_indices[begin, :, :]), # ilo
+    @view(scheme.halo_aware_indices[end, :, :]),   # ihi
+    @view(scheme.halo_aware_indices[:, begin, :]), # jlo
+    @view(scheme.halo_aware_indices[:, end, :]),   # jhi
+    @view(scheme.halo_aware_indices[:, :, begin]), # klo
+    @view(scheme.halo_aware_indices[:, :, end]),   # khi
+  )
 
-  # # jlo
-  # jlo_domain = @view scheme.halo_aware_indices[:, begin, :]
-  # jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin, :]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   jlo_domain,
-  #   jlo_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.jlo;
-  #   ndrange=size(jlo_domain),
-  # )
+  DI = LinearIndices(scheme.domain_indices)
+  bc_matrix_indices = (
+    @view(DI[begin, :, :]),
+    @view(DI[end, :, :]),
+    @view(DI[:, begin, :]),
+    @view(DI[:, end, :]),
+    @view(DI[:, :, begin]),
+    @view(DI[:, :, end])
+  )
 
-  # # jhi
-  # jhi_domain = @view scheme.halo_aware_indices[:, end, :]
-  # jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end, :]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   jhi_domain,
-  #   jhi_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.jhi;
-  #   ndrange=size(jhi_domain),
-  # )
-
-  # # klo
-  # klo_domain = @view scheme.halo_aware_indices[:, :, begin]
-  # klo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, :, begin]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   klo_domain,
-  #   klo_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.klo;
-  #   ndrange=size(klo_domain),
-  # )
-
-  # # khi
-  # khi_domain = @view scheme.halo_aware_indices[:, :, end]
-  # khi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, :, end]
-  # boundary_diffusion_op_kernel_3d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   khi_domain,
-  #   khi_matrix_indices,
-  #   scheme.mean_func,
-  #   scheme.stencil_col_lookup,
-  #   bc_locs.khi;
-  #   ndrange=size(khi_domain),
-  # )
+  for bc in 1:6
+    boundary_diffusion_op_kernel_3d!(backend, workgroup)(
+      A,
+      scheme.α,
+      Δt,
+      mesh.cell_center_metrics,
+      mesh.edge_metrics,
+      bc_domains[bc],
+      bc_matrix_indices[bc],
+      scheme.mean_func,
+      scheme.stencil_col_lookup,
+      bc_ops[bc],
+      bc;
+      ndrange=size(bc_domains[bc]),
+    )
+  end
 
   KernelAbstractions.synchronize(backend)
 
   return nothing
 end
-
-# function working_assemble_matrix!(scheme::ImplicitScheme{2}, mesh, u, Δt)
-#   ni, nj = size(scheme.domain_indices)
-
-#   nhalo = 1
-#   matrix_domain_LI = LinearIndices(scheme.domain_indices)
-
-#   matrix_indices = @view matrix_domain_LI[
-#     (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-#   ]
-
-#   inner_domain = @view scheme.halo_aware_indices[
-#     (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-#   ]
-
-#   backend = scheme.backend
-#   workgroup = (64,)
-
-#   inner_diffusion_op_kernel_2d!(backend, workgroup)(
-#     A,
-#     scheme.b,
-#     scheme.α,
-#     u,
-#     scheme.source_term,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     inner_domain,
-#     matrix_indices,
-#     scheme.mean_func,
-#     (ni, nj);
-#     ndrange=size(inner_domain),
-#   )
-
-#   bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4)
-#   # ilo
-#   ilo_domain = @view scheme.halo_aware_indices[begin, :]
-#   ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
-#   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-#     A,
-#     scheme.b,
-#     scheme.α,
-#     u,
-#     scheme.source_term,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     ilo_domain,
-#     ilo_matrix_indices,
-#     scheme.mean_func,
-#     (ni, nj),
-#     bc_locs.ilo;
-#     ndrange=size(ilo_domain),
-#   )
-
-#   # ihi
-#   ihi_domain = @view scheme.halo_aware_indices[end, :]
-#   ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
-#   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-#     A,
-#     scheme.b,
-#     scheme.α,
-#     u,
-#     scheme.source_term,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     ihi_domain,
-#     ihi_matrix_indices,
-#     scheme.mean_func,
-#     (ni, nj),
-#     bc_locs.ihi;
-#     ndrange=size(ihi_domain),
-#   )
-
-#   # jlo
-#   jlo_domain = @view scheme.halo_aware_indices[:, begin]
-#   jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
-#   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-#     A,
-#     scheme.b,
-#     scheme.α,
-#     u,
-#     scheme.source_term,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     jlo_domain,
-#     jlo_matrix_indices,
-#     scheme.mean_func,
-#     (ni, nj),
-#     bc_locs.jlo;
-#     ndrange=size(jlo_domain),
-#   )
-
-#   # jhi
-#   jhi_domain = @view scheme.halo_aware_indices[:, end]
-#   jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
-#   boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-#     A,
-#     scheme.b,
-#     scheme.α,
-#     u,
-#     scheme.source_term,
-#     Δt,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     jhi_domain,
-#     jhi_matrix_indices,
-#     scheme.mean_func,
-#     (ni, nj),
-#     bc_locs.jhi;
-#     ndrange=size(jhi_domain),
-#   )
-
-#   KernelAbstractions.synchronize(backend)
-
-#   return nothing
-# end
