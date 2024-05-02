@@ -147,6 +147,8 @@ function solve!(
   L₂norm = last(scheme.solver.stats.residuals)
   niter = scheme.solver.stats.niter
 
+  cutoff!(scheme.solver.x)
+
   # update u to the solution
   @views begin
     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
@@ -222,6 +224,23 @@ end
 
 @inline function preconditioner(A, ::GPU, τ=0.1)
   return KrylovPreconditioners.kp_ilu0(A)
+end
+
+@inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
+
+function cutoff!(a)
+  backend = KernelAbstractions.get_backend(a)
+  cutoff_kernel!(backend)(a; ndrange=size(a))
+  return nothing
+end
+
+@kernel function cutoff_kernel!(a)
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    _a = cutoff(a[idx])
+    a[idx] = _a
+  end
 end
 
 end
