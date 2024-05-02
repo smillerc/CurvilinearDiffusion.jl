@@ -81,7 +81,7 @@ end
 function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
-  bcs = (ilo=:zero_flux, ihi=:zero_flux, jlo=:zero_flux, jhi=:zero_flux)
+  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
   solver = ImplicitScheme(mesh, bcs; backend=backend)
 
   # Temperature and density
@@ -132,13 +132,15 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-      scheme.α, T, ρ, κ, cₚ
-    )
+    nonlinear_thermal_conduction_step!(scheme, T, ρ, cₚ, κ, Δt)
 
-    @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
-      scheme, mesh, T, Δt;
-    )
+    # @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
+    #   scheme.α, T, ρ, κ, cₚ
+    # )
+
+    # @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
+    #   scheme, mesh, T, Δt;
+    # )
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next

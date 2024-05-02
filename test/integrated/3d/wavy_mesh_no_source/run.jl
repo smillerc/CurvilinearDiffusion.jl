@@ -85,12 +85,12 @@ function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=:zero_flux,
-    ihi=:zero_flux,
-    jlo=:zero_flux,
-    jhi=:zero_flux,
-    klo=:zero_flux,
-    khi=:zero_flux,
+    ilo=NeumannBC(),
+    ihi=NeumannBC(),
+    jlo=NeumannBC(),
+    jhi=NeumannBC(),
+    klo=NeumannBC(),
+    khi=NeumannBC(),
   )
 
   solver = ImplicitScheme(mesh, bcs; backend=backend)
@@ -139,7 +139,7 @@ function run(maxiter=Inf)
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
-  @timeit "save_vtk" save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   @info "Running"
   while true
@@ -157,7 +157,7 @@ function run(maxiter=Inf)
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next
-      @timeit "save_vtk" save_vtk(scheme, T, mesh, iter, t, casename)
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
       global io_next += io_interval
     end
 
@@ -173,7 +173,7 @@ function run(maxiter=Inf)
     global t += Δt
   end
 
-  @timeit "save_vtk" save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   print_timer()
   return scheme, T, mesh
