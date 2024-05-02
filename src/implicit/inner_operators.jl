@@ -42,24 +42,88 @@
 #   end
 # end
 
-@kernel function inner_diffusion_op_kernel_2d!(
-  A,
-  α,
+@kernel function full_diffusion_op_2d!(
+  A::SparseMatrixCSC{T,Ti},
+  b::AbstractVector{T},
+  source_term::AbstractArray{T,N},
+  u::AbstractArray{T,N},
+  α::AbstractArray{T,N},
   Δt,
-  cell_center_metrics,
+  cell_center_jacobian,
   edge_metrics,
   grid_indices,
   matrix_indices,
+  mesh_limits,
   mean_func::F,
   stencil_col_lookup,
-) where {F}
+) where {T,Ti,N,F<:Function}
+
+  #
+  @unpack ilo, ihi, jlo, jhi = mesh_limits
+
   idx = @index(Global, Linear)
 
   @inbounds begin
     row = matrix_indices[idx]
     grid_idx = grid_indices[idx]
+    J = cell_center_jacobian[grid_idx]
     edge_α = edge_diffusivity(α, grid_idx, mean_func)
-    J = cell_center_metrics.J[grid_idx]
+    stencil = diffusion_operator(edge_α, Δt, J, edge_metrics, grid_idx)
+
+    colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
+    colᵢⱼ₋₁ = row + first(stencil_col_lookup.ᵢⱼ₋₁)
+    colᵢ₊₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁)
+    colᵢ₋₁ⱼ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ)
+    colᵢⱼ = row + first(stencil_col_lookup.ᵢⱼ)
+    colᵢ₊₁ⱼ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ)
+    colᵢ₋₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁)
+    colᵢⱼ₊₁ = row + first(stencil_col_lookup.ᵢⱼ₊₁)
+    colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
+
+    onbc = i == ilo || i == ihi || j == jlo || j == jhi
+
+    if onbc
+      A_coeffs, rhs_coeffs = bc_operator(edge_terms, J, Δt, idx, mesh_limits)
+    else
+      A_coeffs, rhs_coeffs = inner_operator(edge_α, Δt, J, edge_metrics, grid_idx)
+    end
+
+    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]
+    A[row, colᵢⱼ₋₁] = stencil[2]
+    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]
+    A[row, colᵢ₋₁ⱼ] = stencil[4]
+    A[row, colᵢⱼ] = stencil[5]
+    A[row, colᵢ₊₁ⱼ] = stencil[6]
+    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]
+    A[row, colᵢⱼ₊₁] = stencil[8]
+    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]
+
+    # rhs update
+    b[row] = (source_term[grid_idx] * Δt + u[grid_idx]) * J
+  end
+end
+
+@kernel function inner_diffusion_op_kernel_2d!(
+  A::SparseMatrixCSC{T,Ti},
+  b::AbstractVector{T},
+  source_term::AbstractArray{T,N},
+  u::AbstractArray{T,N},
+  α::AbstractArray{T,N},
+  Δt,
+  cell_center_jacobian,
+  edge_metrics,
+  grid_indices,
+  matrix_indices,
+  mean_func::F,
+  stencil_col_lookup,
+) where {T,Ti,N,F<:Function}
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    row = matrix_indices[idx]
+    grid_idx = grid_indices[idx]
+    J = cell_center_jacobian[grid_idx]
+    edge_α = edge_diffusivity(α, grid_idx, mean_func)
     stencil = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, grid_idx)
 
     #! format: off
@@ -83,6 +147,9 @@
     A[row, colᵢⱼ₊₁  ] = stencil[8] 
     A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] 
     #! format: on
+
+    # rhs update
+    b[row] = (source_term[grid_idx] * Δt + u[grid_idx]) * J
   end
 end
 
@@ -140,6 +207,43 @@ end
       A[row, col] = stencil[c]
     end
   end
+end
+
+# ---------------------------------------------------------------------------
+#  RHS update
+# ---------------------------------------------------------------------------
+
+function rhs_update(source_term, Δt, u, J)
+  return (source_term * Δt + u) * J
+end
+
+function rhs_update(
+  bc::DirichletBC, stencil, source_term, Δt, u, J, idx::CartesianIndex{2}, mesh_limits
+)
+  @unpack ilo, ihi, jlo, jhi = mesh_limits
+
+  i, j = idx.I
+
+  uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁ = stencil
+
+  u_bc = bc.val # boundary condition value, e.g. boundary temperature
+
+  rhs = (source_term * Δt + u) * J
+
+  if i == ilo
+    rhs += -(u_bc * uᵢ₋₁ⱼ)
+  end
+
+  if j == jlo
+  end
+
+  if i == ihi
+  end
+
+  if j == jhi
+  end
+
+  return rhs
 end
 
 # ---------------------------------------------------------------------------
@@ -210,5 +314,18 @@ end
 )
   edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
   stencil = stencil_3d(edge_terms, J, Δt)
+  return stencil
+end
+
+# ---------------------------------------------------------------------------
+#  Boundary Operators
+# ---------------------------------------------------------------------------
+
+# Generate a stencil for a single 2D cell in the interior
+@inline function _bc_diffusion_operator(
+  ::NeumannBC, edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{2}, mesh_limits
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = neumann_stencil_2d(edge_terms, J, Δt, idx, mesh_limits)
   return stencil
 end
