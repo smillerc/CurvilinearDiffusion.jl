@@ -16,7 +16,8 @@ using TimerOutputs
 using UnPack
 using Printf
 
-export ImplicitScheme, solve!, assemble_matrix!
+export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
+export DirichletBC, NeumannBC
 
 struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2,SCL}
   A::SM # sparse matrix
@@ -107,6 +108,8 @@ function solve!(
   maxiter=500,
   show_hist=true,
 ) where {N,T}
+
+  #
   domain_LI = LinearIndices(scheme.domain_indices)
 
   A = scheme.A
