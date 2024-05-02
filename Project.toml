@@ -29,7 +29,7 @@ WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 
 [extensions]
-CurvilinearDiffusionExt = "CUDA"
+CurvilinearDiffusionCUDAExt = "CUDA"
 
 [compat]
 julia = "1.6"
