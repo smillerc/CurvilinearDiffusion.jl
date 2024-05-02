@@ -7,65 +7,102 @@ end
 
 struct NeumannBC <: AbstractBC end
 
-bc_operator(::NeumannBC) = _neumann_boundary_diffusion_operator, nothing
-bc_operator(bc::DirichletBC) = _dirichlet_boundary_diffusion_operator, bc.val
+bc_operator(::NeumannBC) = _neumann_boundary_diffusion_operator
+bc_operator(::DirichletBC) = _dirichlet_boundary_diffusion_operator
+
+const ILO_BC_LOC = 1
+const IHI_BC_LOC = 2
+const JLO_BC_LOC = 3
+const JHI_BC_LOC = 4
+const KLO_BC_LOC = 5
+const KHI_BC_LOC = 6
+
+applybc!(::NeumannBC, u, mesh, loc::Int) = nothing
+
+function applybc!(bcs, u, mesh)
+  for (i, bc) in enumerate(bcs)
+    applybc!(bc, u, mesh, i)
+  end
+end
+
+function applybc!(::NeumannBC, u, mesh::CurvilinearGrid2D, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      copy!(u[ilo, :], u[ilo - 1, :])
+    elseif loc == IHI_BC_LOC
+      copy!(u[ihi, :], u[ihi + 1, :])
+    elseif loc == JLO_BC_LOC
+      copy!(u[:, jlo], u[:, jlo - 1])
+    elseif loc == JHI_BC_LOC
+      copy!(u[:, jhi], u[:, jhi + 1])
+    else
+      error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
+  end
+end
+
+# 
+function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid1D, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1] .= bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1] .= bc.val
+    else
+      error("Bad 1d boundary location value $(loc), must be 1 or 2")
+    end
+  end
+end
+
+function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid2D, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1, :] .= bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1, :] .= bc.val
+    elseif loc == JLO_BC_LOC
+      u[:, jlo - 1] .= bc.val
+    elseif loc == JHI_BC_LOC
+      u[:, jhi + 1] .= bc.val
+    else
+      error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
+  end
+end
+
+function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid3D, loc::Int)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1, :, :] .= bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1, :, :] .= bc.val
+    elseif loc == JLO_BC_LOC
+      u[:, jlo - 1, :] .= bc.val
+    elseif loc == JHI_BC_LOC
+      u[:, jhi + 1, :] .= bc.val
+    elseif loc == KLO_BC_LOC
+      u[:, :, klo - 1] .= bc.val
+    elseif loc == KHI_BC_LOC
+      u[:, :, khi + 1] .= bc.val
+    else
+      error("Bad 3d boundary location value $(loc), must be 1-6")
+    end
+  end
+end
 
 # struct RobinBC <: AbstractBC end
 
 # ---------------------------------------------------------------------------
 #  Kernels
 # ---------------------------------------------------------------------------
-
-# @kernel function boundary_diffusion_op_kernel_1d!(
-#   A,
-#   b,
-#   @Const(α),
-#   @Const(u),
-#   @Const(source_term),
-#   @Const(Δt),
-#   @Const(cell_center_metrics),
-#   @Const(edge_metrics),
-#   @Const(grid_indices),
-#   @Const(matrix_indices),
-#   @Const(mean_func::F),
-#   @Const((ni, nj)),
-#   @Const(loc::Symbol)
-# ) where {F}
-#   idx = @index(Global, Linear)
-
-#   begin
-#     grid_idx = grid_indices[idx]
-#     mat_idx = matrix_indices[idx]
-
-#     i, = grid_idx.I
-#     edge_diffusivity = (αᵢ₊½=mean_func(α[i], α[i + 1]), αᵢ₋½=mean_func(α[i], α[i - 1]))
-
-#     stencil, rhs = _neumann_boundary_diffusion_operator(
-#       u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
-#     )
-
-#     A[mat_idx, mat_idx] = stencil[0] # (i)
-
-#     ip1 = true
-#     im1 = true
-
-#     if loc === :ilo
-#       im1 = false
-#     elseif loc === :ihi
-#       ip1 = false
-#     end
-
-#     if (im1 && (1 <= (mat_idx - 1) <= ni))
-#       A[mat_idx, mat_idx - 1] = stencil[-1] # i-1
-#     end
-
-#     if (ip1 && (1 <= (mat_idx + 1) <= ni))
-#       A[mat_idx, mat_idx + 1] = stencil[+1] # i+1
-#     end
-
-#     b[mat_idx] = rhs
-#   end
-# end
 
 @kernel function boundary_diffusion_op_kernel_2d!(
   A,
@@ -77,9 +114,9 @@ bc_operator(bc::DirichletBC) = _dirichlet_boundary_diffusion_operator, bc.val
   matrix_indices,
   mean_func::F1,
   stencil_col_lookup,
-  boundary_operator::F2,
+  boundary_operator::BC,
   loc::Int,
-) where {F1<:Function,F2<:Function}
+) where {F1<:Function,BC}
   idx = @index(Global, Linear)
 
   _, ncols = size(A)
@@ -91,16 +128,10 @@ bc_operator(bc::DirichletBC) = _dirichlet_boundary_diffusion_operator, bc.val
     J = cell_center_metrics.J[grid_idx]
     stencil = boundary_operator(edge_α, Δt, J, edge_metrics, grid_idx, loc)
 
-    ip1 = jp1 = im1 = jm1 = true
-    if loc == 1 # :ilo
-      im1 = false
-    elseif loc == 2 # :ihi
-      ip1 = false
-    elseif loc == 3 # :jlo
-      jm1 = false
-    elseif loc == 4 # :jhi
-      jp1 = false
-    end
+    ᵢ₋₁ = !(loc == ILO_BC_LOC)
+    ᵢ₊₁ = !(loc == IHI_BC_LOC)
+    ⱼ₋₁ = !(loc == JLO_BC_LOC)
+    ⱼ₊₁ = !(loc == JHI_BC_LOC)
 
     #! format: off
     colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
@@ -113,17 +144,17 @@ bc_operator(bc::DirichletBC) = _dirichlet_boundary_diffusion_operator, bc.val
     colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
     colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
 
-    if ((im1 && jm1) && (1 <= colᵢ₋₁ⱼ₋₁ <= ncols)) A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] end # (i-1, j-1)
-    if ((       jm1) && (1 <= colᵢⱼ₋₁   <= ncols)) A[row, colᵢⱼ₋₁  ] = stencil[2] end # (i  , j-1)
-    if ((im1       ) && (1 <= colᵢ₊₁ⱼ₋₁ <= ncols)) A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] end # (i+1, j-1)
-    if ((im1 && jp1) && (1 <= colᵢ₋₁ⱼ   <= ncols)) A[row, colᵢ₋₁ⱼ  ] = stencil[4] end # (i-1, j  )
+    if ((ᵢ₋₁ && ⱼ₋₁) && (1 <= colᵢ₋₁ⱼ₋₁ <= ncols)) A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] end # (i-1, j-1)
+    if ((       ⱼ₋₁) && (1 <= colᵢⱼ₋₁   <= ncols)) A[row, colᵢⱼ₋₁  ] = stencil[2] end # (i  , j-1)
+    if ((ᵢ₋₁       ) && (1 <= colᵢ₊₁ⱼ₋₁ <= ncols)) A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] end # (i+1, j-1)
+    if ((ᵢ₋₁ && ⱼ₊₁) && (1 <= colᵢ₋₁ⱼ   <= ncols)) A[row, colᵢ₋₁ⱼ  ] = stencil[4] end # (i-1, j  )
     
     A[row, colᵢⱼ] = stencil[5]  #[+0, +0] # (i  , j  )
 
-    if ((       jp1) && (1 <= colᵢ₊₁ⱼ   <= ncols)) A[row, colᵢ₊₁ⱼ  ] = stencil[6] end # (i+1, j  )
-    if ((ip1 && jm1) && (1 <= colᵢ₋₁ⱼ₊₁ <= ncols)) A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] end # (i-1, j+1)
-    if ((ip1       ) && (1 <= colᵢⱼ₊₁   <= ncols)) A[row, colᵢⱼ₊₁  ] = stencil[8] end # (i  , j+1)
-    if ((ip1 && jp1) && (1 <= colᵢ₊₁ⱼ₊₁ <= ncols)) A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] end # (i+1, j+1)
+    if ((       ⱼ₊₁) && (1 <= colᵢ₊₁ⱼ   <= ncols)) A[row, colᵢ₊₁ⱼ  ] = stencil[6] end # (i+1, j  )
+    if ((ᵢ₊₁ && ⱼ₋₁) && (1 <= colᵢ₋₁ⱼ₊₁ <= ncols)) A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] end # (i-1, j+1)
+    if ((ᵢ₊₁       ) && (1 <= colᵢⱼ₊₁   <= ncols)) A[row, colᵢⱼ₊₁  ] = stencil[8] end # (i  , j+1)
+    if ((ᵢ₊₁ && ⱼ₊₁) && (1 <= colᵢ₊₁ⱼ₊₁ <= ncols)) A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] end # (i+1, j+1)
     #! format: on
 
   end
@@ -153,21 +184,12 @@ end
     J = cell_center_metrics.J[grid_idx]
     stencil = boundary_operator(edge_α, Δt, J, edge_metrics, grid_idx, loc)
 
-    ip1 = jp1 = kp1 = im1 = jm1 = km1 = true
-
-    if loc == 1 # :ilo
-      im1 = false
-    elseif loc == 2 # :ihi
-      ip1 = false
-    elseif loc == 3 # :jlo
-      jm1 = false
-    elseif loc == 4 # :jhi
-      jp1 = false
-    elseif loc == 5 # :klo
-      km1 = false
-    elseif loc == 6 # :khi
-      kp1 = false
-    end
+    ᵢ₊₁ = !(loc == ILO_BC_LOC)
+    ⱼ₊₁ = !(loc == IHI_BC_LOC)
+    ₖ₊₁ = !(loc == JLO_BC_LOC)
+    ᵢ₋₁ = !(loc == JHI_BC_LOC)
+    ⱼ₋₁ = !(loc == KLO_BC_LOC)
+    ₖ₋₁ = !(loc == KHI_BC_LOC)
 
     #! format: off
     colᵢ₋₁ⱼ₋₁ₖ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁ₖ₋₁)
@@ -199,35 +221,35 @@ end
     colᵢ₊₁ⱼ₊₁ₖ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ₊₁)
 
     
-    if ((im1 && jm1 && km1) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₋₁ ]  = stencil[1] end
-    if ((       jm1 && km1) && (1 <= colᵢⱼ₋₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₋₁   ]  = stencil[2] end
-    if ((ip1 && jm1 && km1) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₋₁ ]  = stencil[3] end
-    if ((im1        && km1) && (1 <= colᵢ₋₁ⱼₖ₋₁ <= ncols))      A[row, colᵢ₋₁ⱼₖ₋₁   ]  = stencil[4] end
-    if ((              km1) && (1 <= colᵢⱼₖ₋₁ <= ncols))        A[row, colᵢⱼₖ₋₁     ]  = stencil[5] end
-    if ((ip1        && km1) && (1 <= colᵢ₊₁ⱼₖ₋₁ <= ncols))      A[row, colᵢ₊₁ⱼₖ₋₁   ]  = stencil[6] end
-    if ((im1 && jp1 && km1) && (1 <= colᵢ₋₁ⱼ₊₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₊₁ₖ₋₁ ]  = stencil[7] end
-    if ((       jp1 && km1) && (1 <= colᵢⱼ₊₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₊₁ₖ₋₁   ]  = stencil[8] end
-    if ((ip1 && jp1 && km1) && (1 <= colᵢ₊₁ⱼ₊₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₊₁ₖ₋₁ ]  = stencil[9] end
-    if ((im1 && jm1       ) && (1 <= colᵢ₋₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₋₁ⱼ₋₁ₖ   ]  = stencil[10] end
-    if ((       jm1       ) && (1 <= colᵢⱼ₋₁ₖ <= ncols))        A[row, colᵢⱼ₋₁ₖ     ]  = stencil[11] end
-    if ((ip1 && jm1       ) && (1 <= colᵢ₊₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₋₁ₖ   ]  = stencil[12] end
-    if ((im1              ) && (1 <= colᵢ₋₁ⱼₖ <= ncols))        A[row, colᵢ₋₁ⱼₖ     ]  = stencil[13] end
+    if ((ᵢ₋₁ && ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₋₁ ]  = stencil[1] end
+    if ((       ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢⱼ₋₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₋₁   ]  = stencil[2] end
+    if ((ᵢ₊₁ && ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₋₁ ]  = stencil[3] end
+    if ((ᵢ₋₁        && ₖ₋₁) && (1 <= colᵢ₋₁ⱼₖ₋₁ <= ncols))      A[row, colᵢ₋₁ⱼₖ₋₁   ]  = stencil[4] end
+    if ((              ₖ₋₁) && (1 <= colᵢⱼₖ₋₁ <= ncols))        A[row, colᵢⱼₖ₋₁     ]  = stencil[5] end
+    if ((ᵢ₊₁        && ₖ₋₁) && (1 <= colᵢ₊₁ⱼₖ₋₁ <= ncols))      A[row, colᵢ₊₁ⱼₖ₋₁   ]  = stencil[6] end
+    if ((ᵢ₋₁ && ⱼ₊₁ && ₖ₋₁) && (1 <= colᵢ₋₁ⱼ₊₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₊₁ₖ₋₁ ]  = stencil[7] end
+    if ((       ⱼ₊₁ && ₖ₋₁) && (1 <= colᵢⱼ₊₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₊₁ₖ₋₁   ]  = stencil[8] end
+    if ((ᵢ₊₁ && ⱼ₊₁ && ₖ₋₁) && (1 <= colᵢ₊₁ⱼ₊₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₊₁ₖ₋₁ ]  = stencil[9] end
+    if ((ᵢ₋₁ && ⱼ₋₁       ) && (1 <= colᵢ₋₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₋₁ⱼ₋₁ₖ   ]  = stencil[10] end
+    if ((       ⱼ₋₁       ) && (1 <= colᵢⱼ₋₁ₖ <= ncols))        A[row, colᵢⱼ₋₁ₖ     ]  = stencil[11] end
+    if ((ᵢ₊₁ && ⱼ₋₁       ) && (1 <= colᵢ₊₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₋₁ₖ   ]  = stencil[12] end
+    if ((ᵢ₋₁              ) && (1 <= colᵢ₋₁ⱼₖ <= ncols))        A[row, colᵢ₋₁ⱼₖ     ]  = stencil[13] end
     
     A[row, colᵢⱼₖ] = stencil[14]
 
-    if ((ip1              ) && (1 <= colᵢ₊₁ⱼₖ <= ncols))        A[row, colᵢ₊₁ⱼₖ     ]  = stencil[15] end
-    if ((im1 && jp1       ) && (1 <= colᵢ₋₁ⱼ₊₁ₖ <= ncols))      A[row, colᵢ₋₁ⱼ₊₁ₖ   ]  = stencil[16] end
-    if ((       jp1       ) && (1 <= colᵢⱼ₊₁ₖ <= ncols))        A[row, colᵢⱼ₊₁ₖ     ]  = stencil[17] end
-    if ((ip1 && jp1       ) && (1 <= colᵢ₊₁ⱼ₊₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₊₁ₖ   ]  = stencil[18] end
-    if ((im1 && jm1 && kp1) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₊₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₊₁ ]  = stencil[19] end
-    if ((       jm1 && kp1) && (1 <= colᵢⱼ₋₁ₖ₊₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₊₁   ]  = stencil[20] end
-    if ((ip1 && jm1 && kp1) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₊₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₊₁ ]  = stencil[21] end
-    if ((im1        && kp1) && (1 <= colᵢ₋₁ⱼₖ₊₁ <= ncols))      A[row, colᵢ₋₁ⱼₖ₊₁   ]  = stencil[22] end
-    if ((              kp1) && (1 <= colᵢⱼₖ₊₁ <= ncols))        A[row, colᵢⱼₖ₊₁     ]  = stencil[23] end
-    if ((ip1        && kp1) && (1 <= colᵢ₊₁ⱼₖ₊₁ <= ncols))      A[row, colᵢ₊₁ⱼₖ₊₁   ]  = stencil[24] end
-    if ((im1 && jp1 && kp1) && (1 <= colᵢ₋₁ⱼ₊₁ₖ₊₁ <= ncols))    A[row, colᵢ₋₁ⱼ₊₁ₖ₊₁ ]  = stencil[25] end
-    if ((       jp1 && kp1) && (1 <= colᵢⱼ₊₁ₖ₊₁ <= ncols))      A[row, colᵢⱼ₊₁ₖ₊₁   ]  = stencil[26] end
-    if ((ip1 && jp1 && kp1) && (1 <= colᵢ₊₁ⱼ₊₁ₖ₊₁ <= ncols))    A[row, colᵢ₊₁ⱼ₊₁ₖ₊₁ ]  = stencil[27] end
+    if ((ᵢ₊₁              ) && (1 <= colᵢ₊₁ⱼₖ <= ncols))        A[row, colᵢ₊₁ⱼₖ     ]  = stencil[15] end
+    if ((ᵢ₋₁ && ⱼ₊₁       ) && (1 <= colᵢ₋₁ⱼ₊₁ₖ <= ncols))      A[row, colᵢ₋₁ⱼ₊₁ₖ   ]  = stencil[16] end
+    if ((       ⱼ₊₁       ) && (1 <= colᵢⱼ₊₁ₖ <= ncols))        A[row, colᵢⱼ₊₁ₖ     ]  = stencil[17] end
+    if ((ᵢ₊₁ && ⱼ₊₁       ) && (1 <= colᵢ₊₁ⱼ₊₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₊₁ₖ   ]  = stencil[18] end
+    if ((ᵢ₋₁ && ⱼ₋₁ && ₖ₊₁) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₊₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₊₁ ]  = stencil[19] end
+    if ((       ⱼ₋₁ && ₖ₊₁) && (1 <= colᵢⱼ₋₁ₖ₊₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₊₁   ]  = stencil[20] end
+    if ((ᵢ₊₁ && ⱼ₋₁ && ₖ₊₁) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₊₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₊₁ ]  = stencil[21] end
+    if ((ᵢ₋₁        && ₖ₊₁) && (1 <= colᵢ₋₁ⱼₖ₊₁ <= ncols))      A[row, colᵢ₋₁ⱼₖ₊₁   ]  = stencil[22] end
+    if ((              ₖ₊₁) && (1 <= colᵢⱼₖ₊₁ <= ncols))        A[row, colᵢⱼₖ₊₁     ]  = stencil[23] end
+    if ((ᵢ₊₁        && ₖ₊₁) && (1 <= colᵢ₊₁ⱼₖ₊₁ <= ncols))      A[row, colᵢ₊₁ⱼₖ₊₁   ]  = stencil[24] end
+    if ((ᵢ₋₁ && ⱼ₊₁ && ₖ₊₁) && (1 <= colᵢ₋₁ⱼ₊₁ₖ₊₁ <= ncols))    A[row, colᵢ₋₁ⱼ₊₁ₖ₊₁ ]  = stencil[25] end
+    if ((       ⱼ₊₁ && ₖ₊₁) && (1 <= colᵢⱼ₊₁ₖ₊₁ <= ncols))      A[row, colᵢⱼ₊₁ₖ₊₁   ]  = stencil[26] end
+    if ((ᵢ₊₁ && ⱼ₊₁ && ₖ₊₁) && (1 <= colᵢ₊₁ⱼ₊₁ₖ₊₁ <= ncols))    A[row, colᵢ₊₁ⱼ₊₁ₖ₊₁ ]  = stencil[27] end
 
     #! format: on
 
@@ -249,16 +271,16 @@ end
   )
 
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-  if loc == 1 # :ilo
+  if ILO_BC_LOC == 1
     a_Jξ²ᵢ₋½ = zero(T)
     a_Jξηᵢ₋½ = zero(T)
-  elseif loc == 2 # :ihi
+  elseif IHI_BC_LOC == 2
     a_Jξ²ᵢ₊½ = zero(T)
     a_Jξηᵢ₊½ = zero(T)
-  elseif loc == 3 # :jlo
+  elseif JLO_BC_LOC == 3
     a_Jη²ⱼ₋½ = zero(T)
     a_Jηξⱼ₋½ = zero(T)
-  elseif loc == 4 # :jhi
+  elseif JHI_BC_LOC == 4
     a_Jη²ⱼ₊½ = zero(T)
     a_Jηξⱼ₊½ = zero(T)
   else
@@ -306,22 +328,22 @@ end
   a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
 
   # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-  if loc == 1 # :ilo
+  if loc == ILO_BC_LOC
     a_Jξ²ᵢ₋½ = a_Jξηᵢ₋½ = a_Jξζᵢ₋½ = zero(T)
 
-  elseif loc == 2 # :ihi
+  elseif loc == IHI_BC_LOC
     a_Jξ²ᵢ₊½ = a_Jξηᵢ₊½ = a_Jξζᵢ₊½ = zero(T)
 
-  elseif loc == 3 # :jlo
+  elseif loc == JLO_BC_LOC
     a_Jηξⱼ₋½ = a_Jη²ⱼ₋½ = a_Jηζⱼ₋½ = zero(T)
 
-  elseif loc == 4 # :jhi
+  elseif loc == JHI_BC_LOC
     a_Jηξⱼ₊½ = a_Jη²ⱼ₊½ = a_Jηζⱼ₊½ = zero(T)
 
-  elseif loc == 5 # :klo
+  elseif loc == KLO_BC_LOC
     a_Jζξₖ₋½ = a_Jζηₖ₋½ = a_Jζ²ₖ₋½ = zero(T)
 
-  elseif loc == 6 # :khi
+  elseif loc == KHI_BC_LOC
     a_Jζξₖ₊½ = a_Jζηₖ₊½ = a_Jζ²ₖ₊½ = zero(T)
   else
     error("bad boundary location")
