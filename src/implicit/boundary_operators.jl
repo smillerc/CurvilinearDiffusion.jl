@@ -84,8 +84,9 @@ end
       αⱼ₋½=mean_func(α[i, j], α[i, j - 1]),
     )
 
+    J = cell_center_metrics.J[grid_idx]
     stencil = _neumann_boundary_diffusion_operator(
-      edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
+      edge_diffusivity, Δt, J, edge_metrics, grid_idx, loc
     )
 
     ip1 = true
