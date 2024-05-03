@@ -175,59 +175,6 @@ function solve!(
   return L₂norm, niter, issolved(scheme.solver)
 end
 
-# function working_solve!(
-#   scheme::ImplicitScheme,
-#   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
-#   u,
-#   Δt;
-#   maxiter=500,
-#   show_hist=true,
-# )
-#   domain_LI = LinearIndices(scheme.domain_indices)
-
-#   # update the A matrix
-#   @timeit "assemble_matrix" assemble_matrix!(scheme, mesh, u, Δt)
-
-#   # precondition
-#   @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, scheme.A)
-
-#   n = size(scheme.A, 1)
-#   precond_op = LinearOperator(
-#     eltype(scheme.A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
-#   )
-
-#   if !warmedup(scheme)
-#     @timeit "dqgmres! (linear solve)" dqgmres!(
-#       scheme.solver, scheme.A, scheme.b; N=precond_op, history=true, itmax=maxiter
-#     )
-#     warmedup!(scheme)
-#   else
-#     @timeit "dqgmres! (linear solve)" dqgmres!(
-#       scheme.solver,
-#       scheme.A,
-#       scheme.b,
-#       scheme.solver.x; # use last step as a starting point
-#       N=precond_op,
-#       itmax=maxiter,
-#       history=true,
-#     )
-#   end
-
-#   resids = last(scheme.solver.stats.residuals)
-#   niter = scheme.solver.stats.niter
-
-#   # update u to the solution
-#   @views begin
-#     copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
-#   end
-
-#   # if show_hist
-#   #   @printf "Convergence: %.1e, iterations: %i Δt: %.3e\n" resids niter Δt
-#   # end
-
-#   return resids, niter, issolved(scheme.solver)
-# end
-
 @inline function preconditioner(A, ::CPU, τ=0.1)
   return ILUZero.ilu0(A)
 end

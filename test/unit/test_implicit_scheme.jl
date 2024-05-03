@@ -1,6 +1,3 @@
-using CurvilinearGrids
-using Test
-using CurvilinearDiffusion
 
 @testset "ImplicitScheme construction" begin
   function uniform_grid(nx, ny)
@@ -33,7 +30,10 @@ using CurvilinearDiffusion
 
   @test length(scheme.b) == 64
   @test length(scheme.x) == 64
+  @test length(scheme.solver.x) == 64
   @test size(scheme.A) == (64, 64)
   @test size(scheme.α) == (8, 8)
   @test size(scheme.source_term) == (8, 8)
+
+  @test size(mesh.iterators.cell.domain) == size(scheme.iterators.domain.linear)
 end
