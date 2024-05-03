@@ -1,30 +1,26 @@
 
-function initialize_coefficient_matrix(mesh::CurvilinearGrid1D, ::CPU)
-  len, = cellsize(mesh)
+function initialize_coefficient_matrix(iterators, ::CurvilinearGrid1D, ::CPU)
+  len = length(iterators.full.linear)
   A = Tridiagonal(zeros(len - 1), ones(len), zeros(len - 1))
   return A, nothing
 end
 
-function initialize_coefficient_matrix(mesh::CurvilinearGrid2D, ::CPU)
-  dims = cellsize(mesh)
+function initialize_coefficient_matrix(iterators, ::CurvilinearGrid2D, ::CPU)
+  dims = size(iterators.full.cartesian)
   A, stencil_col_lookup = init_coeff_matrix(dims; format=:csc, cardinal_only=false)
   return A, stencil_col_lookup
 end
 
-# function initialize_coefficient_matrix(mesh::CurvilinearGrid2D, ::CUDABackend)
-#   A, stencil_col_lookup = initialize_coefficient_matrix(mesh, CPU())
-
-#   return CuSparseMatrixCSR(A), stencil_col_lookup
-# end
-
-function initialize_coefficient_matrix(mesh::CurvilinearGrid3D, ::CPU)
-  dims = cellsize(mesh)
+function initialize_coefficient_matrix(iterators, ::CurvilinearGrid3D, ::CPU)
+  dims = size(iterators.full.cartesian)
   A, stencil_col_lookup = init_coeff_matrix(dims; format=:csc, cardinal_only=false)
   return A, stencil_col_lookup
 end
 
-function init_coeff_matrix(dims::NTuple{N,Int}; format=:csr, cardinal_only=false) where {N}
+function init_coeff_matrix(dims::NTuple{N,Int}; format=:csc, cardinal_only=false) where {N}
   @assert all(dims .> 2)
+
+  @assert format == :csr || format == :csc
 
   CI = CartesianIndices(dims)
   LI = LinearIndices(CI)

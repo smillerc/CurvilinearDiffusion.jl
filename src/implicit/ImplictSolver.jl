@@ -19,7 +19,7 @@ using Printf
 export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2,SCL}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,SCL}
   A::SM # sparse matrix
   x::V # solution vector
   b::V # RHS vector
@@ -29,9 +29,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,CI1,CI2,SCL}
   source_term::AA # cell-centered source term
   mean_func::F
   bcs::BC
-  nhalo::Int
-  domain_indices::CI1
-  halo_aware_indices::CI2
+  iterators::IT
   backend # GPU / CPU
   warmed_up::Vector{Bool}
   stencil_col_lookup::SCL
@@ -48,33 +46,40 @@ include("matrix_assembly.jl")
 include("rhs_assembly.jl")
 include("init_matrix.jl")
 
-function ImplicitScheme(
-  mesh,
-  bcs;
-  mean_func=arithmetic_mean,
-  T=Float64,
-  # solver=KrylovJL_GMRES(),
-  backend=CPU(),
-)
-  celldims = cellsize_withhalo(mesh)
+function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend=CPU())
+  @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
-  len = prod(cellsize(mesh))
+  # The diffusion solver is currently set to use only 1 halo cell
+  nhalo = 1
 
-  halo_aware_CI = mesh.iterators.cell.domain
-  domain_CI = CartesianIndices(size(halo_aware_CI))
+  # CartesianIndices used to iterate through the mesh; this is the same
+  # size as the diffusion domain, but the indices are within the context
+  # of the mesh (which will have the same or more halo cells, e.g. a hydro mesh with 6 halo cells)
+  mesh_CI = expand(mesh.iterators.cell.domain, nhalo)
 
-  @assert length(domain_CI) == length(halo_aware_CI)
+  # The CI CartesianIndices are used to iterate through the
+  # entire problem, and the LI linear indices are to make it simple
+  # to work with 1D indices for the A matrix and b rhs vector construction
+  full_CI = CartesianIndices(size(mesh_CI))
+  domain_CI = expand(full_CI, -nhalo)
 
-  A, stencil_col_lookup = initialize_coefficient_matrix(mesh, backend)
+  @assert length(full_CI) == length(mesh_CI)
+
+  iterators = (
+    mesh=mesh_CI, # used to access mesh quantities
+    domain=(cartesian=domain_CI, linear=LinearIndices(domain_CI)),
+    full=(cartesian=full_CI, linear=LinearIndices(full_CI)),
+  )
+
+  A, stencil_col_lookup = initialize_coefficient_matrix(iterators, mesh, backend)
   Pl = preconditioner(A, backend)
 
-  b = KernelAbstractions.zeros(backend, T, len)
-  x = KernelAbstractions.zeros(backend, T, len)
+  b = KernelAbstractions.zeros(backend, T, length(full_CI))
+  x = KernelAbstractions.zeros(backend, T, length(full_CI))
 
-  diffusivity = KernelAbstractions.zeros(backend, T, celldims)
-  source_term = KernelAbstractions.zeros(backend, T, celldims)
-  # memory = 50
-  # solver = Krylov.DqgmresSolver(A, b, memory)
+  diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
+  source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
+
   solver = Krylov.GmresSolver(A, b)
 
   implicit_solver = ImplicitScheme(
@@ -87,9 +92,7 @@ function ImplicitScheme(
     source_term,
     mean_func,
     bcs,
-    mesh.nhalo,
-    domain_CI,
-    halo_aware_CI,
+    iterators,
     backend,
     [false],
     stencil_col_lookup,
@@ -108,9 +111,9 @@ function solve!(
   maxiter=500,
   show_hist=true,
 ) where {N,T}
-
   #
-  domain_LI = LinearIndices(scheme.domain_indices)
+
+  @assert size(u) == size(mesh.iterators.cell.domain)
 
   A = scheme.A
   b = scheme.b
@@ -153,8 +156,12 @@ function solve!(
   cutoff!(scheme.solver.x)
 
   # update u to the solution
+  domain_LI = scheme.iterators.domain.linear
   @views begin
-    copyto!(u[scheme.halo_aware_indices], scheme.solver.x[domain_LI])
+    copyto!(
+      u[mesh.iterators.cell.domain], #
+      scheme.solver.x[domain_LI],    #
+    )
   end
 
   if show_hist
