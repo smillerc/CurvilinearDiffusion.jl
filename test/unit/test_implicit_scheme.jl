@@ -34,6 +34,6 @@
   @test size(scheme.A) == (64, 64)
   @test size(scheme.α) == (8, 8)
   @test size(scheme.source_term) == (8, 8)
-
+  @test scheme.limits == (ilo=1, jlo=1, ihi=8, jhi=8)
   @test size(mesh.iterators.cell.domain) == size(scheme.iterators.domain.linear)
 end
