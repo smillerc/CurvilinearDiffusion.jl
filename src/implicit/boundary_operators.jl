@@ -7,8 +7,8 @@ end
 
 struct NeumannBC <: AbstractBC end
 
-bc_operator(::NeumannBC) = (_neumann_boundary_diffusion_operator, nothing)
-bc_operator(bc::DirichletBC) = (_dirichlet_boundary_diffusion_operator, bc.val)
+# bc_operator(::NeumannBC) = (_neumann_boundary_diffusion_operator, nothing)
+# bc_operator(bc::DirichletBC) = (_dirichlet_boundary_diffusion_operator, bc.val)
 
 const ILO_BC_LOC = 1
 const IHI_BC_LOC = 2
@@ -17,15 +17,15 @@ const JHI_BC_LOC = 4
 const KLO_BC_LOC = 5
 const KHI_BC_LOC = 6
 
-applybc!(::NeumannBC, u, mesh, loc::Int) = nothing
+# applybc!(::NeumannBC, u, mesh, loc::Int) = nothing
 
-function applybc!(bcs, u, mesh)
+function applybcs!(bcs, mesh, limits, u::AbstractArray)
   for (i, bc) in enumerate(bcs)
-    applybc!(bc, u, mesh, i)
+    applybc!(bc, mesh, u, limits, i)
   end
 end
 
-function applybc!(::NeumannBC, u, mesh::CurvilinearGrid2D, loc::Int)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
@@ -43,60 +43,60 @@ function applybc!(::NeumannBC, u, mesh::CurvilinearGrid2D, loc::Int)
   end
 end
 
-# 
-function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid1D, loc::Int)
-  @unpack ilo, ihi = mesh.domain_limits.cell
+#
+# function applybc!(bc::DirichletBC, ::CurvilinearGrid1D, u::AbstractArray, limits, loc::Int)
+#   @unpack ilo, ihi = mesh.domain_limits.cell
+
+#   @views begin
+#     if loc == ILO_BC_LOC
+#       u[ilo - 1] .= bc.val
+#     elseif loc == IHI_BC_LOC
+#       u[ihi + 1] .= bc.val
+#     else
+#       error("Bad 1d boundary location value $(loc), must be 1 or 2")
+#     end
+#   end
+# end
+
+function applybc!(bc::DirichletBC, ::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = limits
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1] .= bc.val
+      u[ilo, :] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi + 1] .= bc.val
-    else
-      error("Bad 1d boundary location value $(loc), must be 1 or 2")
-    end
-  end
-end
-
-function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid2D, loc::Int)
-  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
-
-  @views begin
-    if loc == ILO_BC_LOC
-      u[ilo - 1, :] .= bc.val
-    elseif loc == IHI_BC_LOC
-      u[ihi + 1, :] .= bc.val
+      u[ihi, :] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[:, jlo - 1] .= bc.val
+      u[:, jlo] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[:, jhi + 1] .= bc.val
+      u[:, jhi] .= bc.val
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
   end
 end
 
-function applybc!(bc::DirichletBC, u, mesh::CurvilinearGrid3D, loc::Int)
-  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
+# function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u, limits, loc::Int)
+#   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
-  @views begin
-    if loc == ILO_BC_LOC
-      u[ilo - 1, :, :] .= bc.val
-    elseif loc == IHI_BC_LOC
-      u[ihi + 1, :, :] .= bc.val
-    elseif loc == JLO_BC_LOC
-      u[:, jlo - 1, :] .= bc.val
-    elseif loc == JHI_BC_LOC
-      u[:, jhi + 1, :] .= bc.val
-    elseif loc == KLO_BC_LOC
-      u[:, :, klo - 1] .= bc.val
-    elseif loc == KHI_BC_LOC
-      u[:, :, khi + 1] .= bc.val
-    else
-      error("Bad 3d boundary location value $(loc), must be 1-6")
-    end
-  end
-end
+#   @views begin
+#     if loc == ILO_BC_LOC
+#       u[ilo - 1, :, :] .= bc.val
+#     elseif loc == IHI_BC_LOC
+#       u[ihi + 1, :, :] .= bc.val
+#     elseif loc == JLO_BC_LOC
+#       u[:, jlo - 1, :] .= bc.val
+#     elseif loc == JHI_BC_LOC
+#       u[:, jhi + 1, :] .= bc.val
+#     elseif loc == KLO_BC_LOC
+#       u[:, :, klo - 1] .= bc.val
+#     elseif loc == KHI_BC_LOC
+#       u[:, :, khi + 1] .= bc.val
+#     else
+#       error("Bad 3d boundary location value $(loc), must be 1-6")
+#     end
+#   end
+# end
 
 # struct RobinBC <: AbstractBC end
 
@@ -152,7 +152,7 @@ end
     if ((       ⱼ₋₁) && (1 <= colᵢⱼ₋₁   <= ncols)) A[row, colᵢⱼ₋₁  ] = stencil[2] end # (i  , j-1)
     if ((ᵢ₋₁       ) && (1 <= colᵢ₊₁ⱼ₋₁ <= ncols)) A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] end # (i+1, j-1)
     if ((ᵢ₋₁ && ⱼ₊₁) && (1 <= colᵢ₋₁ⱼ   <= ncols)) A[row, colᵢ₋₁ⱼ  ] = stencil[4] end # (i-1, j  )
-    
+
     A[row, colᵢⱼ] = stencil[5]  #[+0, +0] # (i  , j  )
 
     if ((       ⱼ₊₁) && (1 <= colᵢ₊₁ⱼ   <= ncols)) A[row, colᵢ₊₁ⱼ  ] = stencil[6] end # (i+1, j  )
@@ -230,7 +230,7 @@ end
     colᵢⱼ₊₁ₖ₊₁   = row + first(stencil_col_lookup.ᵢⱼ₊₁ₖ₊₁)
     colᵢ₊₁ⱼ₊₁ₖ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁ₖ₊₁)
 
-    
+
     if ((ᵢ₋₁ && ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢ₋₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₋₁ⱼ₋₁ₖ₋₁ ]  = stencil[1] end
     if ((       ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢⱼ₋₁ₖ₋₁ <= ncols))      A[row, colᵢⱼ₋₁ₖ₋₁   ]  = stencil[2] end
     if ((ᵢ₊₁ && ⱼ₋₁ && ₖ₋₁) && (1 <= colᵢ₊₁ⱼ₋₁ₖ₋₁ <= ncols))    A[row, colᵢ₊₁ⱼ₋₁ₖ₋₁ ]  = stencil[3] end
@@ -244,7 +244,7 @@ end
     if ((       ⱼ₋₁       ) && (1 <= colᵢⱼ₋₁ₖ <= ncols))        A[row, colᵢⱼ₋₁ₖ     ]  = stencil[11] end
     if ((ᵢ₊₁ && ⱼ₋₁       ) && (1 <= colᵢ₊₁ⱼ₋₁ₖ <= ncols))      A[row, colᵢ₊₁ⱼ₋₁ₖ   ]  = stencil[12] end
     if ((ᵢ₋₁              ) && (1 <= colᵢ₋₁ⱼₖ <= ncols))        A[row, colᵢ₋₁ⱼₖ     ]  = stencil[13] end
-    
+
     A[row, colᵢⱼₖ] = stencil[14]
 
     if ((ᵢ₊₁              ) && (1 <= colᵢ₊₁ⱼₖ <= ncols))        A[row, colᵢ₊₁ⱼₖ     ]  = stencil[15] end
@@ -437,4 +437,31 @@ function neumann_stencil_bc(
   end
 
   return SVector(uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁)
+end
+
+function bc_coeffs(::NeumannBC, ::CartesianIndex{2}, loc, T)
+  Aᵢ₋₁ⱼ₋₁ = Aᵢⱼ₋₁ = Aᵢ₊₁ⱼ₋₁ = Aᵢ₋₁ⱼ = Aᵢ₊₁ⱼ = Aᵢ₋₁ⱼ₊₁ = Aᵢⱼ₊₁ = Aᵢ₊₁ⱼ₊₁ = zero(T)
+  Aᵢⱼ = one(T)
+
+  if loc == ILO_BC_LOC
+    Aᵢ₊₁ⱼ = -one(T)
+  elseif loc == IHI_BC_LOC
+    Aᵢ₋₁ⱼ = -one(T)
+  elseif loc == JLO_BC_LOC
+    Aᵢⱼ₊₁ = -one(T)
+  elseif loc == JHI_BC_LOC
+    Aᵢⱼ₋₁ = -one(T)
+  else
+    error("Bad boundary location! ($loc)")
+  end
+
+  A_coeffs = SVector(Aᵢ₋₁ⱼ₋₁, Aᵢⱼ₋₁, Aᵢ₊₁ⱼ₋₁, Aᵢ₋₁ⱼ, Aᵢⱼ, Aᵢ₊₁ⱼ, Aᵢ₋₁ⱼ₊₁, Aᵢⱼ₊₁, Aᵢ₊₁ⱼ₊₁)
+  rhs_coeff = zero(T)
+  return A_coeffs, rhs_coeff
+end
+
+function bc_coeffs(bc::DirichletBC, ::CartesianIndex{2}, loc, T)
+  A_coeffs = SVector{9,T}(0, 0, 0, 0, 1, 0, 0, 0, 0)
+  rhs_coeff = bc.val
+  return A_coeffs, rhs_coeff
 end
