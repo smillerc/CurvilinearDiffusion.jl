@@ -1,3 +1,4 @@
 /Manifest.toml
 *.vt?
 *.pvd
+*.DS_Store
