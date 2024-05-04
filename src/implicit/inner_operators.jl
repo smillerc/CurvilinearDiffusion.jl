@@ -51,56 +51,102 @@
   Δt,
   cell_center_jacobian,
   edge_metrics,
-  grid_indices,
+  mesh_indices,
+  diffusion_prob_indices,
   matrix_indices,
-  mesh_limits,
+  limits,
   mean_func::F,
   stencil_col_lookup,
+  bcs,
 ) where {T,Ti,N,F<:Function}
 
   #
-  @unpack ilo, ihi, jlo, jhi = mesh_limits
+  _, ncols = size(A)
+
+  # These are the indicies corresponding to the edge
+  # of the diffusion problem
+  @unpack ilo, ihi, jlo, jhi = limits
 
   idx = @index(Global, Linear)
 
-  @inbounds begin
+  begin
     row = matrix_indices[idx]
-    grid_idx = grid_indices[idx]
-    J = cell_center_jacobian[grid_idx]
-    edge_α = edge_diffusivity(α, grid_idx, mean_func)
-    stencil = diffusion_operator(edge_α, Δt, J, edge_metrics, grid_idx)
-
-    colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
-    colᵢⱼ₋₁ = row + first(stencil_col_lookup.ᵢⱼ₋₁)
-    colᵢ₊₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁)
-    colᵢ₋₁ⱼ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ)
-    colᵢⱼ = row + first(stencil_col_lookup.ᵢⱼ)
-    colᵢ₊₁ⱼ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ)
-    colᵢ₋₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁)
-    colᵢⱼ₊₁ = row + first(stencil_col_lookup.ᵢⱼ₊₁)
-    colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
+    mesh_idx = mesh_indices[idx]
+    diff_idx = diffusion_prob_indices[idx]
+    i, j = diff_idx.I
 
     onbc = i == ilo || i == ihi || j == jlo || j == jhi
 
-    if onbc
-      A_coeffs, rhs_coeffs = bc_operator(edge_terms, J, Δt, idx, mesh_limits)
+    cols = (
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁), # colᵢ₋₁ⱼ₋₁
+      row + first(stencil_col_lookup.ᵢⱼ₋₁),   # colᵢⱼ₋₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁), # colᵢ₊₁ⱼ₋₁
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ),   # colᵢ₋₁ⱼ
+      row + first(stencil_col_lookup.ᵢⱼ),     # colᵢⱼ
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ),   # colᵢ₊₁ⱼ
+      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁), # colᵢ₋₁ⱼ₊₁
+      row + first(stencil_col_lookup.ᵢⱼ₊₁),   # colᵢⱼ₊₁
+      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁), # colᵢ₊₁ⱼ₊₁
+    )
+
+    if !onbc
+      J = cell_center_jacobian[mesh_idx]
+      edge_α = edge_diffusivity(α, diff_idx, mean_func)
+      A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
+
+      rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
+
+      for (i, col) in enumerate(cols)
+        A[row, col] = A_coeffs[i]
+      end
     else
-      A_coeffs, rhs_coeffs = inner_operator(edge_α, Δt, J, edge_metrics, grid_idx)
+      A_coeffs, rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+
+      for (i, col) in enumerate(cols)
+        if 1 <= col <= ncols
+          A[row, col] = A_coeffs[i]
+        end
+      end
     end
 
-    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]
-    A[row, colᵢⱼ₋₁] = stencil[2]
-    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]
-    A[row, colᵢ₋₁ⱼ] = stencil[4]
-    A[row, colᵢⱼ] = stencil[5]
-    A[row, colᵢ₊₁ⱼ] = stencil[6]
-    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]
-    A[row, colᵢⱼ₊₁] = stencil[8]
-    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]
-
-    # rhs update
-    b[row] = (source_term[grid_idx] * Δt + u[grid_idx]) * J
+    # @show row, mesh_idx, diff_idx, A_coeffs, rhs_coeff, onbc
+    b[row] = rhs_coeff
   end
+end
+
+function bc_operator(bcs, idx::CartesianIndex{2}, limits, T)
+  @unpack ilo, ihi, jlo, jhi = limits
+  i, j = idx.I
+
+  onbc = i == ilo || i == ihi || j == jlo || j == jhi
+
+  if !onbc
+    error("The bc_operator is getting called, but we're not on a boundary!")
+  end
+
+  at_corner = (
+    (i == ihi) && (j == jlo) ||
+    (i == ihi) && (j == jhi) ||
+    (i == ilo) && (j == jlo) ||
+    (i == ilo) && (j == jhi)
+  )
+
+  if at_corner
+    # return SVector{9,T}(0, 0, 0, 0, 0, 0, 0, 0, 0), zero(T)
+    return SVector{9,T}(0, 0, 0, 0, 1, 0, 0, 0, 0), zero(T)
+  else
+    if i == ilo
+      A_coeffs, rhs_coeff = bc_coeffs(bcs.ilo, idx, ILO_BC_LOC, T)
+    elseif i == ihi
+      A_coeffs, rhs_coeff = bc_coeffs(bcs.ihi, idx, IHI_BC_LOC, T)
+    elseif j == jlo
+      A_coeffs, rhs_coeff = bc_coeffs(bcs.jlo, idx, JLO_BC_LOC, T)
+    elseif j == jhi
+      A_coeffs, rhs_coeff = bc_coeffs(bcs.jhi, idx, JHI_BC_LOC, T)
+    end
+  end
+
+  return A_coeffs, rhs_coeff
 end
 
 @kernel function inner_diffusion_op_kernel_2d!(
@@ -137,15 +183,15 @@ end
     colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
     colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
 
-    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1] 
-    A[row, colᵢⱼ₋₁  ] = stencil[2] 
-    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3] 
-    A[row, colᵢ₋₁ⱼ  ] = stencil[4] 
-    A[row, colᵢⱼ    ] = stencil[5] 
-    A[row, colᵢ₊₁ⱼ  ] = stencil[6] 
-    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7] 
-    A[row, colᵢⱼ₊₁  ] = stencil[8] 
-    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9] 
+    A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]
+    A[row, colᵢⱼ₋₁  ] = stencil[2]
+    A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]
+    A[row, colᵢ₋₁ⱼ  ] = stencil[4]
+    A[row, colᵢⱼ    ] = stencil[5]
+    A[row, colᵢ₊₁ⱼ  ] = stencil[6]
+    A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]
+    A[row, colᵢⱼ₊₁  ] = stencil[8]
+    A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]
     #! format: on
 
     # rhs update
@@ -207,43 +253,6 @@ end
       A[row, col] = stencil[c]
     end
   end
-end
-
-# ---------------------------------------------------------------------------
-#  RHS update
-# ---------------------------------------------------------------------------
-
-function rhs_update(source_term, Δt, u, J)
-  return (source_term * Δt + u) * J
-end
-
-function rhs_update(
-  bc::DirichletBC, stencil, source_term, Δt, u, J, idx::CartesianIndex{2}, mesh_limits
-)
-  @unpack ilo, ihi, jlo, jhi = mesh_limits
-
-  i, j = idx.I
-
-  uᵢ₋₁ⱼ₋₁, uᵢⱼ₋₁, uᵢ₊₁ⱼ₋₁, uᵢ₋₁ⱼ, uᵢⱼ, uᵢ₊₁ⱼ, uᵢ₋₁ⱼ₊₁, uᵢⱼ₊₁, uᵢ₊₁ⱼ₊₁ = stencil
-
-  u_bc = bc.val # boundary condition value, e.g. boundary temperature
-
-  rhs = (source_term * Δt + u) * J
-
-  if i == ilo
-    rhs += -(u_bc * uᵢ₋₁ⱼ)
-  end
-
-  if j == jlo
-  end
-
-  if i == ihi
-  end
-
-  if j == jhi
-  end
-
-  return rhs
 end
 
 # ---------------------------------------------------------------------------
@@ -321,11 +330,11 @@ end
 #  Boundary Operators
 # ---------------------------------------------------------------------------
 
-# Generate a stencil for a single 2D cell in the interior
-@inline function _bc_diffusion_operator(
-  ::NeumannBC, edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{2}, mesh_limits
-)
-  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
-  stencil = neumann_stencil_2d(edge_terms, J, Δt, idx, mesh_limits)
-  return stencil
-end
+# # Generate a stencil for a single 2D cell in the interior
+# @inline function _bc_diffusion_operator(
+#   ::NeumannBC, edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{2}, mesh_limits
+# )
+#   edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+#   stencil = neumann_stencil_2d(edge_terms, J, Δt, idx, mesh_limits)
+#   return stencil
+# end
