@@ -17,9 +17,9 @@ using UnPack
 using Printf
 
 export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
-export DirichletBC, NeumannBC
+export DirichletBC, NeumannBC, applybc!, applybcs!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,SCL}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L,SCL}
   A::SM # sparse matrix
   x::V # solution vector
   b::V # RHS vector
@@ -30,6 +30,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,SCL}
   mean_func::F
   bcs::BC
   iterators::IT
+  limits::L
   backend # GPU / CPU
   warmed_up::Vector{Bool}
   stencil_col_lookup::SCL
@@ -57,6 +58,33 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
   # of the mesh (which will have the same or more halo cells, e.g. a hydro mesh with 6 halo cells)
   mesh_CI = expand(mesh.iterators.cell.domain, nhalo)
 
+  # The diffusion domain is nested within the mesh extents, since
+  # the mesh can have a larger halo/ghost region;
+  #
+  #   +--------------------------------------+
+  #   |                                      |
+  #   |   +------------------------------+   |
+  #   |   |                              |   |
+  #   |   |   +----------------------+   |   |
+  #   |   |   |                      |   |   |
+  #   |   |   |                      |   |   |
+  #   |   |   |                      |   |   |
+  #   |   |   |                      |   |   |
+  #   |   |   |(1)                   |   |   |
+  #   |   |   +----------------------+   |   |
+  #   |   |(2)                           |   |
+  #   |   +------------------------------+   |
+  #   |(3)                                   |
+  #   +--------------------------------------+
+
+  # (1) is the "domain" region of both the mesh and the diffusion problem
+  # (2) is the full extent of the diffusion problem (region 1 + 1 halo cell)
+  # (3) is the full extent of the mesh (region 1 + n halo cells)
+
+  # The regions (2) and (3) will be the same size if the mesh has 1 halo cell
+  # The linear problem Ax=b that this scheme solves is done within region (2),
+  # and boundary conditions are handled via ghost/halo cells.
+
   # The CI CartesianIndices are used to iterate through the
   # entire problem, and the LI linear indices are to make it simple
   # to work with 1D indices for the A matrix and b rhs vector construction
@@ -66,11 +94,18 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
   @assert length(full_CI) == length(mesh_CI)
 
   iterators = (
-    mesh=mesh_CI, # used to access mesh quantities
-    domain=(cartesian=domain_CI, linear=LinearIndices(domain_CI)),
-    full=(cartesian=full_CI, linear=LinearIndices(full_CI)),
+    domain=( # region 1, but within the context of region 2
+      cartesian=domain_CI,
+      linear=LinearIndices(domain_CI),
+    ),
+    full=( # region 2
+      cartesian=full_CI,
+      linear=LinearIndices(full_CI),
+    ),
+    mesh=mesh_CI, # region 2, but within the context of region 3
   )
 
+  _limits = limits(full_CI)
   A, stencil_col_lookup = initialize_coefficient_matrix(iterators, mesh, backend)
   Pl = preconditioner(A, backend)
 
@@ -93,12 +128,19 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
     mean_func,
     bcs,
     iterators,
+    _limits,
     backend,
     [false],
     stencil_col_lookup,
   )
 
   return implicit_solver
+end
+
+function limits(CI::CartesianIndices{2})
+  lo = first.(CI.indices)
+  hi = last.(CI.indices)
+  return (ilo=lo[1], jlo=lo[2], ihi=hi[1], jhi=hi[2])
 end
 
 function solve!(
@@ -113,15 +155,15 @@ function solve!(
 ) where {N,T}
   #
 
-  @assert size(u) == size(mesh.iterators.cell.domain)
+  @assert size(u) == size(mesh.iterators.cell.full)
 
   A = scheme.A
   b = scheme.b
   x = scheme.solver.x
 
   # update the A matrix
-  @timeit "assemble_matrix" assemble_matrix!(A, scheme, mesh, Δt)
-  @timeit "assemble_rhs" assemble_rhs!(b, scheme, mesh, u, Δt)
+  @timeit "assembly" assemble!(A, u, scheme, mesh, Δt)
+  # @timeit "assemble_rhs" assemble_rhs!(b, scheme, mesh, u, Δt)
 
   # precondition
   @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, A)
@@ -156,10 +198,10 @@ function solve!(
   cutoff!(scheme.solver.x)
 
   # update u to the solution
-  domain_LI = scheme.iterators.domain.linear
+  domain_LI = scheme.iterators.full.linear
   @views begin
     copyto!(
-      u[mesh.iterators.cell.domain], #
+      u[scheme.iterators.mesh], #
       scheme.solver.x[domain_LI],    #
     )
   end
@@ -169,7 +211,9 @@ function solve!(
   end
 
   if !issolved(scheme.solver)
-    @warn "The iterative solver didn't converge in the number of max iterations $(maxiter)"
+    @error(
+      "The iterative solver didn't converge in the number of max iterations $(maxiter)"
+    )
   end
 
   return L₂norm, niter, issolved(scheme.solver)
