@@ -16,13 +16,13 @@ const KHI_BC_LOC = 6
 
 # applybc!(::NeumannBC, u, mesh, loc::Int) = nothing
 
-function applybcs!(bcs, mesh, limits, u::AbstractArray)
+function applybcs!(bcs, mesh, u::AbstractArray)
   for (i, bc) in enumerate(bcs)
-    applybc!(bc, mesh, u, limits, i)
+    applybc!(bc, mesh, u, i)
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
@@ -40,7 +40,7 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, limits, loc::Int)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   @views begin
@@ -97,24 +97,22 @@ function applybc!(
   end
 end
 
-function applybc!(
-  bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, limits, loc::Int
-)
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo, :, :] .= bc.val
+      u[ilo - 1, :, :] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi, :, :] .= bc.val
+      u[ihi + 1, :, :] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[:, jlo, :] .= bc.val
+      u[:, jlo - 1, :] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[:, jhi, :] .= bc.val
+      u[:, jhi + 1, :] .= bc.val
     elseif loc == KLO_BC_LOC
-      u[:, :, klo] .= bc.val
+      u[:, :, klo - 1] .= bc.val
     elseif loc == KHI_BC_LOC
-      u[:, :, khi] .= bc.val
+      u[:, :, khi + 1] .= bc.val
     else
       error("Bad 3d boundary location value $(loc), must be 1-6")
     end
