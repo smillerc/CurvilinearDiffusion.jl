@@ -94,7 +94,7 @@ end
 
   # These are the indicies corresponding to the edge
   # of the diffusion problem
-  @unpack ilo, ihi, jlo, jhi = limits
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
 
   idx = @index(Global, Linear)
 
@@ -199,22 +199,16 @@ function bc_operator(bcs, idx::CartesianIndex{3}, limits, T)
   @unpack ilo, ihi, jlo, jhi, klo, khi = limits
   i, j, k = idx.I
 
-  onbc = i == ilo || i == ihi || j == jlo || j == jhi || k == klo || k == khi
+  onibc = i == ilo || i == ihi
+  onjbc = j == jlo || j == jhi
+  onkbc = k == klo || k == khi
+
+  onbc = onibc || onjbc || onkbc
+  at_corner = (onibc && onjbc) || (onibc && onjbc) || (onjbc && onkbc)
 
   if !onbc
     error("The bc_operator is getting called, but we're not on a boundary!")
   end
-
-  at_corner = (
-    ((i == ihi) && (j == jlo) && (k == klo)) ||
-    ((i == ihi) && (j == jhi) && (k == klo)) ||
-    ((i == ilo) && (j == jlo) && (k == klo)) ||
-    ((i == ilo) && (j == jhi) && (k == klo)) ||
-    ((i == ihi) && (j == jlo) && (k == khi)) ||
-    ((i == ihi) && (j == jhi) && (k == khi)) ||
-    ((i == ilo) && (j == jlo) && (k == khi)) ||
-    ((i == ilo) && (j == jhi) && (k == khi))
-  )
 
   if at_corner
     return SVector{27,T}(

@@ -44,7 +44,6 @@ end
 include("../averaging.jl")
 include("../edge_terms.jl")
 include("matrix_assembly.jl")
-include("rhs_assembly.jl")
 include("init_matrix.jl")
 
 function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend=CPU())
@@ -141,6 +140,12 @@ function limits(CI::CartesianIndices{2})
   lo = first.(CI.indices)
   hi = last.(CI.indices)
   return (ilo=lo[1], jlo=lo[2], ihi=hi[1], jhi=hi[2])
+end
+
+function limits(CI::CartesianIndices{3})
+  lo = first.(CI.indices)
+  hi = last.(CI.indices)
+  return (ilo=lo[1], jlo=lo[2], klo=lo[3], ihi=hi[1], jhi=hi[2], khi=hi[3])
 end
 
 function solve!(

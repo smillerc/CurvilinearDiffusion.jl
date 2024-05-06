@@ -5,7 +5,7 @@ include("boundary_operators.jl")
 
 function assemble!(
   A::SparseMatrixCSC, u::AbstractArray{T,2}, scheme::ImplicitScheme{2}, mesh, Δt
-)
+) where {T}
   backend = scheme.backend
   workgroup = (64,)
 
@@ -35,7 +35,7 @@ end
 
 function assemble!(
   A::SparseMatrixCSC, u::AbstractArray{T,3}, scheme::ImplicitScheme{3}, mesh, Δt
-)
+) where {T}
   backend = scheme.backend
   workgroup = (64,)
 

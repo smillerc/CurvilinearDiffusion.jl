@@ -40,6 +40,28 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits
   end
 end
 
+function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, limits, loc::Int)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      copy!(u[ilo, :, :], u[ilo - 1, :, :])
+    elseif loc == IHI_BC_LOC
+      copy!(u[ihi, :, :], u[ihi + 1, :, :])
+    elseif loc == JLO_BC_LOC
+      copy!(u[:, jlo, :], u[:, jlo - 1, :])
+    elseif loc == JHI_BC_LOC
+      copy!(u[:, jhi, :], u[:, jhi + 1, :])
+    elseif loc == KLO_BC_LOC
+      copy!(u[:, :, klo], u[:, :, klo - 1])
+    elseif loc == KHI_BC_LOC
+      copy!(u[:, :, khi], u[:, :, khi + 1])
+    else
+      error("Bad 3d boundary location value $(loc), must be 1-6")
+    end
+  end
+end
+
 #
 # function applybc!(bc::DirichletBC, ::CurvilinearGrid1D, u::AbstractArray, limits, loc::Int)
 #   @unpack ilo, ihi = mesh.domain_limits.cell
@@ -55,26 +77,30 @@ end
 #   end
 # end
 
-function applybc!(bc::DirichletBC, ::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int)
-  @unpack ilo, ihi, jlo, jhi = limits
+function applybc!(
+  bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int
+)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo, :] .= bc.val
+      u[ilo - 1, :] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi, :] .= bc.val
+      u[ihi + 1, :] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[:, jlo] .= bc.val
+      u[:, jlo - 1] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[:, jhi] .= bc.val
+      u[:, jhi + 1] .= bc.val
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
   end
 end
 
-function applybc!(bc::DirichletBC, ::CurvilinearGrid3D, u::AbstractArray, limits, loc::Int)
-  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
+function applybc!(
+  bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, limits, loc::Int
+)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
