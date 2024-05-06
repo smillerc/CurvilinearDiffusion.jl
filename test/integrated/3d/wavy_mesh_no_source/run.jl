@@ -147,13 +147,8 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-      scheme.α, T, ρ, κ, cₚ
-    )
+    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
-    @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
-      scheme, mesh, T, Δt
-    )
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next

@@ -70,8 +70,8 @@ end
 function initialize_mesh()
   ni, nj = (101, 101)
   nhalo = 6
-  x, y = wavy_grid(ni, nj)
-  # x, y = uniform_grid(ni, nj)
+  # x, y = wavy_grid(ni, nj)
+  x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
@@ -81,7 +81,13 @@ end
 function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
-  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
+  bcs = (
+    ilo=NeumannBC(),  #
+    ihi=NeumannBC(),  #
+    jlo=NeumannBC(),  #
+    # jhi=NeumannBC(),  #
+    jhi=DirichletBC(100.0),  #
+  )
   solver = ImplicitScheme(mesh, bcs; backend=backend)
 
   # Temperature and density
@@ -119,6 +125,7 @@ function run(maxiter=Inf)
   casename = "wavy_mesh_2d_no_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
+
   global Δt = 1e-4
   global t = 0.0
   global maxt = 0.2
@@ -132,24 +139,13 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    nonlinear_thermal_conduction_step!(scheme, T, ρ, cₚ, κ, Δt)
+    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
-    # @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-    #   scheme.α, T, ρ, κ, cₚ
-    # )
-
-    # @timeit "solve!" L₂, ncycles, is_converged = CurvilinearDiffusion.ImplicitSchemeType.solve!(
-    #   scheme, mesh, T, Δt;
-    # )
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
       global io_next += io_interval
-    end
-
-    if iter >= maxiter - 1
-      break
     end
 
     if t >= maxt
@@ -158,18 +154,21 @@ function run(maxiter=Inf)
 
     global iter += 1
     global t += Δt
+    if iter >= maxiter - 1
+      break
+    end
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   print_timer()
-  return scheme, T
+  return scheme, mesh, T
 end
 
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature = run(Inf)
+  scheme, mesh, temperature = run(1000)
   nothing
 end
