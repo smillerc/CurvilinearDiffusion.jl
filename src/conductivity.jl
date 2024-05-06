@@ -11,9 +11,35 @@ update the thermal conductivity of the mesh at each cell-center.
  - `κ::Function`: function to determine thermal conductivity, e.g. κ(ρ,T) = κ0 * ρ * T^(5/2)
  - `cₚ::Real`: heat capacity at constant pressure
 """
-function update_conductivity!(diffusivity, temp, ρ, cₚ, κ::F) where {F<:Function}
-  backend = KernelAbstractions.get_backend(diffusivity)
-  conductivity_kernel(backend)(diffusivity, temp, ρ, cₚ, κ; ndrange=size(diffusivity))
+function update_conductivity!(
+  scheme, temperature, density, cₚ::Real, κ::F
+) where {F<:Function}
+  diff_domain = scheme.iterators.full.cartesian
+  domain = scheme.iterators.mesh
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, cₚ, κ; ndrange=size(α))
+
+  return nothing
+end
+
+function update_conductivity!(
+  scheme, temperature, density, cₚ::AbstractArray, κ::F
+) where {F<:Function}
+  diff_domain = scheme.iterators.full.cartesian
+  domain = scheme.iterators.mesh
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  _cₚ = @view cₚ[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, _cₚ, κ; ndrange=size(α))
 
   return nothing
 end
