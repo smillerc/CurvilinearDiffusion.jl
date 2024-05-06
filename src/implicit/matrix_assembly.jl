@@ -39,6 +39,7 @@ function assemble!(
   backend = scheme.backend
   workgroup = (64,)
 
+  nrows = length(scheme.iterators.full.cartesian)
   full_diffusion_op_3d!(backend, workgroup)(
     A,
     scheme.b,
@@ -53,9 +54,8 @@ function assemble!(
     scheme.iterators.full.linear,
     scheme.limits,
     scheme.mean_func,
-    scheme.stencil_col_lookup,
     scheme.bcs;
-    ndrange=length(scheme.iterators.full.cartesian),
+    ndrange=nrows,
   )
 
   KernelAbstractions.synchronize(backend)
