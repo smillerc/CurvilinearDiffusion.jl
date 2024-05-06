@@ -1,13 +1,15 @@
 
 function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
-  #   m, n = (5, 5)
+  m, n = dims
 
   nhalo = 1
   ninner = (m - 2nhalo) * (n - 2nhalo)
 
   # 2 coeffs per boundary loc
-  ilo = ihi = m - 2nhalo
-  jlo = jhi = n - 2nhalo
+  ilo = (m - 2nhalo) * (bcs.ilo isa NeumannBC)
+  ihi = (m - 2nhalo) * (bcs.ihi isa NeumannBC)
+  jlo = (n - 2nhalo) * (bcs.jlo isa NeumannBC)
+  jhi = (n - 2nhalo) * (bcs.jhi isa NeumannBC)
 
   # 8 coeffs per inner loc (not including the main diagonal)
   inner = ninner * 8
@@ -50,52 +52,59 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
     end
   end
 
-  ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
-  for idx in ilo_CI
-    k += 1
-    i, j = idx.I
-    row = LI[idx]
-    col = LI[i + 1, j]
+  if ilo > 0
+    ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
+    for idx in ilo_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i + 1, j]
 
-    rows[k] = row
-    cols[k] = col
-    vals[k] = -1
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
 
-  ihi_CI = @view CI[end, (begin + 1):(end - 1)]
-  for idx in ihi_CI
-    k += 1
-    i, j = idx.I
-    row = LI[idx]
-    col = LI[i - 1, j]
+  if ihi > 0
+    ihi_CI = @view CI[end, (begin + 1):(end - 1)]
+    for idx in ihi_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i - 1, j]
 
-    rows[k] = row
-    cols[k] = col
-    vals[k] = -1
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
 
-  jlo_CI = @view CI[(begin + 1):(end - 1), begin]
-  for idx in jlo_CI
-    k += 1
-    i, j = idx.I
-    row = LI[idx]
-    col = LI[i, j + 1]
+  if jlo > 0
+    jlo_CI = @view CI[(begin + 1):(end - 1), begin]
+    for idx in jlo_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i, j + 1]
 
-    rows[k] = row
-    cols[k] = col
-    vals[k] = -1
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
+  if jhi > 0
+    jhi_CI = @view CI[(begin + 1):(end - 1), end]
+    for idx in jhi_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i, j - 1]
 
-  jhi_CI = @view CI[(begin + 1):(end - 1), end]
-  for idx in jhi_CI
-    k += 1
-    i, j = idx.I
-    row = LI[idx]
-    col = LI[i, j - 1]
-
-    rows[k] = row
-    cols[k] = col
-    vals[k] = -1
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
 
   A = sparse(rows, cols, vals)
@@ -104,7 +113,6 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
 end
 
 function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
-  #   m, n = (5, 5)
   ni, nj, nk = dims
   nhalo = 1
   ninner = (ni - 2nhalo) * (nj - 2nhalo) * (nk - 2nhalo)
@@ -255,17 +263,17 @@ end
 #   return A, nothing
 # end
 
+function initialize_coefficient_matrix(iterators, ::CurvilinearGrid2D, bcs, ::CPU)
+  dims = size(iterators.full.cartesian)
+  A = _initialize_coefficent_matrix(dims, bcs)
+  return A
+end
+
 function initialize_coefficient_matrix(iterators, ::CurvilinearGrid3D, bcs, ::CPU)
   dims = size(iterators.full.cartesian)
   A = _initialize_coefficent_matrix(dims, bcs)
-  return A, nothing
+  return A
 end
-
-# function initialize_coefficient_matrix(iterators, ::CurvilinearGrid3D, ::CPU)
-#   dims = size(iterators.full.cartesian)
-#   A, stencil_col_lookup = init_coeff_matrix(dims; format=:csc, cardinal_only=false)
-#   return A, stencil_col_lookup
-# end
 
 # function init_coeff_matrix(dims::NTuple{N,Int}; format=:csc, cardinal_only=false) where {N}
 #   @assert all(dims .> 2)

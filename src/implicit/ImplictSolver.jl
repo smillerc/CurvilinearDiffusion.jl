@@ -19,7 +19,7 @@ using Printf
 export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, applybc!, applybcs!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L,SCL}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L}
   A::SM # sparse matrix
   x::V # solution vector
   b::V # RHS vector
@@ -33,7 +33,6 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L,SCL}
   limits::L
   backend # GPU / CPU
   warmed_up::Vector{Bool}
-  stencil_col_lookup::SCL
 end
 
 warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
@@ -105,7 +104,7 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
   )
 
   _limits = limits(full_CI)
-  A, stencil_col_lookup = initialize_coefficient_matrix(iterators, mesh, backend)
+  A = initialize_coefficient_matrix(iterators, mesh, bcs, backend)
   Pl = preconditioner(A, backend)
 
   b = KernelAbstractions.zeros(backend, T, length(full_CI))
@@ -130,7 +129,6 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
     _limits,
     backend,
     [false],
-    stencil_col_lookup,
   )
 
   return implicit_solver
@@ -155,7 +153,7 @@ function solve!(
   Δt;
   atol::T=√eps(T),
   rtol::T=√eps(T),
-  maxiter=500,
+  maxiter=200,
   show_hist=true,
 ) where {N,T}
   #
@@ -216,9 +214,8 @@ function solve!(
   end
 
   if !issolved(scheme.solver)
-    @error(
-      "The iterative solver didn't converge in the number of max iterations $(maxiter)"
-    )
+    @show scheme.solver.stats
+    error("The iterative solver didn't converge in the number of max iterations $(maxiter)")
   end
 
   return L₂norm, niter, issolved(scheme.solver)
