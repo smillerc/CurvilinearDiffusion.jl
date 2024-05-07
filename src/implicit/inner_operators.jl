@@ -152,7 +152,7 @@ end
 #  Boundary condition RHS operators
 # ---------------------------------------------------------------------------
 
-function bc_operator(bcs, idx::CartesianIndex{2}, limits, T)
+function bc_operator(bcs, idx::CartesianIndex{1}, limits, T)
   @unpack ilo, ihi = limits
   i, = idx.I
 
