@@ -6,7 +6,7 @@ using KernelAbstractions
 
 include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
-export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
+export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!
 
 include("nonlinear_thermal_conduction.jl")

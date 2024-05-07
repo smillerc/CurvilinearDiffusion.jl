@@ -16,15 +16,11 @@ using TimerOutputs
 using UnPack
 using Printf
 
-export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
+export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L}
-  A::SM # sparse matrix
-  x::V # solution vector
-  b::V # RHS vector
-  solver::ST # linear solver, e.g. GMRES, CG, etc.
-  Pl::PL # preconditioner
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L}
+  linear_problem::ST # linear solver, e.g. GMRES, CG, etc.
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
   mean_func::F
@@ -33,10 +29,11 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L}
   limits::L
   backend # GPU / CPU
   warmed_up::Vector{Bool}
+  direct_solve::Bool
 end
 
 warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
-function warmedup!(scheme::ImplicitScheme)
+function warmup!(scheme::ImplicitScheme)
   return scheme.warmed_up[1] = true
 end
 
@@ -45,7 +42,9 @@ include("../edge_terms.jl")
 include("matrix_assembly.jl")
 include("init_matrix.jl")
 
-function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend=CPU())
+function ImplicitScheme(
+  mesh, bcs; direct_solve=false, mean_func=arithmetic_mean, T=Float64, backend=CPU()
+)
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
   # The diffusion solver is currently set to use only 1 halo cell
@@ -104,23 +103,29 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
   )
 
   _limits = limits(full_CI)
+  @info "Initializing the sparse A coefficient matrix"
   A = initialize_coefficient_matrix(iterators, mesh, bcs, backend)
-  Pl = preconditioner(A, backend)
 
   b = KernelAbstractions.zeros(backend, T, length(full_CI))
-  x = KernelAbstractions.zeros(backend, T, length(full_CI))
-
   diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
-  solver = Krylov.GmresSolver(A, b)
+  # solver = Krylov.GmresSolver(A, b)
+  if direct_solve
+    linear_problem = init(LinearProblem(A, b))
+  else
+    Pl, _ldiv = preconditioner(A, backend)
+
+    algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
+    # algorithm = KrylovJL_GMRES(; history=true) # krylov solver
+    # algorithm = HYPREAlgorithm(HYPRE.GMRES)
+    # Pl = HYPRE.BoomerAMG
+    linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
+    # linear_problem = init(LinearProblem(A, b), algorithm;)
+  end
 
   implicit_solver = ImplicitScheme(
-    A,
-    x,
-    b,
-    solver,
-    Pl,
+    linear_problem,
     diffusivity,
     source_term,
     mean_func,
@@ -129,8 +134,10 @@ function ImplicitScheme(mesh, bcs; mean_func=arithmetic_mean, T=Float64, backend
     _limits,
     backend,
     [false],
+    direct_solve,
   )
 
+  @info "Initialization finished"
   return implicit_solver
 end
 
@@ -159,67 +166,65 @@ function solve!(
   #
 
   domain_u = @view u[scheme.iterators.mesh]
-  A = scheme.A
-  b = scheme.b
-  x = scheme.solver.x
 
   @assert size(u) == size(mesh.iterators.cell.full)
 
   # update the A matrix and b vector; A is a separate argument
   # so we can dispatch on type for GPU vs CPU assembly
-  @timeit "assembly" assemble!(A, u, scheme, mesh, Δt)
-
-  # precondition
-  @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, A)
-
-  n = size(A, 1)
-  precond_op = LinearOperator(
-    eltype(A), n, n, false, false, (y, v) -> ldiv!(y, scheme.Pl, v)
-  )
+  @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
+  KernelAbstractions.synchronize(scheme.backend)
 
   if !warmedup(scheme)
-    @timeit "linear solve (cold)" gmres!(
-      scheme.solver, A, b; atol=atol, rtol=rtol, N=precond_op, history=true, itmax=maxiter
-    )
-    warmedup!(scheme)
+    if scheme.direct_solve
+      @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
+    end
+
+    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem)
+    warmup!(scheme)
   else
-    @timeit "linear solve (warm)" gmres!(
-      scheme.solver,
-      A,
-      b,
-      x;
-      atol=atol,
-      rtol=rtol,
-      N=precond_op,
-      itmax=maxiter,
-      history=true,
-    )
+    @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
   end
 
-  L₂norm = last(scheme.solver.stats.residuals)
-  niter = scheme.solver.stats.niter
+  cutoff!(scheme.linear_problem.u)
+  copyto!(domain_u, scheme.linear_problem.u) # update solution
 
-  cutoff!(x)
-  copyto!(domain_u, x) # update solution
+  if !scheme.direct_solve
+    L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
+    niter = scheme.linear_problem.cacheval.stats.niter
+    is_solved = scheme.linear_problem.cacheval.stats.solved
 
-  if show_hist
-    @printf "\t Krylov stats: L₂norm: %.1e, iterations: %i\n" L₂norm niter
+    if !is_solved
+      @show scheme.linear_problem.cacheval.stats
+      error(
+        "The iterative solver didn't converge in the number of max iterations $(maxiter)"
+      )
+    end
+
+    if show_hist
+      @printf "\t Krylov stats: L₂norm: %.1e, iterations: %i\n" L₂norm niter
+    end
+
+    return L₂norm, niter, true # issolved(scheme.linear_problem)
+  else
+    return -Inf, 1, true
   end
-
-  if !issolved(scheme.solver)
-    @show scheme.solver.stats
-    error("The iterative solver didn't converge in the number of max iterations $(maxiter)")
-  end
-
-  return L₂norm, niter, issolved(scheme.solver)
 end
 
 @inline function preconditioner(A, ::CPU, τ=0.1)
-  return ILUZero.ilu0(A)
+  p = ILUZero.ilu0(A)
+  _ldiv = true
+  return p, _ldiv
 end
 
-@inline function preconditioner(A, ::GPU, τ=0.1)
-  return KrylovPreconditioners.kp_ilu0(A)
+@inline function preconditioner(A, backend::GPU, τ=0.1)
+  p = KrylovPreconditioners.kp_ilu0(A)
+  _ldiv = true
+  # nblocks = 4
+
+  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, nblocks, backend)
+  # _ldiv = false
+
+  return p, _ldiv
 end
 
 @inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
