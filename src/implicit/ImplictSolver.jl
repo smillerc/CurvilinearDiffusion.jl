@@ -17,7 +17,7 @@ using UnPack
 using Printf
 
 export ImplicitScheme, solve!, assemble_matrix!, initialize_coefficient_matrix
-export DirichletBC, NeumannBC, applybc!, applybcs!
+export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!
 
 struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},SM,V,ST,PL,F,BC,IT,L}
   A::SM # sparse matrix
