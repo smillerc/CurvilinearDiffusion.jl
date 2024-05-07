@@ -158,15 +158,16 @@ function solve!(
 ) where {N,T}
   #
 
-  @assert size(u) == size(mesh.iterators.cell.full)
-
+  domain_u = @view u[scheme.iterators.mesh]
   A = scheme.A
   b = scheme.b
   x = scheme.solver.x
 
-  # update the A matrix
+  @assert size(u) == size(mesh.iterators.cell.full)
+
+  # update the A matrix and b vector; A is a separate argument
+  # so we can dispatch on type for GPU vs CPU assembly
   @timeit "assembly" assemble!(A, u, scheme, mesh, Δt)
-  # @timeit "assemble_rhs" assemble_rhs!(b, scheme, mesh, u, Δt)
 
   # precondition
   @timeit "ilu0! (preconditioner)" ilu0!(scheme.Pl, A)
@@ -198,16 +199,8 @@ function solve!(
   L₂norm = last(scheme.solver.stats.residuals)
   niter = scheme.solver.stats.niter
 
-  cutoff!(scheme.solver.x)
-
-  # update u to the solution
-  domain_LI = scheme.iterators.full.linear
-  @views begin
-    copyto!(
-      u[scheme.iterators.mesh], #
-      scheme.solver.x[domain_LI],    #
-    )
-  end
+  cutoff!(x)
+  copyto!(domain_u, x) # update solution
 
   if show_hist
     @printf "\t Krylov stats: L₂norm: %.1e, iterations: %i\n" L₂norm niter
