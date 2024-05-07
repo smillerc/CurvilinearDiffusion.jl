@@ -71,7 +71,8 @@ end
 function initialize_mesh()
   ni = nj = nk = 51
   nhalo = 4
-  x, y, z = wavy_grid(ni, nj, nk)
+  # x, y, z = wavy_grid(ni, nj, nk)
+  x, y, z = uniform_grid(ni, nj, nk)
   mesh = CurvilinearGrid3D(x, y, z, (ni, nj, nk), nhalo)
 
   return mesh
@@ -85,10 +86,16 @@ function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=NeumannBC(),
+    ilo=DirichletBC(150.0),
+    # ihi=DirichletBC(150.0),
+    # jlo=DirichletBC(150.0),
+    # jhi=DirichletBC(150.0),
+    # klo=DirichletBC(150.0),
+    # khi=DirichletBC(150.0),
+    # ilo=NeumannBC(),
     ihi=NeumannBC(),
-    jlo=NeumannBC(),
-    jhi=NeumannBC(),
+    jlo=PeriodicBC(),
+    jhi=PeriodicBC(),
     klo=NeumannBC(),
     khi=NeumannBC(),
   )
@@ -111,16 +118,16 @@ function init_state()
     end
   end
 
-  fwhm = 0.5
-  x0, y0, z0 = zeros(3)
-  for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
+  # fwhm = 0.5
+  # x0, y0, z0 = zeros(3)
+  # for idx in mesh.iterators.cell.domain
+  #   x⃗c = centroid(mesh, idx)
 
-    T[idx] =
-      T_hot *
-      exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm + ((z0 - x⃗c.z)^2) / fwhm)) +
-      T_cold
-  end
+  #   T[idx] =
+  #     T_hot *
+  #     exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm + ((z0 - x⃗c.z)^2) / fwhm)) +
+  #     T_cold
+  # end
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -132,7 +139,7 @@ function run(maxiter=Inf)
   casename = "wavy_mesh_3d_no_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
-  #   return scheme, T, mesh
+  # return scheme, T, mesh
   global Δt = 1e-4
   global t = 0.0
   global maxt = 0.2
@@ -166,6 +173,7 @@ function run(maxiter=Inf)
 
     global iter += 1
     global t += Δt
+    # break
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -178,6 +186,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(Inf)
+  scheme, temperature, mesh = run(10)
   nothing
 end
