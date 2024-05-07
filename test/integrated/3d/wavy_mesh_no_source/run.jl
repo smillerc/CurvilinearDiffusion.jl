@@ -5,11 +5,11 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-@static if Sys.islinux()
-  using MKL
-elseif Sys.isapple()
-  using AppleAccelerate
-end
+# @static if Sys.islinux()
+#   using MKL
+# elseif Sys.isapple()
+#   using AppleAccelerate
+# end
 
 NMAX = Sys.CPU_THREADS
 BLAS.set_num_threads(NMAX)
@@ -17,7 +17,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :CPU
+dev = :GPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -69,7 +69,7 @@ function uniform_grid(nx, ny, nz)
 end
 
 function initialize_mesh()
-  ni = nj = nk = 51
+  ni = nj = nk = 200
   nhalo = 4
   # x, y, z = wavy_grid(ni, nj, nk)
   x, y, z = uniform_grid(ni, nj, nk)
@@ -82,17 +82,11 @@ end
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  @info "Initializing"
+  @info "Initializing mesh"
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
     ilo=DirichletBC(150.0),
-    # ihi=DirichletBC(150.0),
-    # jlo=DirichletBC(150.0),
-    # jhi=DirichletBC(150.0),
-    # klo=DirichletBC(150.0),
-    # khi=DirichletBC(150.0),
-    # ilo=NeumannBC(),
     ihi=NeumannBC(),
     jlo=PeriodicBC(),
     jhi=PeriodicBC(),
@@ -100,7 +94,8 @@ function init_state()
     khi=NeumannBC(),
   )
 
-  solver = ImplicitScheme(mesh, bcs; backend=backend)
+  @info "Initializing ImplicitScheme"
+  solver = ImplicitScheme(mesh, bcs; direct_solve=false, backend=backend)
 
   # Temperature and density
   T_hot = 1e3
@@ -154,9 +149,8 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
-
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
+    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -182,10 +176,11 @@ function run(maxiter=Inf)
   return scheme, T, mesh
 end
 
+# @profview
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(10)
+  scheme, temperature, mesh = run(50)
   nothing
 end
