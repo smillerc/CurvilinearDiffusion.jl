@@ -43,19 +43,22 @@ end
 function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
+
   @views begin
     if loc == ILO_BC_LOC
-      copy!(u[ilo, :, :], u[ilo - 1, :, :])
+      copy!(u[ilo - 1, :, :], u[ilo, :, :])
     elseif loc == IHI_BC_LOC
-      copy!(u[ihi, :, :], u[ihi + 1, :, :])
+      copy!(u[ihi + 1, :, :], u[ihi, :, :])
     elseif loc == JLO_BC_LOC
-      copy!(u[:, jlo, :], u[:, jlo - 1, :])
+      copy!(u[:, jlo - 1, :], u[:, jlo, :])
     elseif loc == JHI_BC_LOC
-      copy!(u[:, jhi, :], u[:, jhi + 1, :])
+      copy!(u[:, jhi + 1, :], u[:, jhi, :])
     elseif loc == KLO_BC_LOC
-      copy!(u[:, :, klo], u[:, :, klo - 1])
+      copy!(u[:, :, klo - 1], u[:, :, klo])
     elseif loc == KHI_BC_LOC
-      copy!(u[:, :, khi], u[:, :, khi + 1])
+      copy!(u[:, :, khi + 1], u[:, :, khi])
     else
       error("Bad 3d boundary location value $(loc), must be 1-6")
     end
@@ -77,9 +80,7 @@ end
 #   end
 # end
 
-function applybc!(
-  bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, limits, loc::Int
-)
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
@@ -100,6 +101,7 @@ end
 function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
+  # @show ilo, ihi, jlo, jhi, klo, khi, loc, bc.val
   @views begin
     if loc == ILO_BC_LOC
       u[ilo - 1, :, :] .= bc.val
