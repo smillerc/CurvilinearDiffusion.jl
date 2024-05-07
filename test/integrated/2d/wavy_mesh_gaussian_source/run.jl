@@ -147,6 +147,7 @@ function initialize_mesh()
   ni, nj = (101, 101)
   nhalo = 6
   x, y = wavy_grid2(ni, nj)
+  # x, y = wavy_grid(ni, nj)
   # x, y = uniform_grid(ni, nj)
   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
@@ -176,7 +177,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 #* temperature^3
+      return κ0 # * temperature^3
     end
   end
 
@@ -187,13 +188,9 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
 
-    # source_term[idx] =
-    #   T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
     T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
 
-  fill!(source_term, 0)
-  copy!(solver.source_term, source_term) # move to gpu (if need be)
   # copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
@@ -203,20 +200,19 @@ end
 # Solve
 # ------------------------------------------------------------
 function run(maxiter=Inf)
+  casename = "implicit_gauss_source"
+
   solver, mesh, T, ρ, cₚ, κ = init_state()
 
   global Δt = 1e-5
   global t = 0.0
   global maxt = 0.015
   global iter = 0
-  global io_interval = 5e-4
+  # global maxiter = 1500
+  global io_interval = 0.01
   global io_next = io_interval
   pvd = paraview_collection("full_sim")
   @timeit "save_vtk" save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-
-  @timeit "update_conductivity!" CurvilinearDiffusion.update_conductivity!(
-    solver.α, T, ρ, κ, cₚ
-  )
 
   while true
     if iter == 0
@@ -260,10 +256,9 @@ end
 
 begin
   cd(@__DIR__)
-  const casename = "implicit_gauss_source"
   rm.(glob("*.vts"))
 
-  solver, temperature = run(1500)
+  solver, temperature = run(101)
   nothing
 end
 

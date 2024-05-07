@@ -1,51 +1,5 @@
-
-using StaticArrays, OffsetArrays
-
-const ilo_loc = 1
-const ihi_loc = 2
-const jlo_loc = 3
-const jhi_loc = 4
-const klo_loc = 5
-const khi_loc = 6
-
-const ilojlo_loc = 7
-const ilojhi_loc = 8
-const ihijlo_loc = 9
-const ihijhi_loc = 10
-
-const ilojloklo_loc = 11
-const ilojhiklo_loc = 12
-const ihijloklo_loc = 13
-const ihijhiklo_loc = 14
-
-const ilojlokhi_loc = 15
-const ilojhikhi_loc = 16
-const ihijlokhi_loc = 17
-const ihijhikhi_loc = 18
-
-function lame_o()
-  ∂u∂t =
-    f_ξ² * (aᵢ₊½ * (uⁿ⁺¹ᵢ₊₁ⱼ - uⁿ⁺¹ᵢⱼ) - aᵢ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢ₋₁ⱼ)) +
-    f_η² * (aⱼ₊½ * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ) - aⱼ₋½ * (uⁿ⁺¹ᵢⱼ - uⁿ⁺¹ᵢⱼ₋₁)) +
-    f_ξη * (
-      aᵢ₊₁ⱼ * (uⁿ⁺¹ᵢ₊₁ⱼ₊₁ - uⁿ⁺¹ᵢ₊₁ⱼ₋₁) - # ∂u/∂η
-      aᵢ₋₁ⱼ * (uⁿ⁺¹ᵢ₋₁ⱼ₊₁ - uⁿ⁺¹ᵢ₋₁ⱼ₋₁)   # ∂u/∂η
-    ) + # ∂/∂ξ
-    f_ξη * (
-      aᵢⱼ₊₁ * (uⁿ⁺¹ᵢ₊₁ⱼ₊₁ - uⁿ⁺¹ᵢ₋₁ⱼ₊₁) - # ∂u/∂ξ
-      aᵢⱼ₋₁ * (uⁿ⁺¹ᵢ₊₁ⱼ₋₁ - uⁿ⁺¹ᵢ₋₁ⱼ₋₁)   # ∂u/∂ξ
-    ) + # ∂/∂η
-    aᵢⱼ * 0.5α * (uⁿ⁺¹ᵢ₊₁ⱼ - uⁿ⁺¹ᵢ₋₁ⱼ) +
-    aᵢⱼ * 0.5β * (uⁿ⁺¹ᵢⱼ₊₁ - uⁿ⁺¹ᵢⱼ₋₁) +
-    s
-
-  coeffs = (
-    uⁿ⁺¹ᵢ₊₁ⱼ=f_ξ² * aᵢ₊½ + aᵢⱼ * 0.5α, #
-  )
-end
-
 # ---------------------------------------------------------------------------
-#  Kernels
+#  
 # ---------------------------------------------------------------------------
 # @kernel function inner_diffusion_op_kernel_2d!(
 #   A,
@@ -60,265 +14,298 @@ end
 # ) where {F}
 #   idx = @index(Global, Linear)
 
-#   begin
-#     grid_idx = grid_indices[idx]
-#     row = matrix_indices[idx]
-#     i, j = grid_idx.I
+const offsets1d = (-1, 0, 1)
 
-#     metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
+const offsets2d = (
+  (-1, -1), (+0, -1), (+1, -1), (-1, +0), (+0, +0), (+1, +0), (-1, +1), (+0, +1), (+1, +1)
+)
 
-#     aᵢⱼ = α[i, j]
-#     aᵢ₊₁ⱼ = α[i + 1, j]
-#     aᵢ₋₁ⱼ = α[i - 1, j]
-#     aᵢⱼ₊₁ = α[i, j + 1]
-#     aᵢⱼ₋₁ = α[i, j - 1]
+const offsets3d = (
+  (-1, -1, -1),
+  (+0, -1, -1),
+  (+1, -1, -1),
+  (-1, +0, -1),
+  (+0, +0, -1),
+  (+1, +0, -1),
+  (-1, +1, -1),
+  (+0, +1, -1),
+  (+1, +1, -1),
+  (-1, -1, +0),
+  (+0, -1, +0),
+  (+1, -1, +0),
+  (-1, +0, +0),
+  (+0, +0, +0),
+  (+1, +0, +0),
+  (-1, +1, +0),
+  (+0, +1, +0),
+  (+1, +1, +0),
+  (-1, -1, +1),
+  (+0, -1, +1),
+  (+1, -1, +1),
+  (-1, +0, +1),
+  (+0, +0, +1),
+  (+1, +0, +1),
+  (-1, +1, +1),
+  (+0, +1, +1),
+  (+1, +1, +1),
+)
 
-#     diffusivity = (;
-#       aᵢⱼ,
-#       aᵢ₊₁ⱼ,
-#       aᵢ₋₁ⱼ,
-#       aᵢⱼ₊₁,
-#       aᵢⱼ₋₁,
-#       aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
-#       aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
-#       aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
-#       aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
-#     )
+# ---------------------------------------------------------------------------
+#  
+# ---------------------------------------------------------------------------
 
-#     #! format: off
-#     colᵢ₋₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁)
-#     colᵢⱼ₋₁ =   row + first(stencil_col_lookup.ᵢⱼ₋₁)
-#     colᵢ₊₁ⱼ₋₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁)
-#     colᵢ₋₁ⱼ =   row + first(stencil_col_lookup.ᵢ₋₁ⱼ)
-#     colᵢⱼ =     row + first(stencil_col_lookup.ᵢⱼ)
-#     colᵢ₊₁ⱼ =   row + first(stencil_col_lookup.ᵢ₊₁ⱼ)
-#     colᵢ₋₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁)
-#     colᵢⱼ₊₁ =   row + first(stencil_col_lookup.ᵢⱼ₊₁)
-#     colᵢ₊₁ⱼ₊₁ = row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁)
-
-#     stencil = inner_op_2d(metric_terms, diffusivity, Δt)
-
-#     if i == 8 && j == 8
-#       @show grid_indices
-#       @show stencil 
-#       @show row
-#       @show colᵢ₋₁ⱼ₋₁
-#       @show colᵢⱼ₋₁
-#       @show colᵢ₊₁ⱼ₋₁
-#       @show colᵢ₋₁ⱼ
-#       @show colᵢⱼ
-#       @show colᵢ₊₁ⱼ
-#       @show colᵢ₋₁ⱼ₊₁
-#       @show colᵢⱼ₊₁
-#       @show colᵢ₊₁ⱼ₊₁
-#     end
-
-#     A[row, colᵢ₋₁ⱼ₋₁] = stencil[1]  #[-1, -1] # (i-1, j-1)
-#     A[row, colᵢⱼ₋₁  ] = stencil[2]  #[+0, -1] # (i  , j-1)
-#     A[row, colᵢ₊₁ⱼ₋₁] = stencil[3]  #[+1, -1] # (i+1, j-1)
-#     A[row, colᵢ₋₁ⱼ  ] = stencil[4]  #[-1, +0] # (i-1, j  )
-#     A[row, colᵢⱼ    ] = stencil[5]  #[+0, +0] # (i  , j  )
-#     A[row, colᵢ₊₁ⱼ  ] = stencil[6]  #[+1, +0] # (i+1, j  )
-#     A[row, colᵢ₋₁ⱼ₊₁] = stencil[7]  #[-1, +1] # (i-1, j+1)
-#     A[row, colᵢⱼ₊₁  ] = stencil[8]  #[ 0, +1] # (i  , j+1)
-#     A[row, colᵢ₊₁ⱼ₊₁] = stencil[9]  #[+1, +1] # (i+1, j+1)
-#     #! format: on
-
-#   end
-# end
-
-@kernel function inner_diffusion_op_kernel_2d!(
-  A,
-  α,
+@kernel function _assembly_kernel_2d(
+  A::SparseMatrixCSC{T,Ti},
+  b::AbstractVector{T},
+  source_term::AbstractArray{T,N},
+  u::AbstractArray{T,N},
+  α::AbstractArray{T,N},
   Δt,
-  cell_center_metrics,
+  cell_center_jacobian,
   edge_metrics,
-  grid_indices,
+  mesh_indices,
+  diffusion_prob_indices,
   matrix_indices,
-  meanfunc::F,
-  (ni, nj),
-) where {F}
+  limits,
+  mean_func::F,
+  bcs,
+) where {T,Ti,N,F<:Function}
+
+  # These are the indicies corresponding to the edge
+  # of the diffusion problem
+  @unpack ilo, ihi, jlo, jhi = limits
+
   idx = @index(Global, Linear)
 
-  begin
-    grid_idx = grid_indices[idx]
-    mat_idx = matrix_indices[idx]
-    i, j = grid_idx.I
+  @inbounds begin
+    row = matrix_indices[idx]
+    mesh_idx = mesh_indices[idx]
+    diff_idx = diffusion_prob_indices[idx]
+    i, j = diff_idx.I
 
-    metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
+    onbc = i == ilo || i == ihi || j == jlo || j == jhi
 
-    aᵢⱼ = α[i, j]
-    aᵢ₊₁ⱼ = α[i + 1, j]
-    aᵢ₋₁ⱼ = α[i - 1, j]
-    aᵢⱼ₊₁ = α[i, j + 1]
-    aᵢⱼ₋₁ = α[i, j - 1]
+    if !onbc
+      J = cell_center_jacobian[mesh_idx]
+      edge_α = edge_diffusivity(α, diff_idx, mean_func)
+      A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
 
-    diffusivity = (;
-      aᵢⱼ,
-      aᵢ₊₁ⱼ,
-      aᵢ₋₁ⱼ,
-      aᵢⱼ₊₁,
-      aᵢⱼ₋₁,
-      aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
-      aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
-      aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
-      aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
-    )
+      rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
 
-    stencil = inner_op_2d(metric_terms, diffusivity, Δt)
+      @inbounds for icol in 1:9
+        ij = diff_idx.I .+ offsets2d[icol]
+        col = matrix_indices[ij...]
 
-    #! format: off
-    A[mat_idx, mat_idx - ni - 1] = stencil[1] #[-1, -1] # (i-1, j-1)
-    A[mat_idx, mat_idx - ni]     = stencil[2] #[+0, -1] # (i  , j-1)
-    A[mat_idx, mat_idx - ni + 1] = stencil[3] #[+1, -1] # (i+1, j-1)
-    A[mat_idx, mat_idx - 1]      = stencil[4] #[-1, +0] # (i-1, j  )
-    A[mat_idx, mat_idx]          = stencil[5] #[+0, +0] # (i  , j  )
-    A[mat_idx, mat_idx + 1]      = stencil[6] #[+1, +0] # (i+1, j  )
-    A[mat_idx, mat_idx + ni - 1] = stencil[7] #[-1, +1] # (i-1, j+1)
-    A[mat_idx, mat_idx + ni]     = stencil[8] #[ 0, +1] # (i  , j+1)
-    A[mat_idx, mat_idx + ni + 1] = stencil[9] #[+1, +1] # (i+1, j+1)
-    #! format: on
+        A[row, col] = A_coeffs[icol]
+      end
 
-    # b[mat_idx] = rhs
+    else
+      rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+    end
+
+    b[row] = rhs_coeff
+  end
+end
+
+@kernel function _assembly_kernel_3d(
+  A::SparseMatrixCSC{T,Ti},
+  b::AbstractVector{T},
+  source_term::AbstractArray{T,N},
+  u::AbstractArray{T,N},
+  α::AbstractArray{T,N},
+  Δt,
+  cell_center_jacobian,
+  edge_metrics,
+  mesh_indices,
+  diffusion_prob_indices,
+  matrix_indices,
+  limits,
+  mean_func::F,
+  bcs,
+) where {T,Ti,N,F<:Function}
+
+  # These are the indicies corresponding to the edge
+  # of the diffusion problem
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
+
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    row = matrix_indices[idx]
+    mesh_idx = mesh_indices[idx]
+    diff_idx = diffusion_prob_indices[idx]
+    i, j, k = diff_idx.I
+
+    onbc = i == ilo || i == ihi || j == jlo || j == jhi || k == klo || k == khi
+
+    if !onbc
+      J = cell_center_jacobian[mesh_idx]
+      edge_α = edge_diffusivity(α, diff_idx, mean_func)
+      A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
+
+      rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
+
+      @inbounds for icol in 1:27
+        ijk = diff_idx.I .+ offsets3d[icol]
+        col = matrix_indices[ijk...]
+
+        A[row, col] = A_coeffs[icol]
+      end
+
+    else
+      rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+    end
+
+    b[row] = rhs_coeff
   end
 end
 
 # ---------------------------------------------------------------------------
-#  Operators
+#  Boundary condition RHS operators
 # ---------------------------------------------------------------------------
 
-function inner_op_1d(metric_terms, diffusivity, Δt::T) where {T}
+function bc_operator(bcs, idx::CartesianIndex{1}, limits, T)
+  @unpack ilo, ihi = limits
+  i, = idx.I
 
-  #
-  @unpack α, f_ξ² = metric_terms
-  @unpack aᵢ, aᵢ₊₁, aᵢ₋₁, aᵢ₊½, aᵢ₋½ = diffusivity
+  at_ibc = i == ilo || i == ihi
+  at_bc = at_ibc || at_jbc
 
-  # current cell
-  uⁿ⁺¹ᵢ = one(T) + ((aᵢ₊½ + aᵢ₋½) * f_ξ²) * Δt
+  if !at_bc
+    error("The bc_operator is getting called, but we're not at_ a boundary!")
+  end
 
-  # cardinal terms
-  uⁿ⁺¹ᵢ₊₁ = (-aᵢ₊½ * f_ξ² - aᵢ * (α / 2)) * Δt
-  uⁿ⁺¹ᵢ₋₁ = (-aᵢ₋½ * f_ξ² + aᵢ * (α / 2)) * Δt
+  if i == ilo
+    rhs_coeff = bc_rhs_coefficient(bcs.ilo, idx, T)
+  elseif i == ihi
+    rhs_coeff = bc_rhs_coefficient(bcs.ihi, idx, T)
+  end
 
-  stencil = SVector{3,T}(uⁿ⁺¹ᵢ₋₁, uⁿ⁺¹ᵢ, uⁿ⁺¹ᵢ₊₁)
+  return rhs_coeff
+end
 
+function bc_operator(bcs, idx::CartesianIndex{2}, limits, T)
+  @unpack ilo, ihi, jlo, jhi = limits
+  i, j = idx.I
+
+  at_ibc = i == ilo || i == ihi
+  at_jbc = j == jlo || j == jhi
+  at_bc = at_ibc || at_jbc
+
+  if !at_bc
+    error("The bc_operator is getting called, but we're not at_ a boundary!")
+  end
+
+  if i == ilo
+    rhs_coeff = bc_rhs_coefficient(bcs.ilo, idx, T)
+  elseif i == ihi
+    rhs_coeff = bc_rhs_coefficient(bcs.ihi, idx, T)
+  elseif j == jlo
+    rhs_coeff = bc_rhs_coefficient(bcs.jlo, idx, T)
+  elseif j == jhi
+    rhs_coeff = bc_rhs_coefficient(bcs.jhi, idx, T)
+  end
+
+  return rhs_coeff
+end
+
+function bc_operator(bcs, idx::CartesianIndex{3}, limits, T)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
+  i, j, k = idx.I
+
+  at_ibc = i == ilo || i == ihi
+  at_jbc = j == jlo || j == jhi
+  at_kbc = k == klo || k == khi
+  at_bc = at_ibc || at_jbc || at_kbc
+
+  if !at_bc
+    error("The bc_operator is getting called, but we're not at_ a boundary!")
+  end
+
+  if i == ilo
+    rhs_coeff = bc_rhs_coefficient(bcs.ilo, idx, T)
+  elseif i == ihi
+    rhs_coeff = bc_rhs_coefficient(bcs.ihi, idx, T)
+  elseif j == jlo
+    rhs_coeff = bc_rhs_coefficient(bcs.jlo, idx, T)
+  elseif j == jhi
+    rhs_coeff = bc_rhs_coefficient(bcs.jhi, idx, T)
+  elseif k == klo
+    rhs_coeff = bc_rhs_coefficient(bcs.klo, idx, T)
+  elseif k == khi
+    rhs_coeff = bc_rhs_coefficient(bcs.khi, idx, T)
+  end
+
+  return rhs_coeff
+end
+
+# ---------------------------------------------------------------------------
+#  Edge diffusivity
+# ---------------------------------------------------------------------------
+
+function edge_diffusivity(α, idx::CartesianIndex{1}, mean_function::F) where {F<:Function}
+  i, = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i], α[i + 1]), #
+    αᵢ₋½=mean_function(α[i], α[i - 1]), #
+  )
+
+  return edge_diffusivity
+end
+
+function edge_diffusivity(α, idx::CartesianIndex{2}, mean_function::F) where {F<:Function}
+  i, j = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i, j], α[i + 1, j]),
+    αᵢ₋½=mean_function(α[i, j], α[i - 1, j]),
+    αⱼ₊½=mean_function(α[i, j], α[i, j + 1]),
+    αⱼ₋½=mean_function(α[i, j], α[i, j - 1]),
+  )
+
+  return edge_diffusivity
+end
+
+function edge_diffusivity(α, idx::CartesianIndex{3}, mean_function::F) where {F<:Function}
+  i, j, k = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i, j, k], α[i + 1, j, k]),
+    αᵢ₋½=mean_function(α[i, j, k], α[i - 1, j, k]),
+    αⱼ₊½=mean_function(α[i, j, k], α[i, j + 1, k]),
+    αⱼ₋½=mean_function(α[i, j, k], α[i, j - 1, k]),
+    αₖ₊½=mean_function(α[i, j, k], α[i, j, k + 1]),
+    αₖ₋½=mean_function(α[i, j, k], α[i, j, k - 1]),
+  )
+
+  return edge_diffusivity
+end
+
+# ---------------------------------------------------------------------------
+#  Inner-domain Operators
+# ---------------------------------------------------------------------------
+
+# Generate a stencil for a single 1D cell in the interior
+@inline function _inner_diffusion_operator(
+  edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{1}
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_1d(edge_terms, J, Δt)
   return stencil
 end
 
-function inner_op_2d(metric_terms, diffusivity, Δt::T) where {T}
-
-  #
-  @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
-  @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½ = diffusivity
-
-
-  # current cell
-  uⁿ⁺¹ᵢⱼ = one(T) + ((aᵢ₊½ + aᵢ₋½) * f_ξ² + (aⱼ₊½ + aⱼ₋½) * f_η²) * Δt
-
-  # cardinal terms
-  uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢ₊½ * f_ξ² - aᵢⱼ * (α / 2)) * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼ = (-aᵢ₋½ * f_ξ² + aᵢⱼ * (α / 2)) * Δt
-  uⁿ⁺¹ᵢⱼ₊₁ = (-aⱼ₊½ * f_η² - aᵢⱼ * (β / 2)) * Δt
-  uⁿ⁺¹ᵢⱼ₋₁ = (-aⱼ₋½ * f_η² + aᵢⱼ * (β / 2)) * Δt
-
-  # corner terms
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (+aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (+aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη * Δt
-
-  stencil = SVector{9,T}(
-    uⁿ⁺¹ᵢ₋₁ⱼ₋₁,
-    uⁿ⁺¹ᵢ₋₁ⱼ,
-    uⁿ⁺¹ᵢ₋₁ⱼ₊₁,
-    uⁿ⁺¹ᵢⱼ₋₁,
-    uⁿ⁺¹ᵢⱼ,
-    uⁿ⁺¹ᵢⱼ₊₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ₋₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ,
-    uⁿ⁺¹ᵢ₊₁ⱼ₊₁,
-  )
-
+# Generate a stencil for a single 2D cell in the interior
+@inline function _inner_diffusion_operator(
+  edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{2}
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_2d(edge_terms, J, Δt)
   return stencil
 end
 
-function inner_op_3d(metric_terms, diffusivity, Δt::T) where {T}
-
-  #
-  @unpack α, β, γ, f_ξ², f_η², f_ζ², f_ξη, f_ζη, f_ζξ = metric_terms
-  @unpack aᵢⱼₖ,
-  aᵢ₊₁ⱼₖ, aᵢ₋₁ⱼₖ, aᵢⱼ₊₁ₖ, aᵢⱼ₋₁ₖ, aᵢⱼₖ₊₁, aᵢⱼₖ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½, aₖ₊½,
-  aₖ₋½ = diffusivity
-
-  uⁿ⁺¹ᵢⱼₖ =
-    one(T) + (
-      (aᵢ₊½ + aᵢ₋½) * f_ξ² + #
-      (aⱼ₊½ + aⱼ₋½) * f_η² + #
-      (aₖ₊½ + aₖ₋½) * f_ζ²   #
-    ) * Δt
-
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ₊₁ = zero(T)
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ₊₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ₊₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ₊₁ = zero(T)
-
-  uⁿ⁺¹ᵢ₊₁ⱼₖ = (-aᵢ₊½ * f_ξ² - aᵢⱼₖ * (α / 2)) * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼₖ = (-aᵢ₋½ * f_ξ² + aᵢⱼₖ * (α / 2)) * Δt
-
-  uⁿ⁺¹ᵢⱼ₊₁ₖ = (-aⱼ₊½ * f_η² - aᵢⱼₖ * (β / 2)) * Δt
-  uⁿ⁺¹ᵢⱼ₋₁ₖ = (-aⱼ₋½ * f_η² + aᵢⱼₖ * (β / 2)) * Δt
-
-  uⁿ⁺¹ᵢⱼₖ₋₁ = (-aₖ₋½ * f_ζ² + aᵢⱼₖ * (γ / 2)) * Δt
-  uⁿ⁺¹ᵢⱼₖ₊₁ = (-aₖ₊½ * f_ζ² - aᵢⱼₖ * (γ / 2)) * Δt
-
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ = (aᵢ₋₁ⱼₖ + aᵢⱼ₊₁ₖ) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ = (aᵢ₊₁ⱼₖ + aᵢⱼ₋₁ₖ) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ = (-aᵢ₊₁ⱼₖ - aᵢⱼ₊₁ₖ) * f_ξη * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ = (-aᵢ₋₁ⱼₖ - aᵢⱼ₋₁ₖ) * f_ξη * Δt
-
-  uⁿ⁺¹ᵢ₊₁ⱼₖ₋₁ = (aᵢ₊₁ⱼₖ + aᵢⱼₖ₋₁) * f_ζξ * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼₖ₊₁ = (aᵢ₋₁ⱼₖ + aᵢⱼₖ₊₁) * f_ζξ * Δt
-  uⁿ⁺¹ᵢ₊₁ⱼₖ₊₁ = (-aᵢ₊₁ⱼₖ - aᵢⱼₖ₊₁) * f_ζξ * Δt
-  uⁿ⁺¹ᵢ₋₁ⱼₖ₋₁ = (-aᵢ₋₁ⱼₖ - aᵢⱼₖ₋₁) * f_ζξ * Δt
-
-  uⁿ⁺¹ᵢⱼ₊₁ₖ₋₁ = (aᵢⱼ₊₁ₖ + aᵢⱼₖ₋₁) * f_ζη * Δt
-  uⁿ⁺¹ᵢⱼ₋₁ₖ₊₁ = (aᵢⱼ₋₁ₖ + aᵢⱼₖ₊₁) * f_ζη * Δt
-  uⁿ⁺¹ᵢⱼ₊₁ₖ₊₁ = (-aᵢⱼ₊₁ₖ - aᵢⱼₖ₊₁) * f_ζη * Δt
-  uⁿ⁺¹ᵢⱼ₋₁ₖ₋₁ = (-aᵢⱼ₋₁ₖ - aᵢⱼₖ₋₁) * f_ζη * Δt
-
-  stencil = SVector{27,T}(
-    uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ₋₁,
-    uⁿ⁺¹ᵢⱼ₋₁ₖ₋₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ₋₁,
-    uⁿ⁺¹ᵢ₋₁ⱼₖ₋₁,
-    uⁿ⁺¹ᵢⱼₖ₋₁,
-    uⁿ⁺¹ᵢ₊₁ⱼₖ₋₁,
-    uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ₋₁,
-    uⁿ⁺¹ᵢⱼ₊₁ₖ₋₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ₋₁,
-    uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ,
-    uⁿ⁺¹ᵢⱼ₋₁ₖ,
-    uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ,
-    uⁿ⁺¹ᵢ₋₁ⱼₖ,
-    uⁿ⁺¹ᵢⱼₖ,
-    uⁿ⁺¹ᵢ₊₁ⱼₖ,
-    uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ,
-    uⁿ⁺¹ᵢⱼ₊₁ₖ,
-    uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ,
-    uⁿ⁺¹ᵢ₋₁ⱼ₋₁ₖ₊₁,
-    uⁿ⁺¹ᵢⱼ₋₁ₖ₊₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ₋₁ₖ₊₁,
-    uⁿ⁺¹ᵢ₋₁ⱼₖ₊₁,
-    uⁿ⁺¹ᵢⱼₖ₊₁,
-    uⁿ⁺¹ᵢ₊₁ⱼₖ₊₁,
-    uⁿ⁺¹ᵢ₋₁ⱼ₊₁ₖ₊₁,
-    uⁿ⁺¹ᵢⱼ₊₁ₖ₊₁,
-    uⁿ⁺¹ᵢ₊₁ⱼ₊₁ₖ₊₁,
-  )
-
+# Generate a stencil for a single 3D cell in the interior
+@inline function _inner_diffusion_operator(
+  edge_diffusivity, Δt, J, edge_metrics, idx::CartesianIndex{3}
+)
+  edge_terms = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
+  stencil = stencil_3d(edge_terms, J, Δt)
   return stencil
 end

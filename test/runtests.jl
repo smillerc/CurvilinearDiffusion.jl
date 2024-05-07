@@ -1,8 +1,10 @@
 using CurvilinearDiffusion
+using CurvilinearGrids
 using Test
-using StaticArrays
-using BenchmarkTools
+using UnPack
 
-@testset "CurvilinearDiffusion.jl" begin
-  include("unit/test_inner_operator.jl")
+@testset "CurvilinearDiffusion.jl" verbose = true begin
+  # include("unit/test_edge_terms.jl")
+  include("unit/test_bc.jl")
+  include("unit/test_implicit_scheme.jl")
 end

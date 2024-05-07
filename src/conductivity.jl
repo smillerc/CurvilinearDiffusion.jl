@@ -12,27 +12,56 @@ update the thermal conductivity of the mesh at each cell-center.
  - `cₚ::Real`: heat capacity at constant pressure
 """
 function update_conductivity!(
-  diffusivity::AbstractArray{T,N},
-  temp::AbstractArray{T,N},
-  ρ::AbstractArray{T,N},
-  κ::F,
-  cₚ::Real,
-) where {T,N,F}
-  backend = KernelAbstractions.get_backend(diffusivity)
-  conductivity_kernel(backend)(diffusivity, temp, ρ, κ, cₚ; ndrange=size(temp))
+  scheme, temperature, density, cₚ::Real, κ::F
+) where {F<:Function}
+  diff_domain = scheme.iterators.full.cartesian
+  domain = scheme.iterators.mesh
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, cₚ, κ; ndrange=size(α))
 
   return nothing
 end
 
-# super-simple kernel to update the diffusivity if
-# we know the conductivity function
+function update_conductivity!(
+  scheme, temperature, density, cₚ::AbstractArray, κ::F
+) where {F<:Function}
+  diff_domain = scheme.iterators.full.cartesian
+  domain = scheme.iterators.mesh
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  _cₚ = @view cₚ[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, _cₚ, κ; ndrange=size(α))
+
+  return nothing
+end
+
+# conductivity with array-valued cₚ
 @kernel function conductivity_kernel(
-  α, @Const(temperature), @Const(density), @Const(κ::F), @Const(cₚ)
-) where {F}
+  α, temperature, density, cₚ::AbstractArray{T,N}, κ::F
+) where {T,N,F<:Function}
   idx = @index(Global)
 
   @inbounds begin
-    rho = density[idx]
-    α[idx] = κ(rho, temperature[idx]) / (rho * cₚ)
+    α[idx] = κ(density[idx], temperature[idx]) / (density[idx] * cₚ[idx])
+  end
+end
+
+# conductivity with single-valued cₚ
+@kernel function conductivity_kernel(
+  α, temperature, density, cₚ::Real, κ::F
+) where {F<:Function}
+  idx = @index(Global)
+
+  @inbounds begin
+    α[idx] = κ(density[idx], temperature[idx]) / (density[idx] * cₚ)
   end
 end

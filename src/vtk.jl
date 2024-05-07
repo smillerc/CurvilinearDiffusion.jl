@@ -22,15 +22,16 @@ function save_vtk(
   fn = get_filename(iteration, name)
   @info "Writing to $fn"
 
-  domain = mesh.iterators.cell.domain
+  mdomain = mesh.iterators.cell.domain
+  ddomain = scheme.iterators.domain.cartesian
 
   coords = Array{T}.(CurvilinearGrids.coords(mesh))
 
   @views vtk_grid(fn, coords...) do vtk
     vtk["TimeValue"] = t
-    vtk["u"] = Array{T}(u[domain])
-    vtk["diffusivity"] = Array{T}(scheme.α[domain])
-    vtk["source_term"] = Array{T}(scheme.source_term[domain])
+    vtk["u"] = Array{T}(u[mdomain])
+    vtk["diffusivity"] = Array{T}(scheme.α[ddomain])
+    vtk["source_term"] = Array{T}(scheme.source_term[ddomain])
   end
 end
 

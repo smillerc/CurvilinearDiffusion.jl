@@ -1,229 +1,206 @@
 
-# ---------------------------------------------------------------------------
-#  Kernels
-# ---------------------------------------------------------------------------
+abstract type AbstractBC end
 
-@kernel function boundary_diffusion_op_kernel_1d!(
-  A,
-  b,
-  @Const(α),
-  @Const(u),
-  @Const(source_term),
-  @Const(Δt),
-  @Const(cell_center_metrics),
-  @Const(edge_metrics),
-  @Const(grid_indices),
-  @Const(matrix_indices),
-  @Const(mean_func::F),
-  @Const((ni, nj)),
-  @Const(loc::Symbol)
-) where {F}
-  idx = @index(Global, Linear)
+struct DirichletBC{T} <: AbstractBC
+  val::T
+end
 
-  begin
-    grid_idx = grid_indices[idx]
-    mat_idx = matrix_indices[idx]
+struct NeumannBC <: AbstractBC end
+struct PeriodicBC <: AbstractBC end
 
-    i, = grid_idx.I
-    edge_diffusivity = (αᵢ₊½=mean_func(α[i], α[i + 1]), αᵢ₋½=mean_func(α[i], α[i - 1]))
+const ILO_BC_LOC = 1
+const IHI_BC_LOC = 2
+const JLO_BC_LOC = 3
+const JHI_BC_LOC = 4
+const KLO_BC_LOC = 5
+const KHI_BC_LOC = 6
 
-    stencil, rhs = _neumann_boundary_diffusion_operator(
-      u, source_term, edge_diffusivity, Δt, cell_center_metrics, edge_metrics, grid_idx, loc
-    )
-
-    A[mat_idx, mat_idx] = stencil[0] # (i)
-
-    ip1 = true
-    im1 = true
-
-    if loc === :ilo
-      im1 = false
-    elseif loc === :ihi
-      ip1 = false
-    end
-
-    if (im1 && (1 <= (mat_idx - 1) <= ni))
-      A[mat_idx, mat_idx - 1] = stencil[-1] # i-1
-    end
-
-    if (ip1 && (1 <= (mat_idx + 1) <= ni))
-      A[mat_idx, mat_idx + 1] = stencil[+1] # i+1
-    end
-
-    b[mat_idx] = rhs
+function applybcs!(bcs, mesh, u::AbstractArray)
+  for (i, bc) in enumerate(bcs)
+    applybc!(bc, mesh, u, i)
   end
 end
 
-@kernel function boundary_diffusion_op_kernel_2d!(
-  A,
-  α,
-  Δt,
-  cell_center_metrics,
-  edge_metrics,
-  grid_indices,
-  matrix_indices,
-  meanfunc::F,
-  (ni, nj),
-  loc::Int,
-) where {F}
-  idx = @index(Global, Linear)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
 
-  len = ni * nj
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
 
-  begin
-    grid_idx = grid_indices[idx]
-    mat_idx = matrix_indices[idx]
-    i, j = grid_idx.I
-
-    metric_terms = non_cons_terms(cell_center_metrics, edge_metrics, grid_idx)
-
-    aᵢⱼ = α[i, j]
-    aᵢ₊₁ⱼ = α[i + 1, j]
-    aᵢ₋₁ⱼ = α[i - 1, j]
-    aᵢⱼ₊₁ = α[i, j + 1]
-    aᵢⱼ₋₁ = α[i, j - 1]
-
-    diffusivity = (;
-      aᵢⱼ,
-      aᵢ₊₁ⱼ,
-      aᵢ₋₁ⱼ,
-      aᵢⱼ₊₁,
-      aᵢⱼ₋₁,
-      aᵢ₊½=meanfunc(aᵢⱼ, aᵢ₊₁ⱼ),
-      aᵢ₋½=meanfunc(aᵢⱼ, aᵢ₋₁ⱼ),
-      aⱼ₊½=meanfunc(aᵢⱼ, aᵢⱼ₊₁),
-      aⱼ₋½=meanfunc(aᵢⱼ, aᵢⱼ₋₁),
-    )
-
-    stencil = _neumann_boundary_diffusion_operator(metric_terms, diffusivity, Δt, loc)
-
-    A[mat_idx, mat_idx] = stencil[+0, +0] # (i, j)
-
-    ip1 = true
-    jp1 = true
-    im1 = true
-    jm1 = true
-    if loc == 1 # :ilo
-      im1 = false
-    elseif loc == 2 # :ihi
-      ip1 = false
-    elseif loc == 3 # :jlo
-      jm1 = false
-    elseif loc == 4 # :jhi
-      jp1 = false
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1] = u[ilo]
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1] = u[ihi]
+    else
+      error("Bad 1d boundary location value $(loc), must be 1 or 2")
     end
-
-    #! format: off
-    if ((im1 && jm1) && (1 <= (mat_idx - ni - 1 ) <= len)) A[mat_idx, mat_idx - ni - 1] = stencil[-1, -1] end # (i-1, j-1)
-    if ((       jm1) && (1 <= (mat_idx - ni     ) <= len)) A[mat_idx, mat_idx - ni    ] = stencil[+0, -1] end # (i  , j-1)
-    if ((im1       ) && (1 <= (mat_idx - 1      ) <= len)) A[mat_idx, mat_idx - 1     ] = stencil[-1, +0] end # (i-1, j  )
-    if ((im1 && jp1) && (1 <= (mat_idx + ni - 1 ) <= len)) A[mat_idx, mat_idx + ni - 1] = stencil[-1, +1] end # (i-1, j+1)
-    if ((       jp1) && (1 <= (mat_idx + ni     ) <= len)) A[mat_idx, mat_idx + ni    ] = stencil[ 0, +1] end # (i  , j+1)
-    if ((ip1 && jm1) && (1 <= (mat_idx - ni + 1 ) <= len)) A[mat_idx, mat_idx - ni + 1] = stencil[+1, -1] end # (i+1, j-1)
-    if ((ip1       ) && (1 <= (mat_idx + 1      ) <= len)) A[mat_idx, mat_idx + 1     ] = stencil[+1, +0] end # (i+1, j  )
-    if ((ip1 && jp1) && (1 <= (mat_idx + ni + 1 ) <= len)) A[mat_idx, mat_idx + ni + 1] = stencil[+1, +1] end # (i+1, j+1)
-    #! format: on
-
   end
 end
 
-# ---------------------------------------------------------------------------
-#  Operators
-# ---------------------------------------------------------------------------
+function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
-# Generate a stencil for a 1D neumann boundary condition
-@inline function _neumann_boundary_diffusion_operator(
-  u::AbstractArray{T,1},
-  source_term::AbstractArray{T,1},
-  edge_diffusivity,
-  Δτ,
-  cell_center_metrics,
-  edge_metrics,
-  idx,
-  loc,
-) where {T}
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
 
-  #
-  Jᵢ = cell_center_metrics.J[idx]
-  sᵢ = source_term[idx]
-  uᵢ = u[idx]
-
-  @unpack fᵢ₊½, fᵢ₋½ = conservative_edge_terms(edge_diffusivity, edge_metrics, idx)
-
-  if loc == 1 # :ilo
-    fᵢ₋½ = zero(T)
-  elseif loc == 2 # :ihi
-    fᵢ₊½ = zero(T)
+  @views begin
+    if loc == ILO_BC_LOC
+      copy!(u[ilo - 1, jlo:jhi], u[ilo, jlo:jhi])
+    elseif loc == IHI_BC_LOC
+      copy!(u[ihi + 1, jlo:jhi], u[ihi, jlo:jhi])
+    elseif loc == JLO_BC_LOC
+      copy!(u[ilo:ihi, jlo - 1], u[ilo:ihi, jlo])
+    elseif loc == JHI_BC_LOC
+      copy!(u[ilo:ihi, jhi + 1], u[ilo:ihi, jhi])
+    else
+      error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
   end
-
-  A = fᵢ₋½                     # (i-1,j)
-  B = -(fᵢ₋½ + fᵢ₊½ + Jᵢ / Δτ) # (i,j)
-  C = fᵢ₊½                     # (i+1,j)
-  RHS = -(Jᵢ * sᵢ + uᵢ * Jᵢ / Δτ)
-
-  #------------------------------------------------------------------------------
-  # Assemble the stencil
-  #------------------------------------------------------------------------------
-
-  stencil = SVector{3,T}(A, B, C)
-
-  # use an offset so we can index via [+1, -1] for (i+1, j-1)
-  offset_stencil = OffsetVector(stencil, -1:1)
-
-  return offset_stencil, RHS
 end
 
-# Generate a stencil for a 2D neumann boundary condition
-@inline function _neumann_boundary_diffusion_operator(
-  metric_terms, diffusivity, Δt::T, loc
-) where {T}
+function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
-  #
-  @unpack α, β, f_ξ², f_η², f_ξη = metric_terms
-  @unpack aᵢⱼ, aᵢ₊₁ⱼ, aᵢ₋₁ⱼ, aᵢⱼ₊₁, aᵢⱼ₋₁, aᵢ₊½, aᵢ₋½, aⱼ₊½, aⱼ₋½ = diffusivity
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
 
-  ilo = loc == 1 || loc == 5 || loc == 6 # :ilo, (:ilo,:jlo), (:ilo,:jhi)
-  ihi = loc == 2 || loc == 7 || loc == 8 # :ihi, (:ihi,:jlo), (:ihi,:jhi)
-  jlo = loc == 3 || loc == 5 || loc == 7 # :jlo, (:ilo,:jlo), (:ihi,:jlo)
-  jhi = loc == 4 || loc == 6 || loc == 8 # :jhi, (:ilo,:jhi), (:ihi,:jhi)
-
-  uⁿ⁺¹ᵢ₊₁ⱼ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ = zero(T)
-  uⁿ⁺¹ᵢⱼ₊₁ = zero(T)
-  uⁿ⁺¹ᵢⱼ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = zero(T)
-  uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = zero(T)
-  uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = zero(T)
-
-  #! format: off
-  if (ilo) aᵢ₋½ = zero(T) end
-  if (ihi) aᵢ₊½ = zero(T) end
-  if (jlo) aⱼ₋½ = zero(T) end
-  if (jhi) aⱼ₊½ = zero(T) end
-  
-  # current cell
-  uⁿ⁺¹ᵢⱼ = one(T) + ((aᵢ₊½ + aᵢ₋½) * f_ξ² + (aⱼ₊½ + aⱼ₋½) * f_η²) * Δt
-
-  # cardinal terms
-  if (!ihi) uⁿ⁺¹ᵢ₊₁ⱼ = (-aᵢ₊½ * f_ξ² - aᵢⱼ * (α/2)) * Δt end
-  if (!ilo) uⁿ⁺¹ᵢ₋₁ⱼ = (-aᵢ₋½ * f_ξ² + aᵢⱼ * (α/2)) * Δt end
-  if (!jhi) uⁿ⁺¹ᵢⱼ₊₁ = (-aⱼ₊½ * f_η² - aᵢⱼ * (β/2)) * Δt end
-  if (!jlo) uⁿ⁺¹ᵢⱼ₋₁ = (-aⱼ₋½ * f_η² + aᵢⱼ * (β/2)) * Δt end
-
-  # cross terms
-  if (!ihi && !jlo) uⁿ⁺¹ᵢ₊₁ⱼ₋₁ = (+aᵢ₊₁ⱼ + aᵢⱼ₋₁) * f_ξη * Δt end
-  if (!ihi && !jhi) uⁿ⁺¹ᵢ₊₁ⱼ₊₁ = (-aᵢ₊₁ⱼ - aᵢⱼ₊₁) * f_ξη * Δt end
-  if (!ilo && !jlo) uⁿ⁺¹ᵢ₋₁ⱼ₋₁ = (-aᵢ₋₁ⱼ - aᵢⱼ₋₁) * f_ξη * Δt end
-  if (!ilo && !jhi) uⁿ⁺¹ᵢ₋₁ⱼ₊₁ = (+aᵢ₋₁ⱼ + aᵢⱼ₊₁) * f_ξη * Δt end
-  
-  # Create a stencil matrix to hold the coefficients for u[i±1,j±1]
-  stencil = @SMatrix [
-    uⁿ⁺¹ᵢ₋₁ⱼ₋₁ uⁿ⁺¹ᵢⱼ₋₁ uⁿ⁺¹ᵢ₊₁ⱼ₋₁
-    uⁿ⁺¹ᵢ₋₁ⱼ   uⁿ⁺¹ᵢⱼ   uⁿ⁺¹ᵢ₊₁ⱼ
-    uⁿ⁺¹ᵢ₋₁ⱼ₊₁ uⁿ⁺¹ᵢⱼ₊₁ uⁿ⁺¹ᵢ₊₁ⱼ₊₁
-  ]
-  #! format: on
-
-  return OffsetMatrix(stencil, (-1:1, -1:1))
+  @views begin
+    if loc == ILO_BC_LOC
+      copy!(u[ilo - 1, jlo:jhi, klo:khi], u[ilo, jlo:jhi, klo:khi])
+    elseif loc == IHI_BC_LOC
+      copy!(u[ihi + 1, jlo:jhi, klo:khi], u[ihi, jlo:jhi, klo:khi])
+    elseif loc == JLO_BC_LOC
+      copy!(u[ilo:ihi, jlo - 1, klo:khi], u[ilo:ihi, jlo, klo:khi])
+    elseif loc == JHI_BC_LOC
+      copy!(u[ilo:ihi, jhi + 1, klo:khi], u[ilo:ihi, jhi, klo:khi])
+    elseif loc == KLO_BC_LOC
+      copy!(u[ilo:ihi, jlo:jhi, klo - 1], u[ilo:ihi, jlo:jhi, klo])
+    elseif loc == KHI_BC_LOC
+      copy!(u[ilo:ihi, jlo:jhi, khi + 1], u[ilo:ihi, jlo:jhi, khi])
+    else
+      error("Bad 3d boundary location value $(loc), must be 1-6")
+    end
+  end
 end
+
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1] = bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1] = bc.val
+    else
+      error("Bad 1d boundary location value $(loc), must be 1 or 2")
+    end
+  end
+end
+
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1, jlo:jhi] .= bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1, jlo:jhi] .= bc.val
+    elseif loc == JLO_BC_LOC
+      u[ilo:ihi, jlo - 1] .= bc.val
+    elseif loc == JHI_BC_LOC
+      u[ilo:ihi, jhi + 1] .= bc.val
+    else
+      error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
+  end
+end
+
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1, jlo:jhi, klo:khi] .= bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1, jlo:jhi, klo:khi] .= bc.val
+    elseif loc == JLO_BC_LOC
+      u[ilo:ihi, jlo - 1, klo:khi] .= bc.val
+    elseif loc == JHI_BC_LOC
+      u[ilo:ihi, jhi + 1, klo:khi] .= bc.val
+    elseif loc == KLO_BC_LOC
+      u[ilo:ihi, jlo:jhi, klo - 1] .= bc.val
+    elseif loc == KHI_BC_LOC
+      u[ilo:ihi, jlo:jhi, khi + 1] .= bc.val
+    else
+      error("Bad 3d boundary location value $(loc), must be 1-6")
+    end
+  end
+end
+
+function applybc!(::PeriodicBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
+
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
+
+  @views begin
+    if loc == ILO_BC_LOC #|| loc == IHI_BC_LOC
+      u[ilo - 1] = u[ihi]
+      u[ihi + 1] = u[ilo]
+      # else
+      #   error("Bad 1d boundary location value $(loc), must be 1 or 2")
+    end
+  end
+end
+
+function applybc!(::PeriodicBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
+
+  @views begin
+    if loc == ILO_BC_LOC # || loc == IHI_BC_LOC
+      copy!(u[ilo - 1, jlo:jhi], u[ihi, jlo:jhi])
+      copy!(u[ihi + 1, jlo:jhi], u[ilo, jlo:jhi])
+    elseif loc == JLO_BC_LOC # || loc == JHI_BC_LOC
+      copy!(u[ilo:ihi, jlo - 1], u[ilo:ihi, jhi])
+      copy!(u[ilo:ihi, jhi + 1], u[ilo:ihi, jlo])
+      # else
+      #   error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
+  end
+end
+
+function applybc!(::PeriodicBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
+
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
+
+  @views begin
+    if loc == ILO_BC_LOC # || loc == IHI_BC_LOC
+      copy!(u[ilo - 1, jlo:jhi, klo:khi], u[ihi, jlo:jhi, klo:khi])
+      copy!(u[ihi + 1, jlo:jhi, klo:khi], u[ilo, jlo:jhi, klo:khi])
+    elseif loc == JLO_BC_LOC # || loc == JHI_BC_LOC
+      copy!(u[ilo:ihi, jlo - 1, klo:khi], u[ilo:ihi, jhi, klo:khi])
+      copy!(u[ilo:ihi, jhi + 1, klo:khi], u[ilo:ihi, jlo, klo:khi])
+    elseif loc == KLO_BC_LOC # || loc == KHI_BC_LOC
+      copy!(u[ilo:ihi, jlo:jhi, klo - 1], u[ilo:ihi, jlo:jhi, khi])
+      copy!(u[ilo:ihi, jlo:jhi, khi + 1], u[ilo:ihi, jlo:jhi, klo])
+      # else
+      #   error("Bad 3d boundary location value $(loc), must be 1-6")
+    end
+  end
+end
+
+# struct RobinBC <: AbstractBC end
+
+# ---------------------------------------------------------------------------
+#  
+# ---------------------------------------------------------------------------
+
+bc_rhs_coefficient(::NeumannBC, ::CartesianIndex, T) = zero(T)
+bc_rhs_coefficient(::PeriodicBC, ::CartesianIndex, T) = zero(T)
+bc_rhs_coefficient(bc::DirichletBC, ::CartesianIndex, T) = bc.val

@@ -1,4 +1,5 @@
 
+include("stencils.jl")
 include("inner_operators.jl")
 include("boundary_operators.jl")
 include("metric_terms.jl")
@@ -6,110 +7,60 @@ include("metric_terms.jl")
 using UnPack
 using CUDA.CUSPARSE: CSRIterator, _getindex
 
-"""
-    assemble_matrix!(scheme::ImplicitScheme,  Δt)
-
-Assemble the `A` matrix and right-hand side vector `b` for the solution
-to the 2D diffusion problem for a state-array `u` over a time step `Δt`.
-"""
-function assemble_matrix!(scheme::ImplicitScheme{2}, A, mesh, Δt)
-  ni, nj = size(scheme.domain_indices)
-
-  nhalo = 1
-  matrix_domain_LI = LinearIndices(scheme.domain_indices)
-
-  matrix_indices = @view matrix_domain_LI[
-    (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-  ]
-
-  inner_domain = @view scheme.halo_aware_indices[
-    (nhalo + 1):(end - nhalo), (nhalo + 1):(end - nhalo)
-  ]
-
-  backend = CPU() #scheme.backend
+function assemble!(
+  A::SparseMatrixCSC, u::AbstractArray{T,2}, scheme::ImplicitScheme{2}, mesh, Δt
+) where {T}
+  backend = scheme.backend
   workgroup = (64,)
 
-  inner_diffusion_op_kernel_2d!(backend, workgroup)(
+  nrows = length(scheme.iterators.full.cartesian)
+  _assembly_kernel_2d(backend, workgroup)(
     A,
+    scheme.linear_problem.b,
+    scheme.source_term,
+    u,
     scheme.α,
     Δt,
-    mesh.cell_center_metrics,
+    mesh.cell_center_metrics.J,
     mesh.edge_metrics,
-    inner_domain,
-    matrix_indices,
+    scheme.iterators.mesh,
+    scheme.iterators.full.cartesian,
+    scheme.iterators.full.linear,
+    scheme.limits,
     scheme.mean_func,
-    (ni, nj);
-    ndrange=size(inner_domain),
+    scheme.bcs;
+    ndrange=nrows,
   )
 
-  # bc_locs = (ilo=1, ihi=2, jlo=3, jhi=4)
-  # # ilo
-  # ilo_domain = @view scheme.halo_aware_indices[begin, :]
-  # ilo_matrix_indices = @view LinearIndices(scheme.domain_indices)[begin, :]
-  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   ilo_domain,
-  #   ilo_matrix_indices,
-  #   scheme.mean_func,
-  #   (ni, nj),
-  #   bc_locs.ilo;
-  #   ndrange=size(ilo_domain),
-  # )
+  KernelAbstractions.synchronize(backend)
 
-  # # ihi
-  # ihi_domain = @view scheme.halo_aware_indices[end, :]
-  # ihi_matrix_indices = @view LinearIndices(scheme.domain_indices)[end, :]
-  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   ihi_domain,
-  #   ihi_matrix_indices,
-  #   scheme.mean_func,
-  #   (ni, nj),
-  #   bc_locs.ihi;
-  #   ndrange=size(ihi_domain),
-  # )
+  return nothing
+end
 
-  # # jlo
-  # jlo_domain = @view scheme.halo_aware_indices[:, begin]
-  # jlo_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, begin]
-  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   jlo_domain,
-  #   jlo_matrix_indices,
-  #   scheme.mean_func,
-  #   (ni, nj),
-  #   bc_locs.jlo;
-  #   ndrange=size(jlo_domain),
-  # )
+function assemble!(
+  A::SparseMatrixCSC, u::AbstractArray{T,3}, scheme::ImplicitScheme{3}, mesh, Δt
+) where {T}
+  backend = scheme.backend
+  workgroup = (64,)
 
-  # # jhi
-  # jhi_domain = @view scheme.halo_aware_indices[:, end]
-  # jhi_matrix_indices = @view LinearIndices(scheme.domain_indices)[:, end]
-  # boundary_diffusion_op_kernel_2d!(backend, workgroup)(
-  #   A,
-  #   scheme.α,
-  #   Δt,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   jhi_domain,
-  #   jhi_matrix_indices,
-  #   scheme.mean_func,
-  #   (ni, nj),
-  #   bc_locs.jhi;
-  #   ndrange=size(jhi_domain),
-  # )
+  nrows = length(scheme.iterators.full.cartesian)
+  _assembly_kernel_3d(backend, workgroup)(
+    A,
+    scheme.linear_problem.b,
+    scheme.source_term,
+    u,
+    scheme.α,
+    Δt,
+    mesh.cell_center_metrics.J,
+    mesh.edge_metrics,
+    scheme.iterators.mesh,
+    scheme.iterators.full.cartesian,
+    scheme.iterators.full.linear,
+    scheme.limits,
+    scheme.mean_func,
+    scheme.bcs;
+    ndrange=nrows,
+  )
 
   KernelAbstractions.synchronize(backend)
 

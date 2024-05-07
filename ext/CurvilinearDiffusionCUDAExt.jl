@@ -1,18 +1,25 @@
 module CurvilinearDiffusionCUDAExt
 
 using CurvilinearDiffusion
+using CurvilinearDiffusion.ImplicitSchemeType:
+  bc_operator, _inner_diffusion_operator, edge_diffusivity
+
 using CurvilinearGrids
 using KernelAbstractions
-
 using CUDA
 using CUDA.CUSPARSE: CuSparseMatrixCSR
+using UnPack
 
-export initialize_coefficient_matrix
+include("CUDA/assembly.jl")
 
-function CurvilinearDiffusion.initialize_coefficient_matrix(
-  mesh::CurvilinearGrid2D, ::CUDABackend
+function CurvilinearDiffusion.ImplicitSchemeType.initialize_coefficient_matrix(
+  iterators, mesh, bcs, ::CUDABackend
 )
-  return CuSparseMatrixCSR(init_A_matrix(mesh, CPU()))
+  return CuSparseMatrixCSR(
+    CurvilinearDiffusion.ImplicitSchemeType.initialize_coefficient_matrix(
+      iterators, mesh, bcs, CPU()
+    ),
+  )
 end
 
 end

@@ -29,6 +29,12 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
+[weakdeps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+
+[extensions]
+CurvilinearDiffusionCUDAExt = "CUDA"
+
 [compat]
 julia = "1.6"
 
