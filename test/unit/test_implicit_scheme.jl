@@ -1,5 +1,5 @@
 
-@testset "ImplicitScheme 2d construction" begin
+@testset "ImplicitScheme 2D construction" begin
   function uniform_grid(nx, ny)
     x0, x1 = (-6, 6)
     y0, y1 = (-6, 6)
@@ -38,7 +38,7 @@
   @test size(mesh.iterators.cell.domain) == size(scheme.iterators.domain.linear)
 end
 
-@testset "ImplicitScheme 3d construction" begin
+@testset "ImplicitScheme 3D construction" begin
   function uniform_grid(nx, ny, nz)
     x0, x1 = (-6, 6)
     y0, y1 = (-6, 6)

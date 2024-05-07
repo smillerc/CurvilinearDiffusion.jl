@@ -22,18 +22,38 @@ function applybcs!(bcs, mesh, u::AbstractArray)
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
-  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+function applybc!(::NeumannBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
+
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
 
   @views begin
     if loc == ILO_BC_LOC
-      copy!(u[ilo, :], u[ilo - 1, :])
+      u[ilo - 1] = u[ilo]
     elseif loc == IHI_BC_LOC
-      copy!(u[ihi, :], u[ihi + 1, :])
+      u[ihi + 1] = u[ihi]
+    else
+      error("Bad 1d boundary location value $(loc), must be 1 or 2")
+    end
+  end
+end
+
+function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  # Neumann BCs set the ghost region to be the same as the inner region along the edge,
+  # such that the edge diffusivity calculation gets the proper value
+
+  @views begin
+    if loc == ILO_BC_LOC
+      copy!(u[ilo - 1, jlo:jhi], u[ilo, jlo:jhi])
+    elseif loc == IHI_BC_LOC
+      copy!(u[ihi + 1, jlo:jhi], u[ihi, jlo:jhi])
     elseif loc == JLO_BC_LOC
-      copy!(u[:, jlo], u[:, jlo - 1])
+      copy!(u[ilo:ihi, jlo - 1], u[ilo:ihi, jlo])
     elseif loc == JHI_BC_LOC
-      copy!(u[:, jhi], u[:, jhi + 1])
+      copy!(u[ilo:ihi, jhi + 1], u[ilo:ihi, jhi])
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
@@ -48,50 +68,49 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::I
 
   @views begin
     if loc == ILO_BC_LOC
-      copy!(u[ilo - 1, :, :], u[ilo, :, :])
+      copy!(u[ilo - 1, jlo:jhi, klo:khi], u[ilo, jlo:jhi, klo:khi])
     elseif loc == IHI_BC_LOC
-      copy!(u[ihi + 1, :, :], u[ihi, :, :])
+      copy!(u[ihi + 1, jlo:jhi, klo:khi], u[ihi, jlo:jhi, klo:khi])
     elseif loc == JLO_BC_LOC
-      copy!(u[:, jlo - 1, :], u[:, jlo, :])
+      copy!(u[ilo:ihi, jlo - 1, klo:khi], u[ilo:ihi, jlo, klo:khi])
     elseif loc == JHI_BC_LOC
-      copy!(u[:, jhi + 1, :], u[:, jhi, :])
+      copy!(u[ilo:ihi, jhi + 1, klo:khi], u[ilo:ihi, jhi, klo:khi])
     elseif loc == KLO_BC_LOC
-      copy!(u[:, :, klo - 1], u[:, :, klo])
+      copy!(u[ilo:ihi, jlo:jhi, klo - 1], u[ilo:ihi, jlo:jhi, klo])
     elseif loc == KHI_BC_LOC
-      copy!(u[:, :, khi + 1], u[:, :, khi])
+      copy!(u[ilo:ihi, jlo:jhi, khi + 1], u[ilo:ihi, jlo:jhi, khi])
     else
       error("Bad 3d boundary location value $(loc), must be 1-6")
     end
   end
 end
 
-#
-# function applybc!(bc::DirichletBC, ::CurvilinearGrid1D, u::AbstractArray, limits, loc::Int)
-#   @unpack ilo, ihi = mesh.domain_limits.cell
+function applybc!(bc::DirichletBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+  @unpack ilo, ihi = mesh.domain_limits.cell
 
-#   @views begin
-#     if loc == ILO_BC_LOC
-#       u[ilo - 1] .= bc.val
-#     elseif loc == IHI_BC_LOC
-#       u[ihi + 1] .= bc.val
-#     else
-#       error("Bad 1d boundary location value $(loc), must be 1 or 2")
-#     end
-#   end
-# end
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1] = bc.val
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1] = bc.val
+    else
+      error("Bad 1d boundary location value $(loc), must be 1 or 2")
+    end
+  end
+end
 
 function applybc!(bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1, :] .= bc.val
+      u[ilo - 1, jlo:jhi] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi + 1, :] .= bc.val
+      u[ihi + 1, jlo:jhi] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[:, jlo - 1] .= bc.val
+      u[ilo:ihi, jlo - 1] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[:, jhi + 1] .= bc.val
+      u[ilo:ihi, jhi + 1] .= bc.val
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
@@ -101,20 +120,19 @@ end
 function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
-  # @show ilo, ihi, jlo, jhi, klo, khi, loc, bc.val
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1, :, :] .= bc.val
+      u[ilo - 1, jlo:jhi, klo:khi] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi + 1, :, :] .= bc.val
+      u[ihi + 1, jlo:jhi, klo:khi] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[:, jlo - 1, :] .= bc.val
+      u[ilo:ihi, jlo - 1, klo:khi] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[:, jhi + 1, :] .= bc.val
+      u[ilo:ihi, jhi + 1, klo:khi] .= bc.val
     elseif loc == KLO_BC_LOC
-      u[:, :, klo - 1] .= bc.val
+      u[ilo:ihi, jlo:jhi, klo - 1] .= bc.val
     elseif loc == KHI_BC_LOC
-      u[:, :, khi + 1] .= bc.val
+      u[ilo:ihi, jlo:jhi, khi + 1] .= bc.val
     else
       error("Bad 3d boundary location value $(loc), must be 1-6")
     end
@@ -126,6 +144,23 @@ end
 # ---------------------------------------------------------------------------
 #  Kernels
 # ---------------------------------------------------------------------------
+
+function bc_coeffs(::NeumannBC, ::CartesianIndex{1}, loc, T)
+  Aᵢ₋₁ = Aᵢ₊₁ = zero(T)
+  Aᵢ = one(T)
+
+  if loc == ILO_BC_LOC
+    Aᵢ₊₁ = -one(T)
+  elseif loc == IHI_BC_LOC
+    Aᵢ₋₁ = -one(T)
+  else
+    error("Bad boundary location! ($loc)")
+  end
+
+  A_coeffs = SVector(Aᵢ₋₁, Aᵢ, Aᵢ₊₁)
+  rhs_coeff = zero(T)
+  return A_coeffs, rhs_coeff
+end
 
 function bc_coeffs(::NeumannBC, ::CartesianIndex{2}, loc, T)
   Aᵢ₋₁ⱼ₋₁ = Aᵢⱼ₋₁ = Aᵢ₊₁ⱼ₋₁ = Aᵢ₋₁ⱼ = Aᵢ₊₁ⱼ = Aᵢ₋₁ⱼ₊₁ = Aᵢⱼ₊₁ = Aᵢ₊₁ⱼ₊₁ = zero(T)
@@ -223,6 +258,12 @@ function bc_coeffs(::NeumannBC, ::CartesianIndex{3}, loc, T)
     Aᵢ₊₁ⱼ₊₁ₖ₊₁,
   )
   rhs_coeff = zero(T)
+  return A_coeffs, rhs_coeff
+end
+
+function bc_coeffs(bc::DirichletBC, ::CartesianIndex{1}, loc, T)
+  A_coeffs = SVector{9,T}(0, 1, 0)
+  rhs_coeff = bc.val
   return A_coeffs, rhs_coeff
 end
 
