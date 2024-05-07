@@ -6,28 +6,16 @@ using KernelAbstractions
 using CUDA
 using CUDA.CUSPARSE: CuSparseMatrixCSR
 
-function CurvilinearDiffusion.initialize_coefficient_matrix(
-  mesh::CurvilinearGrid2D, ::CUDABackend
-)
-  return CuSparseMatrixCSR(CurvilinearDiffusion.initialize_coefficient_matrix(mesh, CPU()))
-end
+include("CUDA/assembly.jl")
 
 function CurvilinearDiffusion.initialize_coefficient_matrix(
-  mesh::CurvilinearGrid3D, ::CUDABackend
+  iterators, mesh, bcs, ::CUDABackend
 )
-  return CuSparseMatrixCSR(CurvilinearDiffusion.initialize_coefficient_matrix(mesh, CPU()))
-end
-
-function CurvilinearDiffusion.assemble_matrix!(
-  A::CuSparseMatrixCSR, scheme::ImplicitScheme{2}, mesh, Δt
-)
-  return nothing
-end
-
-function CurvilinearDiffusion.assemble_matrix!(
-  A::CuSparseMatrixCSR, scheme::ImplicitScheme{3}, mesh, Δt
-)
-  return nothing
+  return CuSparseMatrixCSR(
+    CurvilinearDiffusion.initialize_coefficient_matrix(
+      initialize_coefficient_matrix(iterators, mesh, bcs, CPU())
+    ),
+  )
 end
 
 end
