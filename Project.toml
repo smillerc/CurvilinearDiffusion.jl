@@ -1,7 +1,7 @@
 name = "CurvilinearDiffusion"
 uuid = "333fb37a-136e-4126-b86d-b2955542da26"
 authors = ["Sam Miller <smil@lle.rochester.edu> and contributors"]
-version = "0.1.0-DEV"
+version = "0.1.0"
 
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
