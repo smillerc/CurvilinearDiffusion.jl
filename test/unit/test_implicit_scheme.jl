@@ -28,7 +28,7 @@
   @test mesh.iterators.cell.domain == CartesianIndices((3:8, 3:8))
   @test mesh.iterators.cell.full == CartesianIndices((10, 10))
 
-  @test length(scheme.b) == 64
+  @test length(scheme.linear_problem.b) == 64
   @test length(scheme.x) == 64
   @test length(scheme.solver.x) == 64
   @test size(scheme.A) == (64, 64)
@@ -80,7 +80,7 @@ end
   @test mesh.iterators.cell.full == CartesianIndices((14, 14, 14))
 
   len = 8 * 8 * 8
-  @test length(scheme.b) == len
+  @test length(scheme.linear_problem.b) == len
   @test length(scheme.x) == len
   @test length(scheme.solver.x) == len
   @test size(scheme.A) == (len, len)

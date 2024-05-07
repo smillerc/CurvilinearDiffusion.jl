@@ -12,7 +12,7 @@ function assemble!(
   nrows = length(scheme.iterators.full.cartesian)
   _assembly_kernel_2d(backend, workgroup)(
     A,
-    scheme.b,
+    scheme.linear_problem.b,
     scheme.source_term,
     u,
     scheme.α,
@@ -42,7 +42,7 @@ function assemble!(
   nrows = length(scheme.iterators.full.cartesian)
   _assembly_kernel_3d(backend, workgroup)(
     A,
-    scheme.b,
+    scheme.linear_problem.b,
     scheme.source_term,
     u,
     scheme.α,

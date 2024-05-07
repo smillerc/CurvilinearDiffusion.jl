@@ -40,14 +40,14 @@ function CurvilinearDiffusion.assemble!(
   scheme::ImplicitScheme{N,T,BE},
   mesh,
   Δt,
-) where {Tv,Ti,T,BE}
+) where {Tv,Ti,N,T,BE}
 
   #
   m, _ = size(A)
 
   kernel = @cuda launch = false assemble_csr!(
     A,
-    scheme.b,
+    scheme.linear_problem.b,
     scheme.source_term,
     u,
     scheme.α,
@@ -56,7 +56,6 @@ function CurvilinearDiffusion.assemble!(
     mesh.edge_metrics,
     scheme.iterators.mesh,
     scheme.iterators.full.cartesian,
-    scheme.iterators.full.linear,
     scheme.limits,
     scheme.mean_func,
     scheme.bcs,
@@ -69,7 +68,7 @@ function CurvilinearDiffusion.assemble!(
 
   kernel(
     A,
-    scheme.b,
+    scheme.linear_problem.b,
     scheme.source_term,
     u,
     scheme.α,
@@ -78,7 +77,6 @@ function CurvilinearDiffusion.assemble!(
     mesh.edge_metrics,
     scheme.iterators.mesh,
     scheme.iterators.full.cartesian,
-    scheme.iterators.full.linear,
     scheme.limits,
     scheme.mean_func,
     scheme.bcs;
@@ -89,59 +87,59 @@ function CurvilinearDiffusion.assemble!(
   return nothing
 end
 
-function assemble_csr!(
-  A,
-  b::AbstractVector{T},
-  source_term::AbstractArray{T,2},
-  u::AbstractArray{T,2},
-  α::AbstractArray{T,2},
-  Δt,
-  cell_center_jacobian,
-  edge_metrics,
-  mesh_indices,
-  diffusion_prob_indices,
-  matrix_indices,
-  limits,
-  mean_func::F,
-  bcs,
-) where {T,F<:Function}
+# function assemble_csr!(
+#   A,
+#   b::AbstractVector{T},
+#   source_term::AbstractArray{T,2},
+#   u::AbstractArray{T,2},
+#   α::AbstractArray{T,2},
+#   Δt,
+#   cell_center_jacobian,
+#   edge_metrics,
+#   mesh_indices,
+#   diffusion_prob_indices,
+#   matrix_indices,
+#   limits,
+#   mean_func::F,
+#   bcs,
+# ) where {T,F<:Function}
 
-  # every thread processes an entire row
-  idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+#   # every thread processes an entire row
+#   idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
 
-  nrows = size(A, 1)
+#   nrows = size(A, 1)
 
-  row > nrows && return nothing
+#   row > nrows && return nothing
 
-  @unpack ilo, ihi, jlo, jhi = mesh_limits
+#   @unpack ilo, ihi, jlo, jhi = mesh_limits
 
-  begin
-    row = matrix_indices[idx]
-    mesh_idx = mesh_indices[idx]
-    diff_idx = diffusion_prob_indices[idx]
-    i, j = diff_idx.I
+#   begin
+#     row = matrix_indices[idx]
+#     mesh_idx = mesh_indices[idx]
+#     diff_idx = diffusion_prob_indices[idx]
+#     i, j = diff_idx.I
 
-    onbc = i == ilo || i == ihi || j == jlo || j == jhi
+#     onbc = i == ilo || i == ihi || j == jlo || j == jhi
 
-    if !onbc
-      J = cell_center_jacobian[mesh_idx]
-      edge_α = edge_diffusivity(α, diff_idx, mean_func)
-      A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
-      rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
+#     if !onbc
+#       J = cell_center_jacobian[mesh_idx]
+#       edge_α = edge_diffusivity(α, diff_idx, mean_func)
+#       A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
+#       rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
 
-      cfirst = A.rowPtr[row]
-      @inbounds for c in 1:9
-        zidx = cfirst + c - 1
-        A.nzVal[zidx] = A_coeffs[c]
-      end
+#       cfirst = A.rowPtr[row]
+#       @inbounds for c in 1:9
+#         zidx = cfirst + c - 1
+#         A.nzVal[zidx] = A_coeffs[c]
+#       end
 
-    else
-      rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
-    end
+#     else
+#       rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+#     end
 
-    b[row] = rhs_coeff
-  end
-end
+#     b[row] = rhs_coeff
+#   end
+# end
 
 function assemble_csr!(
   A,
@@ -154,25 +152,23 @@ function assemble_csr!(
   edge_metrics,
   mesh_indices,
   diffusion_prob_indices,
-  matrix_indices,
   limits,
   mean_func::F,
   bcs,
 ) where {T,F<:Function}
 
   # every thread processes an entire row
-  idx = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+  row = threadIdx().x + (blockIdx().x - 1) * blockDim().x
 
   nrows = size(A, 1)
 
   row > nrows && return nothing
 
-  @unpack ilo, ihi, jlo, jhi, klo, khi = mesh_limits
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
 
   begin
-    row = matrix_indices[idx]
-    mesh_idx = mesh_indices[idx]
-    diff_idx = diffusion_prob_indices[idx]
+    mesh_idx = mesh_indices[row]
+    diff_idx = diffusion_prob_indices[row]
     i, j, k = diff_idx.I
 
     onbc = i == ilo || i == ihi || j == jlo || j == jhi || k == klo || k == khi
@@ -190,9 +186,13 @@ function assemble_csr!(
       end
 
     else
-      rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+      rhs_coeff = CurvilinearDiffusion.ImplicitSchemeType.bc_operator(
+        bcs, diff_idx, limits, T
+      )
     end
 
     b[row] = rhs_coeff
   end
+
+  return nothing
 end
