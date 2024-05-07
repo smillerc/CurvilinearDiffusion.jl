@@ -14,8 +14,6 @@ const JHI_BC_LOC = 4
 const KLO_BC_LOC = 5
 const KHI_BC_LOC = 6
 
-# applybc!(::NeumannBC, u, mesh, loc::Int) = nothing
-
 function applybcs!(bcs, mesh, u::AbstractArray)
   for (i, bc) in enumerate(bcs)
     applybc!(bc, mesh, u, i)
@@ -142,141 +140,8 @@ end
 # struct RobinBC <: AbstractBC end
 
 # ---------------------------------------------------------------------------
-#  Kernels
+#  
 # ---------------------------------------------------------------------------
 
-function bc_coeffs(::NeumannBC, ::CartesianIndex{1}, loc, T)
-  Aᵢ₋₁ = Aᵢ₊₁ = zero(T)
-  Aᵢ = one(T)
-
-  if loc == ILO_BC_LOC
-    Aᵢ₊₁ = -one(T)
-  elseif loc == IHI_BC_LOC
-    Aᵢ₋₁ = -one(T)
-  else
-    error("Bad boundary location! ($loc)")
-  end
-
-  A_coeffs = SVector(Aᵢ₋₁, Aᵢ, Aᵢ₊₁)
-  rhs_coeff = zero(T)
-  return A_coeffs, rhs_coeff
-end
-
-function bc_coeffs(::NeumannBC, ::CartesianIndex{2}, loc, T)
-  Aᵢ₋₁ⱼ₋₁ = Aᵢⱼ₋₁ = Aᵢ₊₁ⱼ₋₁ = Aᵢ₋₁ⱼ = Aᵢ₊₁ⱼ = Aᵢ₋₁ⱼ₊₁ = Aᵢⱼ₊₁ = Aᵢ₊₁ⱼ₊₁ = zero(T)
-  Aᵢⱼ = one(T)
-
-  if loc == ILO_BC_LOC
-    Aᵢ₊₁ⱼ = -one(T)
-  elseif loc == IHI_BC_LOC
-    Aᵢ₋₁ⱼ = -one(T)
-  elseif loc == JLO_BC_LOC
-    Aᵢⱼ₊₁ = -one(T)
-  elseif loc == JHI_BC_LOC
-    Aᵢⱼ₋₁ = -one(T)
-  else
-    error("Bad boundary location! ($loc)")
-  end
-
-  A_coeffs = SVector(Aᵢ₋₁ⱼ₋₁, Aᵢⱼ₋₁, Aᵢ₊₁ⱼ₋₁, Aᵢ₋₁ⱼ, Aᵢⱼ, Aᵢ₊₁ⱼ, Aᵢ₋₁ⱼ₊₁, Aᵢⱼ₊₁, Aᵢ₊₁ⱼ₊₁)
-  rhs_coeff = zero(T)
-  return A_coeffs, rhs_coeff
-end
-
-function bc_coeffs(::NeumannBC, ::CartesianIndex{3}, loc, T)
-  Aᵢ₋₁ⱼ₋₁ₖ₋₁ = zero(T)
-  Aᵢⱼ₋₁ₖ₋₁ = zero(T)
-  Aᵢ₊₁ⱼ₋₁ₖ₋₁ = zero(T)
-  Aᵢ₋₁ⱼₖ₋₁ = zero(T)
-  Aᵢⱼₖ₋₁ = zero(T)
-  Aᵢ₊₁ⱼₖ₋₁ = zero(T)
-  Aᵢ₋₁ⱼ₊₁ₖ₋₁ = zero(T)
-  Aᵢⱼ₊₁ₖ₋₁ = zero(T)
-  Aᵢ₊₁ⱼ₊₁ₖ₋₁ = zero(T)
-  Aᵢ₋₁ⱼ₋₁ₖ = zero(T)
-  Aᵢⱼ₋₁ₖ = zero(T)
-  Aᵢ₊₁ⱼ₋₁ₖ = zero(T)
-  Aᵢ₋₁ⱼₖ = zero(T)
-  Aᵢⱼₖ = one(T)
-  Aᵢ₊₁ⱼₖ = zero(T)
-  Aᵢ₋₁ⱼ₊₁ₖ = zero(T)
-  Aᵢⱼ₊₁ₖ = zero(T)
-  Aᵢ₊₁ⱼ₊₁ₖ = zero(T)
-  Aᵢ₋₁ⱼ₋₁ₖ₊₁ = zero(T)
-  Aᵢⱼ₋₁ₖ₊₁ = zero(T)
-  Aᵢ₊₁ⱼ₋₁ₖ₊₁ = zero(T)
-  Aᵢ₋₁ⱼₖ₊₁ = zero(T)
-  Aᵢⱼₖ₊₁ = zero(T)
-  Aᵢ₊₁ⱼₖ₊₁ = zero(T)
-  Aᵢ₋₁ⱼ₊₁ₖ₊₁ = zero(T)
-  Aᵢⱼ₊₁ₖ₊₁ = zero(T)
-  Aᵢ₊₁ⱼ₊₁ₖ₊₁ = zero(T)
-
-  if loc == ILO_BC_LOC
-    Aᵢ₊₁ⱼₖ = -one(T)
-  elseif loc == IHI_BC_LOC
-    Aᵢ₋₁ⱼₖ = -one(T)
-  elseif loc == JLO_BC_LOC
-    Aᵢⱼ₊₁ₖ = -one(T)
-  elseif loc == JHI_BC_LOC
-    Aᵢⱼ₋₁ₖ = -one(T)
-  elseif loc == KLO_BC_LOC
-    Aᵢⱼₖ₊₁ = -one(T)
-  elseif loc == KHI_BC_LOC
-    Aᵢⱼₖ₋₁ = -one(T)
-  else
-    error("Bad boundary location! ($loc)")
-  end
-
-  A_coeffs = SVector(
-    Aᵢ₋₁ⱼ₋₁ₖ₋₁,
-    Aᵢⱼ₋₁ₖ₋₁,
-    Aᵢ₊₁ⱼ₋₁ₖ₋₁,
-    Aᵢ₋₁ⱼₖ₋₁,
-    Aᵢⱼₖ₋₁,
-    Aᵢ₊₁ⱼₖ₋₁,
-    Aᵢ₋₁ⱼ₊₁ₖ₋₁,
-    Aᵢⱼ₊₁ₖ₋₁,
-    Aᵢ₊₁ⱼ₊₁ₖ₋₁,
-    Aᵢ₋₁ⱼ₋₁ₖ,
-    Aᵢⱼ₋₁ₖ,
-    Aᵢ₊₁ⱼ₋₁ₖ,
-    Aᵢ₋₁ⱼₖ,
-    Aᵢⱼₖ,
-    Aᵢ₊₁ⱼₖ,
-    Aᵢ₋₁ⱼ₊₁ₖ,
-    Aᵢⱼ₊₁ₖ,
-    Aᵢ₊₁ⱼ₊₁ₖ,
-    Aᵢ₋₁ⱼ₋₁ₖ₊₁,
-    Aᵢⱼ₋₁ₖ₊₁,
-    Aᵢ₊₁ⱼ₋₁ₖ₊₁,
-    Aᵢ₋₁ⱼₖ₊₁,
-    Aᵢⱼₖ₊₁,
-    Aᵢ₊₁ⱼₖ₊₁,
-    Aᵢ₋₁ⱼ₊₁ₖ₊₁,
-    Aᵢⱼ₊₁ₖ₊₁,
-    Aᵢ₊₁ⱼ₊₁ₖ₊₁,
-  )
-  rhs_coeff = zero(T)
-  return A_coeffs, rhs_coeff
-end
-
-function bc_coeffs(bc::DirichletBC, ::CartesianIndex{1}, loc, T)
-  A_coeffs = SVector{9,T}(0, 1, 0)
-  rhs_coeff = bc.val
-  return A_coeffs, rhs_coeff
-end
-
-function bc_coeffs(bc::DirichletBC, ::CartesianIndex{2}, loc, T)
-  A_coeffs = SVector{9,T}(0, 0, 0, 0, 1, 0, 0, 0, 0)
-  rhs_coeff = bc.val
-  return A_coeffs, rhs_coeff
-end
-
-function bc_coeffs(bc::DirichletBC, ::CartesianIndex{3}, loc, T)
-  A_coeffs = SVector{27,T}(
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  )
-  rhs_coeff = bc.val
-  return A_coeffs, rhs_coeff
-end
+bc_rhs_coefficient(::NeumannBC, ::CartesianIndex, T) = zero(T)
+bc_rhs_coefficient(bc::DirichletBC, ::CartesianIndex, T) = bc.val
