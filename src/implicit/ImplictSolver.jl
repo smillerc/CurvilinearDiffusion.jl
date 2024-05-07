@@ -1,26 +1,20 @@
 module ImplicitSchemeType
 
-using .Threads
+using CartesianDomains
 using CurvilinearGrids
 using ILUZero
+using IncompleteLU
 using KernelAbstractions
 using Krylov
 using KrylovPreconditioners
 using LinearAlgebra
-using LinearOperators
 using LinearSolve
-using OffsetArrays
+using Printf
 using SparseArrays
+using SparseMatricesCSR
 using StaticArrays
 using TimerOutputs
 using UnPack
-using Printf
-using SparseMatricesCSR
-using BandedMatrices
-using IncompleteLU
-using CUDA
-using CUDSS
-using CUDA.CUSPARSE: CuSparseMatrixCSR
 
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!
@@ -44,7 +38,7 @@ function warmup!(scheme::ImplicitScheme)
 end
 
 include("../averaging.jl")
-# include("../edge_terms.jl")
+include("../edge_terms.jl")
 include("matrix_assembly.jl")
 include("init_matrix.jl")
 
