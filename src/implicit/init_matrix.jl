@@ -5,17 +5,24 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
   nhalo = 1
   ninner = (m - 2nhalo) * (n - 2nhalo)
 
+  if (bcs.ilo isa PeriodicBC && !(bcs.ihi isa PeriodicBC)) ||
+    (bcs.ihi isa PeriodicBC && !(bcs.ilo isa PeriodicBC)) ||
+    (bcs.jlo isa PeriodicBC && !(bcs.jhi isa PeriodicBC)) ||
+    (bcs.jhi isa PeriodicBC && !(bcs.jlo isa PeriodicBC))
+    error("Inconsistent periodic boundary conditions")
+  end
+
   # 2 coeffs per boundary loc
-  ilo = (m - 2nhalo) * (bcs.ilo isa NeumannBC)
-  ihi = (m - 2nhalo) * (bcs.ihi isa NeumannBC)
-  jlo = (n - 2nhalo) * (bcs.jlo isa NeumannBC)
-  jhi = (n - 2nhalo) * (bcs.jhi isa NeumannBC)
+  n_ilo = (m - 2nhalo) * (bcs.ilo isa NeumannBC || bcs.ilo isa PeriodicBC)
+  n_ihi = (m - 2nhalo) * (bcs.ihi isa NeumannBC || bcs.ihi isa PeriodicBC)
+  n_jlo = (n - 2nhalo) * (bcs.jlo isa NeumannBC || bcs.jlo isa PeriodicBC)
+  n_jhi = (n - 2nhalo) * (bcs.jhi isa NeumannBC || bcs.jhi isa PeriodicBC)
 
   # 8 coeffs per inner loc (not including the main diagonal)
   inner = ninner * 8
   diag = m * n
 
-  nzvals = (ihi + ilo + jlo + jhi + diag + inner)
+  nzvals = (n_ihi + n_ilo + n_jlo + n_jhi + diag + inner)
 
   rows = zeros(Int, nzvals)
   cols = zeros(Int, nzvals)
@@ -24,6 +31,10 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
   k = 0
   CI = CartesianIndices((m, n))
   LI = LinearIndices(CI)
+
+  ilo = jlo = 1
+  ihi = m
+  jhi = n
 
   # main-diagonal
   for idx in CI
@@ -52,8 +63,12 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
     end
   end
 
-  if ilo > 0
-    ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
+  ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
+  ihi_CI = @view CI[end, (begin + 1):(end - 1)]
+  jlo_CI = @view CI[(begin + 1):(end - 1), begin]
+  jhi_CI = @view CI[(begin + 1):(end - 1), end]
+
+  if bcs.ilo isa NeumannBC
     for idx in ilo_CI
       k += 1
       i, j = idx.I
@@ -64,10 +79,20 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
       cols[k] = col
       vals[k] = -1
     end
+  elseif bcs.ilo isa PeriodicBC
+    for idx in ilo_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[ihi - 1, j]
+
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
 
-  if ihi > 0
-    ihi_CI = @view CI[end, (begin + 1):(end - 1)]
+  if bcs.ihi isa NeumannBC
     for idx in ihi_CI
       k += 1
       i, j = idx.I
@@ -78,10 +103,20 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
       cols[k] = col
       vals[k] = -1
     end
+  elseif bcs.ihi isa PeriodicBC
+    for idx in ihi_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[ilo + 1, j]
+
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
 
-  if jlo > 0
-    jlo_CI = @view CI[(begin + 1):(end - 1), begin]
+  if bcs.jlo isa NeumannBC
     for idx in jlo_CI
       k += 1
       i, j = idx.I
@@ -92,14 +127,36 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
       cols[k] = col
       vals[k] = -1
     end
+  elseif bcs.jlo isa PeriodicBC
+    for idx in jlo_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i, jhi - 1]
+
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
   end
-  if jhi > 0
-    jhi_CI = @view CI[(begin + 1):(end - 1), end]
+
+  if bcs.jhi isa NeumannBC
     for idx in jhi_CI
       k += 1
       i, j = idx.I
       row = LI[idx]
       col = LI[i, j - 1]
+
+      rows[k] = row
+      cols[k] = col
+      vals[k] = -1
+    end
+  elseif bcs.jhi isa PeriodicBC
+    for idx in jhi_CI
+      k += 1
+      i, j = idx.I
+      row = LI[idx]
+      col = LI[i, jlo + 1]
 
       rows[k] = row
       cols[k] = col
@@ -117,19 +174,39 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
   nhalo = 1
   ninner = (ni - 2nhalo) * (nj - 2nhalo) * (nk - 2nhalo)
 
+  ilo = jlo = klo = 1
+  ihi = ni
+  jhi = nj
+  khi = nk
+
+  if (bcs.ilo isa PeriodicBC && !(bcs.ihi isa PeriodicBC)) ||
+    (bcs.ihi isa PeriodicBC && !(bcs.ilo isa PeriodicBC)) ||
+    (bcs.jlo isa PeriodicBC && !(bcs.jhi isa PeriodicBC)) ||
+    (bcs.jhi isa PeriodicBC && !(bcs.jlo isa PeriodicBC))
+    (bcs.klo isa PeriodicBC && !(bcs.khi isa PeriodicBC)) ||
+      (bcs.khi isa PeriodicBC && !(bcs.klo isa PeriodicBC))
+    error("Inconsistent periodic boundary conditions")
+  end
+
   # 2 coeffs per boundary loc
-  ilo = ((nj - 2nhalo) * (nk - 2nhalo)) * (bcs.ilo isa NeumannBC)
-  ihi = ((nj - 2nhalo) * (nk - 2nhalo)) * (bcs.ihi isa NeumannBC)
-  jlo = ((ni - 2nhalo) * (nk - 2nhalo)) * (bcs.jlo isa NeumannBC)
-  jhi = ((ni - 2nhalo) * (nk - 2nhalo)) * (bcs.jhi isa NeumannBC)
-  klo = ((ni - 2nhalo) * (nj - 2nhalo)) * (bcs.klo isa NeumannBC)
-  khi = ((ni - 2nhalo) * (nj - 2nhalo)) * (bcs.khi isa NeumannBC)
+  n_ilo =
+    ((nj - 2nhalo) * (nk - 2nhalo)) * (bcs.ilo isa NeumannBC || bcs.ilo isa PeriodicBC)
+  n_ihi =
+    ((nj - 2nhalo) * (nk - 2nhalo)) * (bcs.ihi isa NeumannBC || bcs.ihi isa PeriodicBC)
+  n_jlo =
+    ((ni - 2nhalo) * (nk - 2nhalo)) * (bcs.jlo isa NeumannBC || bcs.jlo isa PeriodicBC)
+  n_jhi =
+    ((ni - 2nhalo) * (nk - 2nhalo)) * (bcs.jhi isa NeumannBC || bcs.jhi isa PeriodicBC)
+  n_klo =
+    ((ni - 2nhalo) * (nj - 2nhalo)) * (bcs.klo isa NeumannBC || bcs.klo isa PeriodicBC)
+  n_khi =
+    ((ni - 2nhalo) * (nj - 2nhalo)) * (bcs.khi isa NeumannBC || bcs.khi isa PeriodicBC)
 
   # 26 coeffs per inner loc (not including the main diagonal)
   inner = ninner * 26
   diag = ni * nj * nk
 
-  nzvals = (ihi + ilo + jlo + jhi + klo + khi + diag + inner)
+  nzvals = (n_ihi + n_ilo + n_jlo + n_jhi + n_klo + n_khi + diag + inner)
 
   rows = zeros(Int, nzvals)
   cols = zeros(Int, nzvals)
@@ -167,8 +244,14 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
     end
   end
 
-  if ilo > 0
-    ilo_CI = @view CI[begin, (begin + 1):(end - 1), (begin + 1):(end - 1)]
+  ilo_CI = @view CI[begin, (begin + 1):(end - 1), (begin + 1):(end - 1)]
+  ihi_CI = @view CI[end, (begin + 1):(end - 1), (begin + 1):(end - 1)]
+  jlo_CI = @view CI[(begin + 1):(end - 1), begin, (begin + 1):(end - 1)]
+  jhi_CI = @view CI[(begin + 1):(end - 1), end, (begin + 1):(end - 1)]
+  klo_CI = @view CI[(begin + 1):(end - 1), (begin + 1):(end - 1), begin]
+  khi_CI = @view CI[(begin + 1):(end - 1), (begin + 1):(end - 1), end]
+
+  if bcs.ilo isa NeumannBC
     for idx in ilo_CI
       z += 1
       i, j, k = idx.I
@@ -179,10 +262,20 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
       cols[z] = col
       vals[z] = -1
     end
+  elseif bcs.ilo isa PeriodicBC
+    for idx in ilo_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[ihi - 1, j, k]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
   end
 
-  if ihi > 0
-    ihi_CI = @view CI[end, (begin + 1):(end - 1), (begin + 1):(end - 1)]
+  if bcs.ihi isa NeumannBC
     for idx in ihi_CI
       z += 1
       i, j, k = idx.I
@@ -193,10 +286,20 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
       cols[z] = col
       vals[z] = -1
     end
+  elseif bcs.ihi isa PeriodicBC
+    for idx in ihi_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[ilo + 1, j, k]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
   end
 
-  if jlo > 0
-    jlo_CI = @view CI[(begin + 1):(end - 1), begin, (begin + 1):(end - 1)]
+  if bcs.jlo isa NeumannBC
     for idx in jlo_CI
       z += 1
       i, j, k = idx.I
@@ -207,10 +310,20 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
       cols[z] = col
       vals[z] = -1
     end
+  elseif bcs.jlo isa PeriodicBC
+    for idx in jlo_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[i, jhi - 1, k]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
   end
 
-  if jhi > 0
-    jhi_CI = @view CI[(begin + 1):(end - 1), end, (begin + 1):(end - 1)]
+  if bcs.jhi isa NeumannBC
     for idx in jhi_CI
       z += 1
       i, j, k = idx.I
@@ -221,10 +334,20 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
       cols[z] = col
       vals[z] = -1
     end
+  elseif bcs.jhi isa PeriodicBC
+    for idx in jhi_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[i, jlo + 1, k]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
   end
 
-  if klo > 0
-    klo_CI = @view CI[(begin + 1):(end - 1), (begin + 1):(end - 1), begin]
+  if bcs.klo isa NeumannBC
     for idx in klo_CI
       z += 1
       i, j, k = idx.I
@@ -235,15 +358,36 @@ function _initialize_coefficent_matrix(dims::NTuple{3,Int}, bcs)
       cols[z] = col
       vals[z] = -1
     end
+  elseif bcs.klo isa PeriodicBC
+    for idx in klo_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[i, j, khi - 1]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
   end
 
-  if khi > 0
-    khi_CI = @view CI[(begin + 1):(end - 1), (begin + 1):(end - 1), end]
+  if bcs.khi isa NeumannBC
     for idx in khi_CI
       z += 1
       i, j, k = idx.I
       row = LI[idx]
       col = LI[i, j, k - 1]
+
+      rows[z] = row
+      cols[z] = col
+      vals[z] = -1
+    end
+  elseif bcs.khi isa PeriodicBC
+    for idx in khi_CI
+      z += 1
+      i, j, k = idx.I
+      row = LI[idx]
+      col = LI[i, j, klo + 1]
 
       rows[z] = row
       cols[z] = col
