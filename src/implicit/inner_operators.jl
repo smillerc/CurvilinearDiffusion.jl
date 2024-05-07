@@ -42,7 +42,7 @@ const offsets3d = (
 #  
 # ---------------------------------------------------------------------------
 
-@kernel function full_diffusion_op_2d!(
+@kernel function _assembly_kernel_2d(
   A::SparseMatrixCSC{T,Ti},
   b::AbstractVector{T},
   source_term::AbstractArray{T,N},
@@ -56,12 +56,8 @@ const offsets3d = (
   matrix_indices,
   limits,
   mean_func::F,
-  stencil_col_lookup,
   bcs,
 ) where {T,Ti,N,F<:Function}
-
-  #
-  _, ncols = size(A)
 
   # These are the indicies corresponding to the edge
   # of the diffusion problem
@@ -69,25 +65,13 @@ const offsets3d = (
 
   idx = @index(Global, Linear)
 
-  begin
+  @inbounds begin
     row = matrix_indices[idx]
     mesh_idx = mesh_indices[idx]
     diff_idx = diffusion_prob_indices[idx]
     i, j = diff_idx.I
 
     onbc = i == ilo || i == ihi || j == jlo || j == jhi
-
-    cols = (
-      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₋₁), # colᵢ₋₁ⱼ₋₁
-      row + first(stencil_col_lookup.ᵢⱼ₋₁),   # colᵢⱼ₋₁
-      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₋₁), # colᵢ₊₁ⱼ₋₁
-      row + first(stencil_col_lookup.ᵢ₋₁ⱼ),   # colᵢ₋₁ⱼ
-      row + first(stencil_col_lookup.ᵢⱼ),     # colᵢⱼ
-      row + first(stencil_col_lookup.ᵢ₊₁ⱼ),   # colᵢ₊₁ⱼ
-      row + first(stencil_col_lookup.ᵢ₋₁ⱼ₊₁), # colᵢ₋₁ⱼ₊₁
-      row + first(stencil_col_lookup.ᵢⱼ₊₁),   # colᵢⱼ₊₁
-      row + first(stencil_col_lookup.ᵢ₊₁ⱼ₊₁), # colᵢ₊₁ⱼ₊₁
-    )
 
     if !onbc
       J = cell_center_jacobian[mesh_idx]
@@ -96,25 +80,22 @@ const offsets3d = (
 
       rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
 
-      for (i, col) in enumerate(cols)
-        A[row, col] = A_coeffs[i]
-      end
-    else
-      A_coeffs, rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
+      @inbounds for icol in 1:9
+        ij = diff_idx.I .+ offsets2d[icol]
+        col = matrix_indices[ij...]
 
-      for (i, col) in enumerate(cols)
-        if 1 <= col <= ncols
-          A[row, col] = A_coeffs[i]
-        end
+        A[row, col] = A_coeffs[icol]
       end
+
+    else
+      rhs_coeff = bc_operator(bcs, diff_idx, limits, T)
     end
 
-    # @show row, mesh_idx, diff_idx, A_coeffs, rhs_coeff, onbc
     b[row] = rhs_coeff
   end
 end
 
-@kernel function full_diffusion_op_3d!(
+@kernel function _assembly_kernel_3d(
   A::SparseMatrixCSC{T,Ti},
   b::AbstractVector{T},
   source_term::AbstractArray{T,N},
@@ -137,7 +118,7 @@ end
 
   idx = @index(Global, Linear)
 
-  begin
+  @inbounds begin
     row = matrix_indices[idx]
     mesh_idx = mesh_indices[idx]
     diff_idx = diffusion_prob_indices[idx]

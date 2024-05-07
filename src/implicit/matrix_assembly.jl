@@ -9,7 +9,8 @@ function assemble!(
   backend = scheme.backend
   workgroup = (64,)
 
-  full_diffusion_op_2d!(backend, workgroup)(
+  nrows = length(scheme.iterators.full.cartesian)
+  _assembly_kernel_2d(backend, workgroup)(
     A,
     scheme.b,
     scheme.source_term,
@@ -23,9 +24,8 @@ function assemble!(
     scheme.iterators.full.linear,
     scheme.limits,
     scheme.mean_func,
-    scheme.stencil_col_lookup,
     scheme.bcs;
-    ndrange=length(scheme.iterators.full.cartesian),
+    ndrange=nrows,
   )
 
   KernelAbstractions.synchronize(backend)
@@ -40,7 +40,7 @@ function assemble!(
   workgroup = (64,)
 
   nrows = length(scheme.iterators.full.cartesian)
-  full_diffusion_op_3d!(backend, workgroup)(
+  _assembly_kernel_3d(backend, workgroup)(
     A,
     scheme.b,
     scheme.source_term,
