@@ -148,8 +148,8 @@ function applybc!(::PeriodicBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc:
     if loc == ILO_BC_LOC #|| loc == IHI_BC_LOC
       u[ilo - 1] = u[ihi]
       u[ihi + 1] = u[ilo]
-    else
-      error("Bad 1d boundary location value $(loc), must be 1 or 2")
+      # else
+      #   error("Bad 1d boundary location value $(loc), must be 1 or 2")
     end
   end
 end
@@ -167,8 +167,8 @@ function applybc!(::PeriodicBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::
     elseif loc == JLO_BC_LOC # || loc == JHI_BC_LOC
       copy!(u[ilo:ihi, jlo - 1], u[ilo:ihi, jhi])
       copy!(u[ilo:ihi, jhi + 1], u[ilo:ihi, jlo])
-    else
-      error("Bad 2d boundary location value $(loc), must be 1-4")
+      # else
+      #   error("Bad 2d boundary location value $(loc), must be 1-4")
     end
   end
 end
@@ -189,8 +189,8 @@ function applybc!(::PeriodicBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::
     elseif loc == KLO_BC_LOC # || loc == KHI_BC_LOC
       copy!(u[ilo:ihi, jlo:jhi, klo - 1], u[ilo:ihi, jlo:jhi, khi])
       copy!(u[ilo:ihi, jlo:jhi, khi + 1], u[ilo:ihi, jlo:jhi, klo])
-    else
-      error("Bad 3d boundary location value $(loc), must be 1-6")
+      # else
+      #   error("Bad 3d boundary location value $(loc), must be 1-6")
     end
   end
 end
