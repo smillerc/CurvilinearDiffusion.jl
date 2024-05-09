@@ -201,7 +201,7 @@ function solve!(
     end
 
     if show_hist
-      @printf "\t Krylov stats: L₂norm: %.1e, iterations: %i\n" L₂norm niter
+      @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
     end
 
     return L₂norm, niter, true # issolved(scheme.linear_problem)
