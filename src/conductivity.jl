@@ -62,6 +62,6 @@ end
   idx = @index(Global)
 
   @inbounds begin
-    α[idx] = κ(density[idx], temperature[idx]) / (density[idx] * cₚ)
+    α[idx] = abs(κ(density[idx], temperature[idx]) / (density[idx] * cₚ))
   end
 end

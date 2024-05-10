@@ -17,7 +17,7 @@ using TimerOutputs
 using UnPack
 
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
-export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!
+export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
 struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L}
   linear_problem::ST # linear solver, e.g. GMRES, CG, etc.
@@ -242,6 +242,51 @@ end
     _a = cutoff(a[idx])
     a[idx] = _a
   end
+end
+
+function check_diffusivity_validity(scheme)
+  @kernel function _kernel(α, corners)
+    idx = @index(Global, Cartesian)
+
+    @inbounds begin
+      if !isfinite(α[idx]) || α[idx] <= 0
+        if !in(idx, corners)
+          error("Invalid diffusivity α=$(α[idx]) at $idx")
+        end
+      end
+    end
+  end
+
+  corners = domain_corners(scheme.iterators.full.cartesian)
+  _kernel(scheme.backend)(scheme.α, corners; ndrange=size(scheme.α))
+  return nothing
+end
+
+function domain_corners(::CartesianIndices{1})
+  return (nothing,)
+end
+
+function domain_corners(CI::CartesianIndices{2})
+  @views begin
+    corners = (CI[begin, begin], CI[begin, end], CI[end, begin], CI[end, end])
+  end
+  return corners
+end
+
+function domain_corners(CI::CartesianIndices{3})
+  @views begin
+    corners = (
+      CI[begin, begin, begin],
+      CI[end, begin, begin],
+      CI[begin, end, begin],
+      CI[end, end, begin],
+      CI[begin, begin, end],
+      CI[end, begin, end],
+      CI[begin, end, end],
+      CI[end, end, end],
+    )
+  end
+  return corners
 end
 
 end
