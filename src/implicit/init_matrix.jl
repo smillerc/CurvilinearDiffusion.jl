@@ -1,9 +1,9 @@
 
 function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
-  m, n = dims
+  ni, nj = dims
 
   nhalo = 1
-  ninner = (m - 2nhalo) * (n - 2nhalo)
+  ninner = (ni - 2nhalo) * (nj - 2nhalo)
 
   if (bcs.ilo isa PeriodicBC && !(bcs.ihi isa PeriodicBC)) ||
     (bcs.ihi isa PeriodicBC && !(bcs.ilo isa PeriodicBC)) ||
@@ -13,14 +13,16 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
   end
 
   # 2 coeffs per boundary loc
-  n_ilo = (m - 2nhalo) * (bcs.ilo isa NeumannBC || bcs.ilo isa PeriodicBC)
-  n_ihi = (m - 2nhalo) * (bcs.ihi isa NeumannBC || bcs.ihi isa PeriodicBC)
-  n_jlo = (n - 2nhalo) * (bcs.jlo isa NeumannBC || bcs.jlo isa PeriodicBC)
-  n_jhi = (n - 2nhalo) * (bcs.jhi isa NeumannBC || bcs.jhi isa PeriodicBC)
+  # NeumannBC and PeriodicBC need one 1 off-diagonal entry (in addition to the diagonal)
+  # to impose the boundary condition. DirichletBC does not need any extra
+  n_ilo = (nj - 2nhalo) * (bcs.ilo isa NeumannBC || bcs.ilo isa PeriodicBC)
+  n_ihi = (nj - 2nhalo) * (bcs.ihi isa NeumannBC || bcs.ihi isa PeriodicBC)
+  n_jlo = (ni - 2nhalo) * (bcs.jlo isa NeumannBC || bcs.jlo isa PeriodicBC)
+  n_jhi = (ni - 2nhalo) * (bcs.jhi isa NeumannBC || bcs.jhi isa PeriodicBC)
 
   # 8 coeffs per inner loc (not including the main diagonal)
   inner = ninner * 8
-  diag = m * n
+  diag = ni * nj
 
   nzvals = (n_ihi + n_ilo + n_jlo + n_jhi + diag + inner)
 
@@ -29,12 +31,12 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
   vals = zeros(nzvals)
 
   k = 0
-  CI = CartesianIndices((m, n))
+  CI = CartesianIndices((ni, nj))
   LI = LinearIndices(CI)
 
   ilo = jlo = 1
-  ihi = m
-  jhi = n
+  ihi = ni
+  jhi = nj
 
   # main-diagonal
   for idx in CI
@@ -63,10 +65,10 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
     end
   end
 
-  ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
-  ihi_CI = @view CI[end, (begin + 1):(end - 1)]
   jlo_CI = @view CI[(begin + 1):(end - 1), begin]
   jhi_CI = @view CI[(begin + 1):(end - 1), end]
+  ilo_CI = @view CI[begin, (begin + 1):(end - 1)]
+  ihi_CI = @view CI[end, (begin + 1):(end - 1)]
 
   if bcs.ilo isa NeumannBC
     for idx in ilo_CI
@@ -164,7 +166,7 @@ function _initialize_coefficent_matrix(dims::NTuple{2,Int}, bcs)
     end
   end
 
-  A = sparse(rows, cols, vals)
+  A = sparse(rows[1:k], cols[1:k], vals[1:k])
 
   return A
 end
