@@ -43,10 +43,22 @@ include("matrix_assembly.jl")
 include("init_matrix.jl")
 
 function ImplicitScheme(
-  mesh, bcs; direct_solve=false, mean_func=arithmetic_mean, T=Float64, backend=CPU()
+  mesh,
+  bcs;
+  direct_solve=false,
+  face_conductivity::Symbol=:harmonic,
+  T=Float64,
+  backend=CPU(),
 )
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
+  if face_conductivity === :harmonic
+    mean_func = harmonic_mean
+    @info "Using harmonic mean for face conductivity averaging"
+  else
+    @info "Using arithmetic mean for face conductivity averaging"
+    mean_func = arithmetic_mean
+  end
   # The diffusion solver is currently set to use only 1 halo cell
   nhalo = 1
 
@@ -162,6 +174,7 @@ function solve!(
   rtol::T=√eps(T),
   maxiter=200,
   show_hist=true,
+  cutoff=true,
 ) where {N,T}
   #
 
@@ -185,7 +198,9 @@ function solve!(
     @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
   end
 
-  cutoff!(scheme.linear_problem.u)
+  if cutoff
+    cutoff!(scheme.linear_problem.u)
+  end
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
   if !scheme.direct_solve
@@ -249,7 +264,7 @@ function check_diffusivity_validity(scheme)
     idx = @index(Global, Cartesian)
 
     @inbounds begin
-      if !isfinite(α[idx]) || α[idx] <= 0
+      if !isfinite(α[idx]) || α[idx] < 0
         if !in(idx, corners)
           error("Invalid diffusivity α=$(α[idx]) at $idx")
         end
