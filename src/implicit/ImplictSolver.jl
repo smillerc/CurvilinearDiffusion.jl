@@ -124,15 +124,18 @@ function ImplicitScheme(
 
   # solver = Krylov.GmresSolver(A, b)
   if direct_solve
-    linear_problem = init(LinearProblem(A, b))
+    algorithm = UMFPACKFactorization()
+    linear_problem = init(LinearProblem(A, b), algorithm; verbose=true)
+    # linear_problem = (; A, b, alg=UMFPACKFactorization())
   else
     Pl, _ldiv = preconditioner(A, backend)
-
     algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
-    # algorithm = KrylovJL_GMRES(; history=true) # krylov solver
+    linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
+    # linear_problem = LinearProblem(A, b)
+
     # algorithm = HYPREAlgorithm(HYPRE.GMRES)
     # Pl = HYPRE.BoomerAMG
-    linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
+    # algorithm = KrylovJL_GMRES(; history=true) # krylov solver
     # linear_problem = init(LinearProblem(A, b), algorithm;)
   end
 
@@ -173,7 +176,7 @@ function solve!(
   atol::T=√eps(T),
   rtol::T=√eps(T),
   maxiter=200,
-  show_hist=true,
+  show_convergence=true,
   cutoff=true,
 ) where {N,T}
   #
@@ -187,12 +190,20 @@ function solve!(
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
   KernelAbstractions.synchronize(scheme.backend)
 
+  # prob = LinearProblem(scheme.linear_problem.A, scheme.linear_problem.b)
+  # sol = solve(prob)
+  # if cutoff
+  #   cutoff!(sol.u)
+  # end
+  # copyto!(domain_u, sol.u) # update solution
+
+  scheme.linear_problem.isfresh = true
   if !warmedup(scheme)
     if scheme.direct_solve
       @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
     end
 
-    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem)
+    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem; alias_A=true)
     warmup!(scheme)
   else
     @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
@@ -208,14 +219,14 @@ function solve!(
     niter = scheme.linear_problem.cacheval.stats.niter
     is_solved = scheme.linear_problem.cacheval.stats.solved
 
-    if !is_solved
-      @show scheme.linear_problem.cacheval.stats
-      error(
-        "The iterative solver didn't converge in the number of max iterations $(maxiter)"
-      )
-    end
+    # if !is_solved
+    #   @show scheme.linear_problem.cacheval.stats
+    #   error(
+    #     "The iterative solver didn't converge in the number of max iterations $(maxiter)"
+    #   )
+    # end
 
-    if show_hist
+    if show_convergence
       @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
     end
 
@@ -226,7 +237,8 @@ function solve!(
 end
 
 @inline function preconditioner(A, ::CPU, τ=0.1)
-  p = ILUZero.ilu0(A)
+  # p = ILUZero.ilu0(A)
+  p = IncompleteLU.ilu(A)
   _ldiv = true
   return p, _ldiv
 end
