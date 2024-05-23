@@ -69,6 +69,7 @@ end
 
   A = CurvilinearDiffusion.ImplicitSchemeType._initialize_coefficent_matrix(dims, bcs)
 
+  m = dims[1]
   inner_col = LI[3, 3, 3]
   ilo_col = LI[1, 4, 4]
   ilo_p1_col = LI[2, 4, 4]
