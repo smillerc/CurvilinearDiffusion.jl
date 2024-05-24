@@ -1,7 +1,7 @@
 name = "CurvilinearDiffusion"
 uuid = "333fb37a-136e-4126-b86d-b2955542da26"
 authors = ["Sam Miller <smil@lle.rochester.edu> and contributors"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
@@ -30,7 +30,7 @@ CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CurvilinearDiffusionCUDAExt = "CUDA"
 
 [compat]
-julia = "1.6"
+julia = "1.9"
 
 [extras]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
