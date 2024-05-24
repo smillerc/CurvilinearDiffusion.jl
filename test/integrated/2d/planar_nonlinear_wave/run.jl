@@ -54,7 +54,11 @@ function init_state()
     jhi=NeumannBC(),  #
   )
   solver = ImplicitScheme(
-    mesh, bcs; backend=backend, direct_solve=false, face_conductivity=:arithmetic
+    mesh,
+    bcs;
+    backend=backend,
+    direct_solve=false, # either UMFPACKFactorization (direct) or Kyrlov (iterative) 
+    face_conductivity=:arithmetic, # :harmonic won't work for T=0
   )
 
   # Temperature and density
@@ -92,7 +96,9 @@ function run(maxt, maxiter=Inf)
       break
     end
 
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false)
+    nonlinear_thermal_conduction_step!(
+      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false, apply_density_bc=false
+    )
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
@@ -130,14 +136,14 @@ begin
 
   front_pos = [0.870571]
 
-  xfront = 0.0
+  global xfront = 0.0
   for i in reverse(eachindex(T1d))
     if T1d[i] > 1e-10
-      xfront = x[i]
+      global xfront = x[i]
       break
     end
   end
-  xfront
+
   f = plot(
     x,
     T1d;
