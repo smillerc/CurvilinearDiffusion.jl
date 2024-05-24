@@ -122,21 +122,13 @@ function ImplicitScheme(
   diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
-  # solver = Krylov.GmresSolver(A, b)
   if direct_solve
-    algorithm = UMFPACKFactorization()
-    linear_problem = init(LinearProblem(A, b), algorithm; verbose=true)
-    # linear_problem = (; A, b, alg=UMFPACKFactorization())
+    algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
+    linear_problem = init(LinearProblem(A, b), algorithm)
   else
     Pl, _ldiv = preconditioner(A, backend)
     algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
     linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
-    # linear_problem = LinearProblem(A, b)
-
-    # algorithm = HYPREAlgorithm(HYPRE.GMRES)
-    # Pl = HYPRE.BoomerAMG
-    # algorithm = KrylovJL_GMRES(; history=true) # krylov solver
-    # linear_problem = init(LinearProblem(A, b), algorithm;)
   end
 
   implicit_solver = ImplicitScheme(
@@ -173,11 +165,9 @@ function solve!(
   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
   u,
   Δt;
-  atol::T=√eps(T),
-  rtol::T=√eps(T),
-  maxiter=200,
   show_convergence=true,
   cutoff=true,
+  kwargs...,
 ) where {N,T}
   #
 
@@ -190,55 +180,54 @@ function solve!(
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
   KernelAbstractions.synchronize(scheme.backend)
 
-  # prob = LinearProblem(scheme.linear_problem.A, scheme.linear_problem.b)
-  # sol = solve(prob)
-  # if cutoff
-  #   cutoff!(sol.u)
-  # end
-  # copyto!(domain_u, sol.u) # update solution
+  # For the direct solve, we want to re-use the symbolic factorization (sparsity pattern)
+  # but update the A matrix (which we did above via assemble!(...))
+  # Setting isfresh=true will tell the direct solver that the 
+  # A matrix has been changed. For iterative Krylov solvers, we don't need to 
+  # do this
+  if scheme.direct_solve
+    scheme.linear_problem.isfresh = true
+  end
 
-  scheme.linear_problem.isfresh = true
   if !warmedup(scheme)
     if scheme.direct_solve
       @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
     end
 
-    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem; alias_A=true)
+    @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem; kwargs...)
     warmup!(scheme)
   else
-    @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem)
+    @timeit "linear solve (warm)" LinearSolve.solve!(scheme.linear_problem; kwargs...)
   end
 
+  # Apply a cutoff function to remove negative u values
   if cutoff
     cutoff!(scheme.linear_problem.u)
   end
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
   if !scheme.direct_solve
+    if !scheme.linear_problem.cacheval.stats.solved
+      @show scheme.linear_problem.cacheval.stats
+      error("The solver didn't converge")
+    end
+
     L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
     niter = scheme.linear_problem.cacheval.stats.niter
-    is_solved = scheme.linear_problem.cacheval.stats.solved
-
-    # if !is_solved
-    #   @show scheme.linear_problem.cacheval.stats
-    #   error(
-    #     "The iterative solver didn't converge in the number of max iterations $(maxiter)"
-    #   )
-    # end
 
     if show_convergence
       @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
     end
 
-    return L₂norm, niter, true # issolved(scheme.linear_problem)
+    return L₂norm, niter, true
   else
     return -Inf, 1, true
   end
 end
 
 @inline function preconditioner(A, ::CPU, τ=0.1)
-  # p = ILUZero.ilu0(A)
-  p = IncompleteLU.ilu(A)
+  p = ILUZero.ilu0(A)
+  # p = IncompleteLU.ilu(A)
   _ldiv = true
   return p, _ldiv
 end
