@@ -15,6 +15,7 @@ using SparseMatricesCSR
 using StaticArrays
 using TimerOutputs
 using UnPack
+using Pardiso
 
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
@@ -123,7 +124,11 @@ function ImplicitScheme(
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   if direct_solve
-    algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
+    # algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
+    # algorithm = KLUFactorization(; reuse_symbolic=true, check_pattern=true)
+    # algorithm = MKLPardisoFactorize()
+    algorithm = MKLPardisoIterate()
+
     linear_problem = init(LinearProblem(A, b), algorithm)
   else
     Pl, _ldiv = preconditioner(A, backend)
