@@ -12,10 +12,10 @@ update the thermal conductivity of the mesh at each cell-center.
  - `cₚ::Real`: heat capacity at constant pressure
 """
 function update_conductivity!(
-  scheme, temperature, density, cₚ::Real, κ::F
+  scheme, mesh, temperature, density, cₚ::Real, κ::F
 ) where {F<:Function}
   diff_domain = scheme.iterators.full.cartesian
-  domain = scheme.iterators.mesh
+  domain = mesh.iterators.cell.full
 
   α = @view scheme.α[diff_domain]
   T = @view temperature[domain]
@@ -28,10 +28,10 @@ function update_conductivity!(
 end
 
 function update_conductivity!(
-  scheme, temperature, density, cₚ::AbstractArray, κ::F
+  scheme, mesh, temperature, density, cₚ::AbstractArray, κ::F
 ) where {F<:Function}
   diff_domain = scheme.iterators.full.cartesian
-  domain = scheme.iterators.mesh
+  domain = mesh.iterators.cell.full
 
   α = @view scheme.α[diff_domain]
   T = @view temperature[domain]

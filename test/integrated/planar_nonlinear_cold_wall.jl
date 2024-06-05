@@ -1,4 +1,5 @@
 using CurvilinearGrids, CurvilinearDiffusion
+using Glob
 using WriteVTK, Printf
 
 # ------------------------------------------------------------
@@ -19,19 +20,11 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
   @info "Writing to $fn"
   ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
-  α = @views solver.aⁿ⁺¹[ilo:ihi, jlo:jhi]
+  α = @views solver.α[ilo:ihi, jlo:jhi]
   dens = @views ρ[ilo:ihi, jlo:jhi]
   temp = @views T[ilo:ihi, jlo:jhi]
 
   kappa = α .* dens
-
-  # ξx = [m.ξx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxim1 = [m.ξxᵢ₋½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξxip1 = [m.ξxᵢ₊½ for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ξy = [m.ξy for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηx = [m.ηx for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # ηy = [m.ηy for m in solver.metrics[ilo:ihi, jlo:jhi]]
-  # J = [m.J for m in solver.metrics[ilo:ihi, jlo:jhi]]
 
   xy_n = CurvilinearGrids.coords(mesh)
   vtk_grid(fn, xy_n) do vtk
@@ -40,14 +33,6 @@ function save_vtk(solver, ρ, T, mesh, iteration, t, name, pvd)
     vtk["temperature"] = temp
     vtk["diffusivity"] = α
     vtk["conductivity"] = kappa
-
-    # vtk["xi_xim1"] = ξxim1
-    # vtk["xi_xip1"] = ξxip1
-    # vtk["xi_x"] = ξx
-    # vtk["xi_y"] = ξy
-    # vtk["eta_x"] = ηx
-    # vtk["eta_y"] = ηy
-    # vtk["J"] = @view solver.J[ilo:ihi, jlo:jhi]
 
     pvd[t] = vtk
   end
@@ -110,89 +95,98 @@ function uniform_grid(nx, ny)
   return (x, y)
 end
 
-ni, nj = (41, 41)
-nhalo = 1
-x, y = wavy_grid(ni, nj)
-# x, y = uniform_grid(ni, nj)
-mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+function runme(maxiter)
+  ni, nj = (41, 41)
+  nhalo = 1
+  x, y = wavy_grid(ni, nj)
+  # x, y = uniform_grid(ni, nj)
+  mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 
-# ------------------------------------------------------------
-# Initialization
-# ------------------------------------------------------------
-T0 = 1.0
-bcs = (
-  ilo=(:fixed, T0),
-  ihi=(:fixed, 0.0),
-  # jlo=:zero_flux,
-  # jhi=:zero_flux,
-  jlo=:periodic,
-  jhi=:periodic,
-)
+  # ------------------------------------------------------------
+  # Initialization
+  # ------------------------------------------------------------
+  T0 = 1.0
+  bcs = (
+    ilo=(:fixed, T0),
+    ihi=(:fixed, 0.0),
+    # jlo=:zero_flux,
+    # jhi=:zero_flux,
+    jlo=:periodic,
+    jhi=:periodic,
+  )
 
-solver = ADESolver(mesh, bcs, :conservative)
-CFL = 0.1 # 1/2 is the explicit stability limit
-casename = "nonlinear_coldwall_ad_cons"
-# casename = "nonlinear_coldwall_ad_noncons"
+  solver = ADESolver(mesh, bcs)
+  CFL = 0.1 # 1/2 is the explicit stability limit
+  casename = "nonlinear_coldwall_ad_cons"
+  # casename = "nonlinear_coldwall_ad_noncons"
 
-# Temperature and density
-T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
-ρ = ones(Float64, cellsize_withhalo(mesh))
-cₚ = 1.0
+  # Temperature and density
+  T = ones(Float64, cellsize_withhalo(mesh)) * 1e-5
+  ρ = ones(Float64, cellsize_withhalo(mesh))
+  cₚ = 1.0
 
-# ilo = mesh.domain_limits.cell.ilo
-# T[begin:(ilo - 1), :] .= Tbc
+  # ilo = mesh.domain_limits.cell.ilo
+  # T[begin:(ilo - 1), :] .= Tbc
 
-# Define the conductivity model
-@inline function κ(ρ, T)
-  if !isfinite(T)
-    return 0.0
-  else
-    κ0 = 1.0
-    return κ0 * T^3
+  # Define the conductivity model
+  @inline function κ(ρ, T)
+    if !isfinite(T)
+      return 0.0
+    else
+      κ0 = 1.0
+      return κ0 * T^3
+    end
   end
+
+  # ------------------------------------------------------------
+  # Solve
+  # ------------------------------------------------------------
+
+  global Δt = 1e-4
+  global t = 0.0
+  global maxt = 1.0
+  global iter = 0
+  global io_interval = 0.01
+  global io_next = io_interval
+  pvd = paraview_collection("full_sim")
+  save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+
+  # fill!(solver.aⁿ⁺¹, 10.0)
+  while true
+    CurvilinearDiffusion.update_conductivity!(solver, mesh, T, ρ, cₚ, κ)
+
+    # dt = CurvilinearDiffusion.max_dt(solver, mesh)
+    # global Δt = CFL * dt
+
+    L₂, Linf = CurvilinearDiffusion.ADESolvers.solve!(solver, mesh, T, Δt)
+    @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
+
+    # if iter % io_interval == 0
+    if t + Δt > io_next
+      save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+      global io_next += io_interval
+    end
+
+    if iter >= maxiter
+      break
+    end
+
+    if t >= maxt
+      break
+    end
+
+    global iter += 1
+    global t += Δt
+  end
+
+  save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
+  vtk_save(pvd)
+
+  return solver, mesh
 end
 
-# ------------------------------------------------------------
-# Solve
-# ------------------------------------------------------------
-
-Δt = 1e-4
-t = 0.0
-maxt = 1.0
-iter = 0
-maxiter = 1
-io_interval = 0.01
-io_next = io_interval
-pvd = paraview_collection("full_sim")
-save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
-
-# fill!(solver.aⁿ⁺¹, 10.0)
-while true
-  CurvilinearDiffusion.update_conductivity!(solver, T, ρ, κ, cₚ)
-  # dt = CurvilinearDiffusion.max_dt(solver, mesh)
-  # global Δt = CFL * dt
-
-  L₂, Linf = CurvilinearDiffusion.solve!(solver, mesh, T, Δt)
-  @printf "cycle: %i t: %.4e, L2: %.1e, L∞: %.1e Δt: %.3e\n" iter t L₂ Linf Δt
-
-  # if iter % io_interval == 0
-  if t + Δt > io_next
-    save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-    global io_next += io_interval
-  end
-
-  if iter >= maxiter
-    break
-  end
-
-  if t >= maxt
-    break
-  end
-
-  global iter += 1
-  global t += Δt
+begin
+  rm.(glob("*.vts"))
+  cd(@__DIR__)
+  solver, mesh = runme(10)
 end
-
-save_vtk(solver, ρ, T, mesh, iter, t, casename, pvd)
-vtk_save(pvd);

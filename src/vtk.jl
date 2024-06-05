@@ -16,9 +16,7 @@ function get_filename(iteration, name::String)
   return name * @sprintf("%07i", iteration)
 end
 
-function save_vtk(
-  scheme::ImplicitScheme, u, mesh, iteration=0, t=0.0, name="diffusion", T=Float32
-)
+function save_vtk(scheme, u, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
   fn = get_filename(iteration, name)
   @info "Writing to $fn"
 

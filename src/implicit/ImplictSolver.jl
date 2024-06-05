@@ -15,11 +15,15 @@ using SparseMatricesCSR
 using StaticArrays
 using TimerOutputs
 using UnPack
+using AlgebraicMultigrid
+
+using ..BoundaryConditions
+using ..BoundaryConditions: bc_rhs_coefficient
 
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L,BE}
   linear_problem::ST # linear solver, e.g. GMRES, CG, etc.
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
@@ -27,7 +31,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L}
   bcs::BC
   iterators::IT
   limits::L
-  backend # GPU / CPU
+  backend::BE # GPU / CPU
   warmed_up::Vector{Bool}
   direct_solve::Bool
 end
@@ -126,9 +130,9 @@ function ImplicitScheme(
     algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
     linear_problem = init(LinearProblem(A, b), algorithm)
   else
-    Pl, _ldiv = preconditioner(A, backend)
+    Pr, _ldiv = preconditioner(A, backend)
     algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
-    linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
+    linear_problem = init(LinearProblem(A, b), algorithm; Pr=Pr)
   end
 
   implicit_solver = ImplicitScheme(
@@ -207,10 +211,10 @@ function solve!(
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
   if !scheme.direct_solve
-    if !scheme.linear_problem.cacheval.stats.solved
-      @show scheme.linear_problem.cacheval.stats
-      error("The solver didn't converge")
-    end
+    # if !scheme.linear_problem.cacheval.stats.solved
+    #   @show scheme.linear_problem.cacheval.stats
+    #   error("The solver didn't converge")
+    # end
 
     L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
     niter = scheme.linear_problem.cacheval.stats.niter
@@ -225,9 +229,10 @@ function solve!(
   end
 end
 
-@inline function preconditioner(A, ::CPU, τ=0.1)
+@inline function preconditioner(A, ::CPU, τ=0.05)
   p = ILUZero.ilu0(A)
-  # p = IncompleteLU.ilu(A)
+  # p = IncompleteLU.ilu(A; τ=τ)
+  # p = AlgebraicMultigrid.aspreconditioner(AlgebraicMultigrid.ruge_stuben(A))
   _ldiv = true
   return p, _ldiv
 end

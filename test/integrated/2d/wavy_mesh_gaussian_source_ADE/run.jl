@@ -1,15 +1,16 @@
 using CurvilinearGrids, CurvilinearDiffusion
-using Printf, Adapt
+using WriteVTK, Printf, UnPack, Adapt
+using BlockHaloArrays
 using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-@static if Sys.islinux()
-  using MKL
-elseif Sys.isapple()
-  using AppleAccelerate
-end
+# @static if Sys.islinux()
+#   using MKL
+# elseif Sys.isapple()
+#   using AppleAccelerate
+# end
 
 NMAX = Sys.CPU_THREADS
 BLAS.set_num_threads(NMAX)
@@ -80,23 +81,27 @@ end
 # ------------------------------------------------------------
 function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
-
   bcs = (
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
-    # jhi=DirichletBC(100.0),  #
   )
-  # solver = ImplicitScheme(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
-  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
-  solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+
+  # solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
+  solver = ADESolver(
+    mesh,
+    bcs;
+    backend=backend,
+    face_conductivity=:arithmetic, # :harmonic won't work for T=0
+  )
 
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e2
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = similar(solver.source_term)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -104,18 +109,22 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 # * temperature^3
+      return κ0 * temperature^3
     end
   end
 
+  # Gaussian source term
   fwhm = 0.5
   x0 = 0.0
   y0 = 0.0
-  for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
+  for (idx, midx) in zip(solver.iterators.domain.cartesian, mesh.iterators.cell.domain)
+    x⃗c = centroid(mesh, midx)
 
-    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    source_term[idx] =
+      T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
+
+  copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -124,13 +133,13 @@ end
 # Solve
 # ------------------------------------------------------------
 function run(maxiter=Inf)
-  casename = "wavy_mesh_2d_no_source"
+  casename = "wavy_mesh_2d_with_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
   global Δt = 1e-4
   global t = 0.0
-  global maxt = 0.2
+  global maxt = 1.0
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
@@ -171,6 +180,12 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(500)
+  solver, mesh, temperature = run(Inf)
   nothing
 end
+
+# T_cpu = Array(temperature)
+# using Plots: heatmap
+
+# heatmap(T_cpu)
+# solver, mesh, T, ρ, cₚ, κ = init_state();
