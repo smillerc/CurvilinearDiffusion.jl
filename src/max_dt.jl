@@ -71,13 +71,27 @@ function _max_dt(vx, vy, ξt, ξx, ξy)
 end
 
 function maxxx_dt(uⁿ⁺¹::AbstractArray{T,2}, uⁿ::AbstractArray{T,2}, mesh, CFL, Δt) where {T}
-  denom = -Inf
-  for idx in mesh.iterators.cell.domain
-    denom = max(denom, abs(uⁿ⁺¹[idx] - uⁿ[idx]) / uⁿ⁺¹[idx])
-  end
-  @show denom
+  max_relative_Δu = -Inf
 
-  nextdt = Δt * sqrt()
+  @views begin
+    umax = 0.5maximum(uⁿ[mesh.iterators.cell.domain])
+  end
+
+  ϵ = 0.001
+  for idx in mesh.iterators.cell.domain
+    max_relative_Δu = max(
+      max_relative_Δu, #
+      abs(uⁿ⁺¹[idx] - uⁿ[idx]) / (uⁿ⁺¹[idx] + ϵ * umax),
+    )
+  end
+
+  η_target = 0.05 # 5% change
+
+  Δtⁿ⁺¹ = Δt * sqrt(η_target / max_relative_Δu)
+
+  dt_next = min(Δtⁿ⁺¹, 1.1Δt)
+
+  return dt_next
 end
 
 function max_dt(uⁿ⁺¹::AbstractArray{T,2}, uⁿ::AbstractArray{T,2}, mesh, CFL, Δt) where {T}
