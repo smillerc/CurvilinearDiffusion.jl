@@ -9,11 +9,14 @@ function nonlinear_thermal_conduction_step!(
   κ,
   Δt,
   nsubcycles=1;
-  cutoff=true,
+  enforce_positivity=true,
   show_convergence=true,
   apply_density_bc=true,
   kwargs...,
 )
+  domain = scheme.iterators.domain.cartesian
+  nhalo = 1
+
   for n in 1:nsubcycles
     dt = Δt / n
     @timeit "applybc!" applybcs!(scheme.bcs, mesh, T)
@@ -23,45 +26,68 @@ function nonlinear_thermal_conduction_step!(
     end
 
     @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-    # @timeit "check_diffusivity_validity" check_diffusivity_validity(scheme)
+
+    @timeit "validate_source_term" validate_scalar(
+      scheme.source_term, domain, nhalo, :source_term, enforce_positivity=false
+    )
+    @timeit "validate_diffusivity" validate_scalar(
+      scheme.α, domain, nhalo, :diffusivity, enforce_positivity=true
+    )
     @timeit "solve!" ImplicitSchemeType.solve!(
-      scheme, mesh, T, dt; cutoff=cutoff, show_convergence=show_convergence, kwargs...
+      scheme,
+      mesh,
+      T,
+      dt;
+      cutoff=enforce_positivity,
+      show_convergence=show_convergence,
+      kwargs...,
     )
   end
 end
 
 function nonlinear_thermal_conduction_step!(
-  scheme::AbstractADESolver,
+  solver::AbstractADESolver,
   mesh,
   T,
   ρ,
   cₚ,
   κ,
-  Δt,
-  nsubcycles=1;
-  cutoff=false,
-  show_convergence=true,
-  apply_density_bc=true,
+  Δt;
+  enforce_positivity=false,
+  show_convergence=nothing,
+  apply_bcs=true,
+  CFL=1.0,
   kwargs...,
 )
-  for n in 1:nsubcycles
-    dt = Δt / n
-    # @timeit "applybc!" applybcs!(scheme.bcs, mesh, T)
-    # display(T)
+  domain = solver.iterators.domain.cartesian
+  nhalo = solver.nhalo
 
-    # # if apply_density_bc
-    # @timeit "applybc!" applybcs!(scheme.bcs, mesh, ρ)
-    # display(ρ)
-    # # end
-
-    @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-
-    @timeit "validate_diffusivity" validate_diffusivity(scheme)
-
-    # @views begin
-    #   @show extrema(scheme.α[scheme.iterators.domain.cartesian])
-    # end
-
-    @timeit "solve!" ADESolvers.solve!(scheme, mesh, T, dt; cutoff=cutoff, kwargs...)
+  if apply_bcs
+    @timeit "applybc!" begin
+      applybcs!(solver.bcs, mesh, T)
+      applybcs!(solver.bcs, mesh, ρ)
+    end
   end
+
+  @timeit "update_conductivity!" update_conductivity!(solver, mesh, T, ρ, cₚ, κ)
+
+  @timeit "validate_source_term" validate_scalar(
+    solver.source_term, domain, nhalo, :source_term, enforce_positivity=false
+  )
+  @timeit "validate_diffusivity" validate_scalar(
+    solver.α, domain, nhalo, :diffusivity, enforce_positivity=true
+  )
+
+  @timeit "solve!" begin
+    L2 = ADESolvers.solve!(solver, mesh, T, Δt; cutoff=enforce_positivity, kwargs...)
+  end
+
+  applybcs!(solver.bcs, mesh, T)
+
+  next_dt = max_dt(solver.uⁿ⁺¹, T, mesh, CFL, Δt)
+  maxxx_dt(solver.uⁿ⁺¹, T, mesh, CFL, Δt)
+
+  copy!(T, solver.uⁿ⁺¹) # update the solution
+
+  return next_dt
 end
