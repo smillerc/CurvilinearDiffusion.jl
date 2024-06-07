@@ -178,9 +178,3 @@ begin
   solver, mesh, temperature = run(Inf)
   nothing
 end
-
-# T_cpu = Array(temperature)
-# using Plots: heatmap
-
-# heatmap(T_cpu)
-# solver, mesh, T, ρ, cₚ, κ = init_state();

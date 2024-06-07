@@ -1,102 +1,57 @@
 using CurvilinearGrids, CurvilinearDiffusion
-using Printf, Adapt
+using WriteVTK, Printf, UnPack, Adapt
+using BlockHaloArrays
 using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-@static if Sys.islinux()
-  using MKL
-elseif Sys.isapple()
-  using AppleAccelerate
-end
-
-NMAX = Sys.CPU_THREADS
-BLAS.set_num_threads(NMAX)
-BLAS.get_num_threads()
-
-@show BLAS.get_config()
-
-dev = :CPU
-
-if dev === :GPU
-  @info "Using CUDA"
-  using CUDA
-  using CUDA.CUDAKernels
-  backend = CUDABackend()
-  ArrayT = CuArray
-  # CUDA.allowscalar(false)
-else
-  backend = CPU()
-  ArrayT = Array
-end
-
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj)
-  Lx = 12
-  Ly = 12
-  n_xy = 6
-  n_yx = 6
-
-  xmin = -Lx / 2
-  ymin = -Ly / 2
-
-  Δx0 = Lx / (ni - 1)
-  Δy0 = Ly / (nj - 1)
-
-  Ax = 0.4 / Δx0
-  Ay = 0.8 / Δy0
-  # Ax = 0.2 / Δx0
-  # Ay = 0.4 / Δy0
-
-  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-  return (x, y)
-end
-
-function uniform_grid(nx, ny)
-  x0, x1 = (-6, 6)
-  y0, y1 = (-6, 6)
-
-  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-  return (x, y)
-end
-
 function initialize_mesh()
-  ni, nj = (101, 101)
-  nhalo = 6
-  x, y = wavy_grid(ni, nj)
-  # x, y = uniform_grid(ni, nj)
-  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+  nhalo = 2
+
+  r0, r1 = @. (10.0, 150.0) # min/max radius
+  (θ0, θ1) = deg2rad.((20, 90)) ./ pi # min/max polar angle
+
+  nr, ntheta = 51, 51
+
+  # Linear spacing in each dimension
+  r(ξ) = r0 + (r1 - r0) * ((ξ - 1) / (nr - 1))
+  θ(η) = θ0 + (θ1 - θ0) * ((η - 1) / (ntheta - 1))
+
+  R(i, j) = r(i) * cospi(θ(j))
+  Z(i, j) = r(i) * sinpi(θ(j))
+
+  # mesh = CylindricalGrid2D(R, Z, (nr, ntheta), nhalo)
+  mesh = CurvilinearGrid2D(R, Z, (nr, ntheta), nhalo)
+  return mesh
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
-
+  mesh = initialize_mesh()
   bcs = (
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
-    # jhi=DirichletBC(100.0),  #
   )
-  # solver = ImplicitScheme(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+
+  backend = CPU()
+  # solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
   solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
-  # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
 
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e2
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = similar(solver.source_term)
+  fill!(source_term, 0)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -104,33 +59,31 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 # * temperature^3
+      return κ0 * temperature^3
     end
   end
 
-  fwhm = 0.5
-  x0 = 0.0
-  y0 = 0.0
-  for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
-
-    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+  i_dep = 25:30
+  @views begin
+    source_term[i_dep, :] .= T_hot
   end
 
-  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  copy!(solver.source_term, source_term) # move to gpu (if need be)
+
+  return solver, mesh, T, ρ, cₚ, κ
 end
 
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
 function run(maxiter=Inf)
-  casename = "wavy_mesh_2d_no_source"
+  casename = "cylindrical_deposition"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
   global Δt = 1e-4
   global t = 0.0
-  global maxt = 0.2
+  global maxt = 1.0
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
@@ -141,7 +94,7 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true)
+    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
@@ -171,6 +124,24 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(500)
+  solver, mesh, temperature = run(10)
   nothing
 end
+
+# i_bc = (
+#   halo=(lo=CartesianIndices((3:3, 4:51)), hi=CartesianIndices((52:52, 4:51))),
+#   edge=(lo=CartesianIndices((4:4, 4:51)), hi=CartesianIndices((51:51, 4:51))),
+# )
+# j_bc = (
+#   halo=(lo=CartesianIndices((4:51, 3:3)), hi=CartesianIndices((4:51, 52:52))),
+#   edge=(lo=CartesianIndices((4:51, 4:4)), hi=CartesianIndices((4:51, 51:51))),
+# )
+
+# i_bc = (
+#   halo=(lo=CartesianIndices((1:1, 2:53)), hi=CartesianIndices((54:54, 2:53))),
+#   edge=(lo=CartesianIndices((2:2, 2:53)), hi=CartesianIndices((53:53, 2:53))),
+# )
+# j_bc = (
+#   halo=(lo=CartesianIndices((2:53, 1:1)), hi=CartesianIndices((2:53, 54:54))),
+#   edge=(lo=CartesianIndices((2:53, 2:2)), hi=CartesianIndices((2:53, 53:53))),
+# )
