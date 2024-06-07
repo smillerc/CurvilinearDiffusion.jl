@@ -24,6 +24,7 @@ function ADESolver(
 
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
+  nhalo = 1
   if face_conductivity === :harmonic
     mean_func = harmonic_mean
     @info "Using harmonic mean for face conductivity averaging"
@@ -40,7 +41,17 @@ function ADESolver(
   _limits = limits(iterators.domain.cartesian)
 
   solver = ADESolver(
-    uⁿ⁺¹, qⁿ⁺¹, pⁿ⁺¹, diffusivity, source_term, mean_func, bcs, iterators, _limits, backend
+    uⁿ⁺¹,
+    qⁿ⁺¹,
+    pⁿ⁺¹,
+    diffusivity,
+    source_term,
+    mean_func,
+    bcs,
+    iterators,
+    _limits,
+    backend,
+    nhalo,
   )
 
   return solver
@@ -94,48 +105,46 @@ function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
 
   @printf "\tADESolver L₂: %.1e\n" L₂
 
-  copy!(u, solver.uⁿ⁺¹)
-
-  return nothing
+  return L₂
 end
 
-function solve_subcycle!(solver::ADESolver, mesh, u, Δt; cutoff=false)
-  @unpack ilo, ihi, jlo, jhi = solver.limits
+# function solve_subcycle!(solver::ADESolver, mesh, u, Δt; cutoff=false)
+#   @unpack ilo, ihi, jlo, jhi = solver.limits
 
-  domain = mesh.iterators.cell.domain
-  copy!(solver.uⁿ⁺¹, u)
+#   domain = mesh.iterators.cell.domain
+#   copy!(solver.uⁿ⁺¹, u)
 
-  L₂ = Inf
-  tol = 1e-3
-  cyc_max = 100
-  cyc = 0
+#   L₂ = Inf
+#   tol = 1e-3
+#   cyc_max = 100
+#   cyc = 0
 
-  while L₂ > tol && cyc < cyc_max
-    cyc += 1
-    reverse_sweep!(solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
-    forward_sweep!(solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
+#   while L₂ > tol && cyc < cyc_max
+#     cyc += 1
+#     reverse_sweep!(solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
+#     forward_sweep!(solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
 
-    @inbounds for idx in mesh.iterators.cell.domain
-      solver.uⁿ⁺¹[idx] = 0.5(solver.qⁿ⁺¹[idx] + solver.pⁿ⁺¹[idx])
-    end
+#     @inbounds for idx in mesh.iterators.cell.domain
+#       solver.uⁿ⁺¹[idx] = 0.5(solver.qⁿ⁺¹[idx] + solver.pⁿ⁺¹[idx])
+#     end
 
-    if cutoff
-      cutoff!(solver.uⁿ⁺¹)
-    end
+#     if cutoff
+#       cutoff!(solver.uⁿ⁺¹)
+#     end
 
-    # L₂ = residual(u, solver.uⁿ⁺¹, mesh.iterators.cell.domain, Δt)
-    @views begin
-      # L₂ = L₂norm(u[domain], solver.uⁿ⁺¹[domain])
-      L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
-    end
+#     # L₂ = residual(u, solver.uⁿ⁺¹, mesh.iterators.cell.domain, Δt)
+#     @views begin
+#       # L₂ = L₂norm(u[domain], solver.uⁿ⁺¹[domain])
+#       L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
+#     end
 
-    @printf "\tADESolver cycle: %i, L₂: %.1e\n" cyc L₂
-  end
+#     @printf "\tADESolver cycle: %i, L₂: %.1e\n" cyc L₂
+#   end
 
-  copy!(u, solver.uⁿ⁺¹)
+#   copy!(u, solver.uⁿ⁺¹)
 
-  return nothing
-end
+#   return nothing
+# end
 
 function residual(uⁿ, uⁿ⁺¹, domain, Δt)
   L₂ = 0.0
@@ -167,10 +176,12 @@ function forward_sweep!(pⁿ⁺¹, u, solver, limits, mesh, Δt)
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
-  nhalo = 1
-  i_bc = haloedge_regions(domain, 1, nhalo)
-  j_bc = haloedge_regions(domain, 2, nhalo)
 
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+  j_bc = haloedge_regions(full, 2, solver.nhalo)
+
+  fill!(pⁿ⁺¹, 0)
   @views begin
     copy!(pⁿ⁺¹[domain], u[domain])
     copy!(pⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
@@ -180,10 +191,10 @@ function forward_sweep!(pⁿ⁺¹, u, solver, limits, mesh, Δt)
   end
 
   # make alias for code readibilty
-  pⁿ = @views pⁿ⁺¹
+  pⁿ = pⁿ⁺¹
 
   # Forward sweep ("implicit" pⁿ⁺¹ for i-1, j-1)
-  @inbounds for j in jlo:jhi
+  for j in jlo:jhi
     for i in ilo:ihi
       idx = CartesianIndex(i, j)
       Jᵢⱼ = mesh.cell_center_metrics.J[i, j]
@@ -232,6 +243,18 @@ function forward_sweep!(pⁿ⁺¹, u, solver, limits, mesh, Δt)
         @show Gᵢ₊½ Gᵢ₋½ Gⱼ₊½ Gⱼ₋½
         @show edge_diffusivity
         @show pⁿ[i, j + 1] pⁿ⁺¹[i, j - 1] pⁿ⁺¹[i - 1, j + 1] pⁿ⁺¹[i - 1, j - 1]
+
+        @show pⁿ⁺¹[i, j]
+        @show pⁿ[i, j]
+        @show (Δt / Jᵢⱼ)
+        @show a_Jξ²ᵢ₊½ * (pⁿ[i + 1, j] - pⁿ[i, j])
+        @show a_Jη²ⱼ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j])
+        @show a_Jξ²ᵢ₋½ * pⁿ⁺¹[i - 1, j]
+        @show a_Jη²ⱼ₋½ * pⁿ⁺¹[i, j - 1]
+        @show Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½
+        @show Js
+        @show (1 + (Δt / Jᵢⱼ) * (a_Jξ²ᵢ₋½ + a_Jη²ⱼ₋½))
+
         error("not finite!!!")
       end
     end
@@ -242,10 +265,12 @@ function reverse_sweep!(qⁿ⁺¹, u, solver, limits, mesh, Δt)
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
-  nhalo = 1
-  i_bc = haloedge_regions(domain, 1, nhalo)
-  j_bc = haloedge_regions(domain, 2, nhalo)
 
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+  j_bc = haloedge_regions(full, 2, solver.nhalo)
+
+  fill!(qⁿ⁺¹, 0)
   @views begin
     copy!(qⁿ⁺¹[domain], u[domain])
     copy!(qⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
@@ -253,10 +278,12 @@ function reverse_sweep!(qⁿ⁺¹, u, solver, limits, mesh, Δt)
     copy!(qⁿ⁺¹[j_bc.halo.lo], u[j_bc.halo.lo])
     copy!(qⁿ⁺¹[j_bc.halo.hi], u[j_bc.halo.hi])
   end
-  qⁿ = @views qⁿ⁺¹
+
+  # make alias for code readibilty
+  qⁿ = qⁿ⁺¹
 
   # Reverse sweep ("implicit" pⁿ⁺¹ for i+1, j+1)
-  @inbounds for j in jhi:-1:jlo
+  for j in jhi:-1:jlo
     for i in ihi:-1:ilo
       idx = CartesianIndex(i, j)
       Jᵢⱼ = mesh.cell_center_metrics.J[i, j]

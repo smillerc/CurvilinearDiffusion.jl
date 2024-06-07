@@ -22,7 +22,9 @@ export update_conductivity!
 
 include("max_dt.jl")
 using .TimeStepControl
-export max_dt
+export max_dt, maxxx_dt
+
+include("validity_checks.jl")
 
 include("nonlinear_thermal_conduction.jl")
 export nonlinear_thermal_conduction_step!
