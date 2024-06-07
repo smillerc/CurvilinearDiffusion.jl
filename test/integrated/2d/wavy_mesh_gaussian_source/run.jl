@@ -88,7 +88,8 @@ function init_state()
     jhi=NeumannBC(),  #
   )
 
-  solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
+  # solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
+  solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
 
   # Temperature and density
   T_hot = 1e2
