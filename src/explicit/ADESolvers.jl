@@ -6,6 +6,7 @@ using CurvilinearGrids
 using Polyester, StaticArrays
 using KernelAbstractions
 using UnPack
+using TimerOutputs
 using Printf
 # using ..Partitioning
 

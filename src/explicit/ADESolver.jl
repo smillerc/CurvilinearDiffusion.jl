@@ -78,10 +78,14 @@ function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
   domain = mesh.iterators.cell.domain
   copy!(solver.uⁿ⁺¹, u)
 
-  reverse_sweep!(solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
-  forward_sweep!(solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
+  @timeit "reverse_sweep!" reverse_sweep!(
+    solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt
+  )
+  @timeit "forward_sweep!" forward_sweep!(
+    solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt
+  )
 
-  @inbounds for idx in mesh.iterators.cell.domain
+  @batch for idx in mesh.iterators.cell.domain
     solver.uⁿ⁺¹[idx] = 0.5(solver.qⁿ⁺¹[idx] + solver.pⁿ⁺¹[idx])
   end
 
@@ -128,7 +132,7 @@ end
 
 # 1D
 
-function forward_sweep!(pⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, Δt) where {T}
+function forward_sweep!(pⁿ⁺¹::AbstractArray{T,1}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -152,7 +156,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, 
     Jᵢ = mesh.cell_center_metrics.J[i]
     Js = Jᵢ * solver.source_term[i]
 
-    edge_α = edge_diffusivity(α, idx, solver.mean_func)
+    edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
     edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
 
     @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½ = conservative_edge_terms(edge_terms, mesh.edge_metrics, idx)
@@ -164,7 +168,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, 
   end
 end
 
-function reverse_sweep!(qⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, Δt) where {T}
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,1}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -188,7 +192,7 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, 
     Jᵢⱼ = mesh.cell_center_metrics.J[i]
     Js = Jᵢⱼ * solver.source_term[i]
 
-    edge_α = edge_diffusivity(α, idx, solver.mean_func)
+    edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
     @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½ = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
 
     qⁿ⁺¹[i] = (
@@ -201,7 +205,7 @@ end
 
 # 2D
 
-function forward_sweep!(pⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, Δt) where {T}
+function forward_sweep!(pⁿ⁺¹::AbstractArray{T,2}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -228,16 +232,10 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, 
       idx = CartesianIndex(i, j)
       Jᵢⱼ = mesh.cell_center_metrics.J[i, j]
       Js = Jᵢⱼ * solver.source_term[i, j]
-      # sᵢⱼ = solver.source_term[i, j] * Δt
 
-      aᵢ₊½ = solver.mean_func(solver.α[i, j], solver.α[i + 1, j])
-      aᵢ₋½ = solver.mean_func(solver.α[i, j], solver.α[i - 1, j])
-      aⱼ₊½ = solver.mean_func(solver.α[i, j], solver.α[i, j + 1])
-      aⱼ₋½ = solver.mean_func(solver.α[i, j], solver.α[i, j - 1])
-      edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
-
+      edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
       @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½, a_Jη²ⱼ₊½, a_Jη²ⱼ₋½, a_Jξηᵢ₊½, a_Jξηᵢ₋½, a_Jηξⱼ₊½, a_Jηξⱼ₋½ = conservative_edge_terms(
-        edge_diffusivity, mesh.edge_metrics, idx
+        edge_α, mesh.edge_metrics, idx
       )
 
       #! format: off
@@ -290,7 +288,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, 
   end
 end
 
-function reverse_sweep!(qⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, Δt) where {T}
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,2}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -317,16 +315,10 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, 
       idx = CartesianIndex(i, j)
       Jᵢⱼ = mesh.cell_center_metrics.J[i, j]
       Js = Jᵢⱼ * solver.source_term[i, j]
-      # sᵢⱼ = solver.source_term[i, j] * Δt
 
-      aᵢ₊½ = solver.mean_func(solver.α[i, j], solver.α[i + 1, j])
-      aᵢ₋½ = solver.mean_func(solver.α[i, j], solver.α[i - 1, j])
-      aⱼ₊½ = solver.mean_func(solver.α[i, j], solver.α[i, j + 1])
-      aⱼ₋½ = solver.mean_func(solver.α[i, j], solver.α[i, j - 1])
-      edge_diffusivity = (αᵢ₊½=aᵢ₊½, αᵢ₋½=aᵢ₋½, αⱼ₊½=aⱼ₊½, αⱼ₋½=aⱼ₋½)
-
+      edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
       @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½, a_Jη²ⱼ₊½, a_Jη²ⱼ₋½, a_Jξηᵢ₊½, a_Jξηᵢ₋½, a_Jηξⱼ₊½, a_Jηξⱼ₋½ = conservative_edge_terms(
-        edge_diffusivity, mesh.edge_metrics, idx
+        edge_α, mesh.edge_metrics, idx
       )
 
       #! format: off
@@ -360,7 +352,7 @@ end
 
 # 3D
 
-function forward_sweep!(pⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, Δt) where {T}
+function forward_sweep!(pⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi, klo, khi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -392,7 +384,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, 
         Jᵢⱼₖ = mesh.cell_center_metrics.J[i, j, k]
         Js = Jᵢⱼₖ * solver.source_term[i, j, k]
 
-        edge_α = edge_diffusivity(α, idx, solver.mean_func)
+        edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
         edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
 
         a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
@@ -447,7 +439,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, 
   end
 end
 
-function reverse_sweep!(qⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, Δt) where {T}
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi, klo, khi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -479,7 +471,7 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, 
         Jᵢⱼₖ = mesh.cell_center_metrics.J[i, j, k]
         Js = Jᵢⱼₖ * solver.source_term[i, j, k]
 
-        edge_α = edge_diffusivity(α, idx, solver.mean_func)
+        edge_α = edge_diffusivity(solver.α, idx, solver.mean_func)
         edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
 
         a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
