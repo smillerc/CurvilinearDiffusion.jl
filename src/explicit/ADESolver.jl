@@ -7,20 +7,14 @@ to give sizes to pre-allocate the type members. Provide a `mean_func` to
 tell the solver how to determine diffusivity at the cell edges, i.e. via a
 harmonic mean or arithmetic mean.
 """
-function ADESolver(
-  mesh::CurvilinearGrid2D,
-  bcs;
-  face_conductivity::Symbol=:harmonic,
-  T=Float64,
-  backend=CPU(),
-)
+function ADESolver(mesh, bcs; face_conductivity::Symbol=:harmonic, T=Float64, backend=CPU())
   celldims = cellsize_withhalo(mesh)
-  uⁿ⁺¹ = zeros(T, celldims)
-  qⁿ⁺¹ = zeros(T, celldims)
-  pⁿ⁺¹ = zeros(T, celldims)
+  uⁿ⁺¹ = KernelAbstractions.zeros(backend, T, celldims)
+  qⁿ⁺¹ = KernelAbstractions.zeros(backend, T, celldims)
+  pⁿ⁺¹ = KernelAbstractions.zeros(backend, T, celldims)
 
-  diffusivity = zeros(T, celldims)
-  source_term = zeros(T, celldims)
+  diffusivity = KernelAbstractions.zeros(backend, T, celldims)
+  source_term = KernelAbstractions.zeros(backend, T, celldims)
 
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
@@ -81,8 +75,6 @@ end
  - α: Diffusion coefficient
 """
 function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
-  @unpack ilo, ihi, jlo, jhi = solver.limits
-
   domain = mesh.iterators.cell.domain
   copy!(solver.uⁿ⁺¹, u)
 
@@ -107,44 +99,6 @@ function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
 
   return L₂
 end
-
-# function solve_subcycle!(solver::ADESolver, mesh, u, Δt; cutoff=false)
-#   @unpack ilo, ihi, jlo, jhi = solver.limits
-
-#   domain = mesh.iterators.cell.domain
-#   copy!(solver.uⁿ⁺¹, u)
-
-#   L₂ = Inf
-#   tol = 1e-3
-#   cyc_max = 100
-#   cyc = 0
-
-#   while L₂ > tol && cyc < cyc_max
-#     cyc += 1
-#     reverse_sweep!(solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
-#     forward_sweep!(solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
-
-#     @inbounds for idx in mesh.iterators.cell.domain
-#       solver.uⁿ⁺¹[idx] = 0.5(solver.qⁿ⁺¹[idx] + solver.pⁿ⁺¹[idx])
-#     end
-
-#     if cutoff
-#       cutoff!(solver.uⁿ⁺¹)
-#     end
-
-#     # L₂ = residual(u, solver.uⁿ⁺¹, mesh.iterators.cell.domain, Δt)
-#     @views begin
-#       # L₂ = L₂norm(u[domain], solver.uⁿ⁺¹[domain])
-#       L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
-#     end
-
-#     @printf "\tADESolver cycle: %i, L₂: %.1e\n" cyc L₂
-#   end
-
-#   copy!(u, solver.uⁿ⁺¹)
-
-#   return nothing
-# end
 
 function residual(uⁿ, uⁿ⁺¹, domain, Δt)
   L₂ = 0.0
@@ -172,7 +126,82 @@ function L₂norm(ϕ1, ϕn)
   return l2norm
 end
 
-function forward_sweep!(pⁿ⁺¹, u, solver, limits, mesh, Δt)
+# 1D
+
+function forward_sweep!(pⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, Δt) where {T}
+  @unpack ilo, ihi = limits
+
+  domain = solver.iterators.domain.cartesian
+
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+
+  fill!(pⁿ⁺¹, 0)
+  @views begin
+    copy!(pⁿ⁺¹[domain], u[domain])
+    copy!(pⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
+    copy!(pⁿ⁺¹[i_bc.halo.hi], u[i_bc.halo.hi])
+  end
+
+  # make alias for code readibilty
+  pⁿ = pⁿ⁺¹
+
+  # Forward sweep ("implicit" pⁿ⁺¹ for i-1, j-1)
+  for i in ilo:ihi
+    idx = CartesianIndex(i)
+    Jᵢ = mesh.cell_center_metrics.J[i]
+    Js = Jᵢ * solver.source_term[i]
+
+    edge_α = edge_diffusivity(α, idx, solver.mean_func)
+    edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
+
+    @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½ = conservative_edge_terms(edge_terms, mesh.edge_metrics, idx)
+
+    pⁿ⁺¹[i] = (
+      (pⁿ[i] + (Δt / Jᵢ) * (a_Jξ²ᵢ₊½ * (pⁿ[i + 1] - pⁿ[i]) + a_Jξ²ᵢ₋½ * pⁿ⁺¹[i - 1] + Js)) /
+      (1 + (Δt / Jᵢⱼ) * (a_Jξ²ᵢ₋½))
+    )
+  end
+end
+
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{1,T}, u, solver, limits, mesh, Δt) where {T}
+  @unpack ilo, ihi = limits
+
+  domain = solver.iterators.domain.cartesian
+
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+
+  fill!(qⁿ⁺¹, 0)
+  @views begin
+    copy!(qⁿ⁺¹[domain], u[domain])
+    copy!(qⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
+    copy!(qⁿ⁺¹[i_bc.halo.hi], u[i_bc.halo.hi])
+  end
+
+  # make alias for code readibilty
+  qⁿ = qⁿ⁺¹
+
+  # Reverse sweep ("implicit" qⁿ⁺¹ for i+1)
+  for i in ihi:-1:ilo
+    idx = CartesianIndex(i, j)
+    Jᵢⱼ = mesh.cell_center_metrics.J[i]
+    Js = Jᵢⱼ * solver.source_term[i]
+
+    edge_α = edge_diffusivity(α, idx, solver.mean_func)
+    @unpack a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½ = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
+
+    qⁿ⁺¹[i] = (
+      (
+        qⁿ[i] + (Δt / Jᵢ) * (-a_Jξ²ᵢ₋½ * (qⁿ[i] - qⁿ[i - 1]) - a_Jξ²ᵢ₊½ * qⁿ⁺¹[i + 1] + +Js)
+      ) / (1 + (Δt / Jᵢ) * (a_Jξ²ᵢ₊½))
+    )
+  end
+end
+
+# 2D
+
+function forward_sweep!(pⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -261,7 +290,7 @@ function forward_sweep!(pⁿ⁺¹, u, solver, limits, mesh, Δt)
   end
 end
 
-function reverse_sweep!(qⁿ⁺¹, u, solver, limits, mesh, Δt)
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{2,T}, u, solver, limits, mesh, Δt) where {T}
   @unpack ilo, ihi, jlo, jhi = limits
 
   domain = solver.iterators.domain.cartesian
@@ -329,4 +358,220 @@ function reverse_sweep!(qⁿ⁺¹, u, solver, limits, mesh, Δt)
   end
 end
 
-# @inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
+# 3D
+
+function forward_sweep!(pⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, Δt) where {T}
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
+
+  domain = solver.iterators.domain.cartesian
+
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+  j_bc = haloedge_regions(full, 2, solver.nhalo)
+  k_bc = haloedge_regions(full, 3, solver.nhalo)
+
+  fill!(pⁿ⁺¹, 0)
+  @views begin
+    copy!(pⁿ⁺¹[domain], u[domain])
+    copy!(pⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
+    copy!(pⁿ⁺¹[i_bc.halo.hi], u[i_bc.halo.hi])
+    copy!(pⁿ⁺¹[j_bc.halo.lo], u[j_bc.halo.lo])
+    copy!(pⁿ⁺¹[j_bc.halo.hi], u[j_bc.halo.hi])
+    copy!(pⁿ⁺¹[k_bc.halo.lo], u[k_bc.halo.lo])
+    copy!(pⁿ⁺¹[k_bc.halo.hi], u[k_bc.halo.hi])
+  end
+
+  # make alias for code readibilty
+  pⁿ = pⁿ⁺¹
+
+  # Forward sweep ("implicit" pⁿ⁺¹ for i-1, j-1)
+  for k in klo:khi
+    for j in jlo:jhi
+      for i in ilo:ihi
+        idx = CartesianIndex(i, j, k)
+        Jᵢⱼₖ = mesh.cell_center_metrics.J[i, j, k]
+        Js = Jᵢⱼₖ * solver.source_term[i, j, k]
+
+        edge_α = edge_diffusivity(α, idx, solver.mean_func)
+        edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
+
+        a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
+        a_Jξ²ᵢ₋½ = edge_terms.a_Jξ²ᵢ₋½
+        a_Jξηᵢ₊½ = edge_terms.a_Jξηᵢ₊½
+        a_Jξηᵢ₋½ = edge_terms.a_Jξηᵢ₋½
+        a_Jξζᵢ₊½ = edge_terms.a_Jξζᵢ₊½
+        a_Jξζᵢ₋½ = edge_terms.a_Jξζᵢ₋½
+        a_Jηξⱼ₊½ = edge_terms.a_Jηξⱼ₊½
+        a_Jηξⱼ₋½ = edge_terms.a_Jηξⱼ₋½
+        a_Jη²ⱼ₊½ = edge_terms.a_Jη²ⱼ₊½
+        a_Jη²ⱼ₋½ = edge_terms.a_Jη²ⱼ₋½
+        a_Jηζⱼ₊½ = edge_terms.a_Jηζⱼ₊½
+        a_Jηζⱼ₋½ = edge_terms.a_Jηζⱼ₋½
+        a_Jζξₖ₊½ = edge_terms.a_Jζξₖ₊½
+        a_Jζξₖ₋½ = edge_terms.a_Jζξₖ₋½
+        a_Jζηₖ₊½ = edge_terms.a_Jζηₖ₊½
+        a_Jζηₖ₋½ = edge_terms.a_Jζηₖ₋½
+        a_Jζ²ₖ₊½ = edge_terms.a_Jζ²ₖ₊½
+        a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
+
+        # #! format: off
+        # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
+        # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
+        # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
+        # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
+
+        # # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i + 1, j - 1])
+        # # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] + pⁿ⁺¹[i - 1, j + 1] - pⁿ⁺¹[i - 1, j - 1])
+        # # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i - 1, j + 1])
+        # # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] + pⁿ⁺¹[i + 1, j - 1] - pⁿ⁺¹[i - 1, j - 1])
+        # #! format: on
+
+        pⁿᵢⱼₖ = pⁿ[i, j, k]
+        pⁿ⁺¹[i, j, k] = (
+          (
+            pⁿᵢⱼₖ +
+            (Δt / Jᵢⱼₖ) * (
+              a_Jξ²ᵢ₊½ * (pⁿ[i + 1, j, k] - pⁿᵢⱼₖ) +
+              a_Jη²ⱼ₊½ * (pⁿ[i, j + 1, k] - pⁿᵢⱼₖ) +
+              a_Jζ²ₖ₊½ * (pⁿ[i, j, k + 1] - pⁿᵢⱼₖ) + # current n level
+              a_Jξ²ᵢ₋½ * pⁿ⁺¹[i - 1, j, k] +
+              a_Jη²ⱼ₋½ * pⁿ⁺¹[i, j - 1, k] +
+              a_Jζ²ₖ₋½ * pⁿ⁺¹[i, j, k - 1] + # n+1 level
+              # Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½ # non-orthongonal terms at n
+              Js
+            )
+          ) / (1 + (Δt / Jᵢⱼₖ) * (a_Jξ²ᵢ₋½ + a_Jη²ⱼ₋½ + a_Jζ²ₖ₋½))
+        )
+      end
+    end
+  end
+end
+
+function reverse_sweep!(qⁿ⁺¹::AbstractArray{3,T}, u, solver, limits, mesh, Δt) where {T}
+  @unpack ilo, ihi, jlo, jhi, klo, khi = limits
+
+  domain = solver.iterators.domain.cartesian
+
+  full = expand(domain, solver.nhalo)
+  i_bc = haloedge_regions(full, 1, solver.nhalo)
+  j_bc = haloedge_regions(full, 2, solver.nhalo)
+  k_bc = haloedge_regions(full, 3, solver.nhalo)
+
+  fill!(qⁿ⁺¹, 0)
+  @views begin
+    copy!(qⁿ⁺¹[domain], u[domain])
+    copy!(qⁿ⁺¹[i_bc.halo.lo], u[i_bc.halo.lo])
+    copy!(qⁿ⁺¹[i_bc.halo.hi], u[i_bc.halo.hi])
+    copy!(qⁿ⁺¹[j_bc.halo.lo], u[j_bc.halo.lo])
+    copy!(qⁿ⁺¹[j_bc.halo.hi], u[j_bc.halo.hi])
+    copy!(qⁿ⁺¹[k_bc.halo.lo], u[k_bc.halo.lo])
+    copy!(qⁿ⁺¹[k_bc.halo.hi], u[k_bc.halo.hi])
+  end
+
+  # make alias for code readibilty
+  qⁿ = qⁿ⁺¹
+
+  # Reverse sweep ("implicit" pⁿ⁺¹ for i+1, j+1)
+  for k in khi:-1:klo
+    for j in jhi:-1:jlo
+      for i in ihi:-1:ilo
+        idx = CartesianIndex(i, j, k)
+        Jᵢⱼₖ = mesh.cell_center_metrics.J[i, j, k]
+        Js = Jᵢⱼₖ * solver.source_term[i, j, k]
+
+        edge_α = edge_diffusivity(α, idx, solver.mean_func)
+        edge_terms = conservative_edge_terms(edge_α, mesh.edge_metrics, idx)
+
+        a_Jξ²ᵢ₊½ = edge_terms.a_Jξ²ᵢ₊½
+        a_Jξ²ᵢ₋½ = edge_terms.a_Jξ²ᵢ₋½
+        a_Jξηᵢ₊½ = edge_terms.a_Jξηᵢ₊½
+        a_Jξηᵢ₋½ = edge_terms.a_Jξηᵢ₋½
+        a_Jξζᵢ₊½ = edge_terms.a_Jξζᵢ₊½
+        a_Jξζᵢ₋½ = edge_terms.a_Jξζᵢ₋½
+        a_Jηξⱼ₊½ = edge_terms.a_Jηξⱼ₊½
+        a_Jηξⱼ₋½ = edge_terms.a_Jηξⱼ₋½
+        a_Jη²ⱼ₊½ = edge_terms.a_Jη²ⱼ₊½
+        a_Jη²ⱼ₋½ = edge_terms.a_Jη²ⱼ₋½
+        a_Jηζⱼ₊½ = edge_terms.a_Jηζⱼ₊½
+        a_Jηζⱼ₋½ = edge_terms.a_Jηζⱼ₋½
+        a_Jζξₖ₊½ = edge_terms.a_Jζξₖ₊½
+        a_Jζξₖ₋½ = edge_terms.a_Jζξₖ₋½
+        a_Jζηₖ₊½ = edge_terms.a_Jζηₖ₊½
+        a_Jζηₖ₋½ = edge_terms.a_Jζηₖ₋½
+        a_Jζ²ₖ₊½ = edge_terms.a_Jζ²ₖ₊½
+        a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
+
+        # #! format: off
+        # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
+        # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
+        # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
+        # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
+
+        # # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
+        # # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ[i - 1, j - 1])
+        # # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
+        # # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ[i - 1, j - 1])
+        # #! format: on
+
+        qⁿᵢⱼₖ = qⁿ[i, j, k]
+        qⁿ⁺¹[i, j, k] = (
+          (
+            qⁿᵢⱼₖ +
+            (Δt / Jᵢⱼₖ) * (
+              a_Jξ²ᵢ₊½ * qⁿ⁺¹[i + 1, j] + #
+              a_Jη²ⱼ₊½ * qⁿ⁺¹[i, j + 1] + #
+              a_Jζ²ₖ₊½ * qⁿ⁺¹[i, j + 1] - # n+1 level
+              a_Jξ²ᵢ₋½ * (qⁿᵢⱼₖ - qⁿ[i - 1, j, k]) - #
+              a_Jη²ⱼ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j - 1, k]) - #
+              a_Jζ²ₖ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j, k - 1]) + # current n level
+              # Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½ # non-orthongonal terms at n
+              Js
+            )
+          ) / (1 + (Δt / Jᵢⱼₖ) * (a_Jξ²ᵢ₊½ + a_Jη²ⱼ₊½ + a_Jζ²ₖ₊½))
+        )
+      end
+    end
+  end
+end
+
+@inline function edge_diffusivity(
+  α, idx::CartesianIndex{1}, mean_function::F
+) where {F<:Function}
+  i, = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i], α[i + 1]), #
+    αᵢ₋½=mean_function(α[i], α[i - 1]), #
+  )
+
+  return edge_diffusivity
+end
+
+@inline function edge_diffusivity(
+  α, idx::CartesianIndex{2}, mean_function::F
+) where {F<:Function}
+  i, j = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i, j], α[i + 1, j]),
+    αᵢ₋½=mean_function(α[i, j], α[i - 1, j]),
+    αⱼ₊½=mean_function(α[i, j], α[i, j + 1]),
+    αⱼ₋½=mean_function(α[i, j], α[i, j - 1]),
+  )
+
+  return edge_diffusivity
+end
+
+@inline function edge_diffusivity(
+  α, idx::CartesianIndex{3}, mean_function::F
+) where {F<:Function}
+  i, j, k = idx.I
+  edge_diffusivity = (
+    αᵢ₊½=mean_function(α[i, j, k], α[i + 1, j, k]),
+    αᵢ₋½=mean_function(α[i, j, k], α[i - 1, j, k]),
+    αⱼ₊½=mean_function(α[i, j, k], α[i, j + 1, k]),
+    αⱼ₋½=mean_function(α[i, j, k], α[i, j - 1, k]),
+    αₖ₊½=mean_function(α[i, j, k], α[i, j, k + 1]),
+    αₖ₋½=mean_function(α[i, j, k], α[i, j, k - 1]),
+  )
+
+  return edge_diffusivity
+end
