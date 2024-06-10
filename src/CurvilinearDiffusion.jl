@@ -20,9 +20,9 @@ export solve!, validate_diffusivity
 include("conductivity.jl")
 export update_conductivity!
 
-include("max_dt.jl")
+include("timestep_control.jl")
 using .TimeStepControl
-export max_dt, maxxx_dt
+export next_dt
 
 include("validity_checks.jl")
 

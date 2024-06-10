@@ -84,9 +84,10 @@ function nonlinear_thermal_conduction_step!(
 
   applybcs!(solver.bcs, mesh, T)
 
-  next_dt = max_dt(solver.uⁿ⁺¹, T, mesh, Δt)
-
+  @timeit "next_dt" begin
+    next_Δt = next_dt(solver.uⁿ⁺¹, T, mesh, Δt, kwargs...)
+  end
   copy!(T, solver.uⁿ⁺¹) # update the solution
 
-  return next_dt
+  return next_Δt
 end
