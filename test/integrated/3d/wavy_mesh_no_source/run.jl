@@ -94,8 +94,9 @@ function init_state()
     khi=NeumannBC(),
   )
 
-  @info "Initializing ImplicitScheme"
-  solver = ImplicitScheme(mesh, bcs; direct_solve=false, backend=backend)
+  @info "Initializing..."
+  # solver = ImplicitScheme(mesh, bcs; direct_solve=false, backend=backend)
+  solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
 
   # Temperature and density
   T_hot = 1e3
@@ -113,16 +114,16 @@ function init_state()
     end
   end
 
-  # fwhm = 0.5
-  # x0, y0, z0 = zeros(3)
-  # for idx in mesh.iterators.cell.domain
-  #   x⃗c = centroid(mesh, idx)
+  fwhm = 0.5
+  x0, y0, z0 = zeros(3)
+  for idx in mesh.iterators.cell.domain
+    x⃗c = centroid(mesh, idx)
 
-  #   T[idx] =
-  #     T_hot *
-  #     exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm + ((z0 - x⃗c.z)^2) / fwhm)) +
-  #     T_cold
-  # end
+    T[idx] =
+      T_hot *
+      exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm + ((z0 - x⃗c.z)^2) / fwhm)) +
+      T_cold
+  end
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -181,6 +182,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(50)
+  scheme, temperature, mesh = run(1)
   nothing
 end

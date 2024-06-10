@@ -97,6 +97,7 @@ function init_state()
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
   source_term = similar(solver.source_term)
+  fill!(source_term, 0)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -134,7 +135,7 @@ function run(maxiter=Inf)
 
   global Δt = 1e-4
   global t = 0.0
-  global maxt = 1.0
+  global maxt = 0.6
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
