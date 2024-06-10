@@ -510,9 +510,9 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, 
           (
             qⁿᵢⱼₖ +
             (Δt / Jᵢⱼₖ) * (
-              a_Jξ²ᵢ₊½ * qⁿ⁺¹[i + 1, j] + #
-              a_Jη²ⱼ₊½ * qⁿ⁺¹[i, j + 1] + #
-              a_Jζ²ₖ₊½ * qⁿ⁺¹[i, j + 1] - # n+1 level
+              a_Jξ²ᵢ₊½ * qⁿ⁺¹[i + 1, j, k] + #
+              a_Jη²ⱼ₊½ * qⁿ⁺¹[i, j + 1, k] + #
+              a_Jζ²ₖ₊½ * qⁿ⁺¹[i, j, k + 1] - # n+1 level
               a_Jξ²ᵢ₋½ * (qⁿᵢⱼₖ - qⁿ[i - 1, j, k]) - #
               a_Jη²ⱼ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j - 1, k]) - #
               a_Jζ²ₖ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j, k - 1]) + # current n level
