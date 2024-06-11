@@ -69,10 +69,10 @@ function uniform_grid(nx, ny, nz)
 end
 
 function initialize_mesh()
-  ni = nj = nk = 51
+  ni = nj = nk = 81
   nhalo = 4
-  # x, y, z = wavy_grid(ni, nj, nk)
-  x, y, z = uniform_grid(ni, nj, nk)
+  x, y, z = wavy_grid(ni, nj, nk)
+  # x, y, z = uniform_grid(ni, nj, nk)
   mesh = CurvilinearGrid3D(x, y, z, (ni, nj, nk), nhalo)
 
   return mesh
@@ -182,6 +182,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(1)
+  scheme, temperature, mesh = run(50)
   nothing
 end

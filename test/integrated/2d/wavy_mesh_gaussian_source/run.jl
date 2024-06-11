@@ -146,7 +146,7 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
+    next_Δt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
@@ -164,6 +164,8 @@ function run(maxiter=Inf)
     if iter >= maxiter - 1
       break
     end
+
+    global Δt = next_Δt
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
