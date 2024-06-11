@@ -10,6 +10,8 @@ using TimerOutputs
 using Printf
 # using ..Partitioning
 
+using ..TimeStepControl: next_dt
+
 export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
 export solve!, validate_diffusivity
 

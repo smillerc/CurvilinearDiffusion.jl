@@ -4,6 +4,10 @@ using UnPack
 using CartesianDomains
 using KernelAbstractions
 
+include("timestep_control.jl")
+using .TimeStepControl
+export next_dt
+
 include("boundary_conditions/boundary_operators.jl")
 using .BoundaryConditions
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
@@ -19,10 +23,6 @@ export solve!, validate_diffusivity
 
 include("conductivity.jl")
 export update_conductivity!
-
-include("timestep_control.jl")
-using .TimeStepControl
-export next_dt
 
 include("validity_checks.jl")
 

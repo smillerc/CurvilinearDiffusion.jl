@@ -19,12 +19,14 @@ using AlgebraicMultigrid
 
 using ..BoundaryConditions
 using ..BoundaryConditions: bc_rhs_coefficient
+using ..TimeStepControl: next_dt
 
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
 struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L,BE}
   linear_problem::ST # linear solver, e.g. GMRES, CG, etc.
+  # uⁿ⁺¹::AA
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
   mean_func::F
@@ -124,6 +126,8 @@ function ImplicitScheme(
 
   b = KernelAbstractions.zeros(backend, T, length(full_CI))
   diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
+  uⁿ⁺¹ = KernelAbstractions.zeros(backend, T, size(full_CI))
+
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   if direct_solve
@@ -137,6 +141,7 @@ function ImplicitScheme(
 
   implicit_solver = ImplicitScheme(
     linear_problem,
+    # uⁿ⁺¹,
     diffusivity,
     source_term,
     mean_func,
@@ -173,9 +178,9 @@ function solve!(
   cutoff=true,
   kwargs...,
 ) where {N,T}
-  #
 
-  domain_u = @view u[scheme.iterators.mesh]
+  #
+  domain_u = @views u[scheme.iterators.mesh]
 
   @assert size(u) == size(mesh.iterators.cell.full)
 
@@ -208,6 +213,15 @@ function solve!(
   if cutoff
     cutoff!(scheme.linear_problem.u)
   end
+
+  @timeit "next_dt" begin
+
+    next_Δt = next_dt(
+      scheme.linear_problem.u,
+      domain_u,
+      Δt; kwargs...)
+  end
+
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
   if !scheme.direct_solve
@@ -223,9 +237,11 @@ function solve!(
       @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
     end
 
-    return L₂norm, niter, true
+    # return L₂norm, niter, true
+    return L₂norm, next_Δt
   else
-    return -Inf, 1, true
+    return -Inf, next_Δt
+    # return -Inf, 1, true
   end
 end
 

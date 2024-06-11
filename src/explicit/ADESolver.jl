@@ -74,7 +74,9 @@ end
 # Arguments
  - α: Diffusion coefficient
 """
-function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
+function solve!(
+  solver::ADESolver, mesh, u, Δt; cutoff=false, show_convergence=true, kwargs...
+)
   domain = mesh.iterators.cell.domain
   copy!(solver.uⁿ⁺¹, u)
 
@@ -99,9 +101,17 @@ function solve!(solver::ADESolver, mesh, u, Δt; cutoff=false)
     L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
   end
 
-  @printf "\tADESolver L₂: %.1e\n" L₂
+  if show_convergence
+    @printf "\tADESolver L₂: %.1e\n" L₂
+  end
 
-  return L₂
+  @timeit "next_dt" begin
+    next_Δt = next_dt(view(solver.uⁿ⁺¹, domain), view(u, domain), Δt, kwargs...)
+  end
+
+  copy!(u, solver.uⁿ⁺¹) # update the solution
+
+  return L₂, next_Δt
 end
 
 function residual(uⁿ, uⁿ⁺¹, domain, Δt)
@@ -239,15 +249,15 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{T,2}, u, solver, limits, mesh, 
       )
 
       #! format: off
-      Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
-      Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
-      Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
-      Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
+      # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
+      # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
+      # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
+      # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
 
-      # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i + 1, j - 1])
-      # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] + pⁿ⁺¹[i - 1, j + 1] - pⁿ⁺¹[i - 1, j - 1])
-      # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i - 1, j + 1])
-      # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] + pⁿ⁺¹[i + 1, j - 1] - pⁿ⁺¹[i - 1, j - 1])
+      Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i + 1, j - 1])
+      Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] + pⁿ⁺¹[i - 1, j + 1] - pⁿ⁺¹[i - 1, j - 1])
+      Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i - 1, j + 1])
+      Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] + pⁿ⁺¹[i + 1, j - 1] - pⁿ⁺¹[i - 1, j - 1])
       #! format: on
 
       pⁿ⁺¹[i, j] = (
@@ -263,27 +273,6 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{T,2}, u, solver, limits, mesh, 
           )
         ) / (1 + (Δt / Jᵢⱼ) * (a_Jξ²ᵢ₋½ + a_Jη²ⱼ₋½))
       )
-
-      if !isfinite(pⁿ⁺¹[i, j])
-        @show (i, j)
-        @show a_Jξ²ᵢ₊½ a_Jξ²ᵢ₋½ a_Jη²ⱼ₊½ a_Jη²ⱼ₋½ a_Jξηᵢ₊½ a_Jξηᵢ₋½ a_Jηξⱼ₊½ a_Jηξⱼ₋½
-        @show Gᵢ₊½ Gᵢ₋½ Gⱼ₊½ Gⱼ₋½
-        @show edge_diffusivity
-        @show pⁿ[i, j + 1] pⁿ⁺¹[i, j - 1] pⁿ⁺¹[i - 1, j + 1] pⁿ⁺¹[i - 1, j - 1]
-
-        @show pⁿ⁺¹[i, j]
-        @show pⁿ[i, j]
-        @show (Δt / Jᵢⱼ)
-        @show a_Jξ²ᵢ₊½ * (pⁿ[i + 1, j] - pⁿ[i, j])
-        @show a_Jη²ⱼ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j])
-        @show a_Jξ²ᵢ₋½ * pⁿ⁺¹[i - 1, j]
-        @show a_Jη²ⱼ₋½ * pⁿ⁺¹[i, j - 1]
-        @show Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½
-        @show Js
-        @show (1 + (Δt / Jᵢⱼ) * (a_Jξ²ᵢ₋½ + a_Jη²ⱼ₋½))
-
-        error("not finite!!!")
-      end
     end
   end
 end
@@ -322,15 +311,15 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,2}, u, solver, limits, mesh, 
       )
 
       #! format: off
-      Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
-      Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
-      Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
-      Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
+      # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
+      # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
+      # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
+      # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
 
-      # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
-      # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ[i - 1, j - 1])
-      # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
-      # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ[i - 1, j - 1])
+      Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
+      Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ[i - 1, j - 1])
+      Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
+      Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ[i - 1, j - 1])
       #! format: on
 
       qⁿ⁺¹[i, j] = (
@@ -406,17 +395,34 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, 
         a_Jζ²ₖ₊½ = edge_terms.a_Jζ²ₖ₊½
         a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
 
-        # #! format: off
-        # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i + 1, j + 1] - pⁿ[i + 1, j - 1])
-        # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ[i, j - 1] + pⁿ[i - 1, j + 1] - pⁿ[i - 1, j - 1])
-        # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j + 1] - pⁿ[i - 1, j + 1])
-        # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ[i - 1, j] + pⁿ[i + 1, j - 1] - pⁿ[i - 1, j - 1])
-
-        # # Gᵢ₊½ = a_Jξηᵢ₊½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i + 1, j - 1])
-        # # Gᵢ₋½ = a_Jξηᵢ₋½ * (pⁿ[i, j + 1] - pⁿ⁺¹[i, j - 1] + pⁿ⁺¹[i - 1, j + 1] - pⁿ⁺¹[i - 1, j - 1])
-        # # Gⱼ₊½ = a_Jηξⱼ₊½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] +   pⁿ[i + 1, j + 1] - pⁿ⁺¹[i - 1, j + 1])
-        # # Gⱼ₋½ = a_Jηξⱼ₋½ * (pⁿ[i + 1, j] - pⁿ⁺¹[i - 1, j] + pⁿ⁺¹[i + 1, j - 1] - pⁿ⁺¹[i - 1, j - 1])
-        # #! format: on
+        #! format: off
+        non_orth = (
+          0.25a_Jζηₖ₊½ * (pⁿ⁺¹[i, j + 1, k]   + pⁿ[i, j + 1, k + 1]) - #
+          0.25a_Jζηₖ₊½ * (  pⁿ[i, j - 1, k]   + pⁿ[i, j - 1, k + 1]) - #
+          0.25a_Jζηₖ₋½ * (pⁿ⁺¹[i, j + 1, k]   + pⁿ[i, j + 1, k - 1]) + #
+          0.25a_Jζηₖ₋½ * (  pⁿ[i, j - 1, k]   + pⁿ[i, j - 1, k - 1]) + #
+          0.25a_Jζξₖ₊½ * (pⁿ⁺¹[i + 1, j, k]   + pⁿ[i + 1, j, k + 1]) - #
+          0.25a_Jζξₖ₊½ * (  pⁿ[i - 1, j, k]   + pⁿ[i - 1, j, k + 1]) - #
+          0.25a_Jζξₖ₋½ * (pⁿ⁺¹[i + 1, j, k]   + pⁿ[i + 1, j, k - 1]) + #
+          0.25a_Jζξₖ₋½ * (  pⁿ[i - 1, j, k]   + pⁿ[i - 1, j, k - 1]) + #
+          0.25a_Jηζⱼ₊½ * (pⁿ[i, j + 1, k + 1] + pⁿ⁺¹[i, j, k + 1]) - #
+          0.25a_Jηζⱼ₊½ * (pⁿ[i, j + 1, k - 1] +   pⁿ[i, j, k - 1]) - #
+          0.25a_Jηζⱼ₋½ * (pⁿ[i, j - 1, k + 1] + pⁿ⁺¹[i, j, k + 1]) + #
+          0.25a_Jηζⱼ₋½ * (pⁿ[i, j - 1, k - 1] +   pⁿ[i, j, k - 1]) + #
+          0.25a_Jηξⱼ₊½ * (pⁿ[i + 1, j + 1, k] + pⁿ⁺¹[i + 1, j, k]) - #
+          0.25a_Jηξⱼ₊½ * (pⁿ[i - 1, j + 1, k] +   pⁿ[i - 1, j, k]) - #
+          0.25a_Jηξⱼ₋½ * (pⁿ[i + 1, j - 1, k] + pⁿ⁺¹[i + 1, j, k]) + #
+          0.25a_Jηξⱼ₋½ * (pⁿ[i - 1, j - 1, k] +   pⁿ[i - 1, j, k]) + #
+          0.25a_Jξζᵢ₊½ * (pⁿ[i + 1, j, k + 1] + pⁿ⁺¹[i, j, k + 1]) - #
+          0.25a_Jξζᵢ₊½ * (pⁿ[i + 1, j, k - 1] +   pⁿ[i, j, k - 1]) - #
+          0.25a_Jξζᵢ₋½ * (pⁿ[i - 1, j, k + 1] + pⁿ⁺¹[i, j, k + 1]) + #
+          0.25a_Jξζᵢ₋½ * (pⁿ[i - 1, j, k - 1] +   pⁿ[i, j, k - 1]) + #
+          0.25a_Jξηᵢ₊½ * (pⁿ[i + 1, j + 1, k] + pⁿ⁺¹[i, j + 1, k]) - #
+          0.25a_Jξηᵢ₊½ * (pⁿ[i + 1, j - 1, k] +   pⁿ[i, j - 1, k]) - #
+          0.25a_Jξηᵢ₋½ * (pⁿ[i - 1, j + 1, k] + pⁿ⁺¹[i, j + 1, k]) + #
+          0.25a_Jξηᵢ₋½ * (pⁿ[i - 1, j - 1, k] +   pⁿ[i, j - 1, k])   #
+        )
+        #! format: on
 
         pⁿᵢⱼₖ = pⁿ[i, j, k]
         pⁿ⁺¹[i, j, k] = (
@@ -429,6 +435,7 @@ function forward_sweep!(pⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, 
               a_Jξ²ᵢ₋½ * pⁿ⁺¹[i - 1, j, k] +
               a_Jη²ⱼ₋½ * pⁿ⁺¹[i, j - 1, k] +
               a_Jζ²ₖ₋½ * pⁿ⁺¹[i, j, k - 1] + # n+1 level
+              non_orth +
               # Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½ # non-orthongonal terms at n
               Js
             )
@@ -493,17 +500,34 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, 
         a_Jζ²ₖ₊½ = edge_terms.a_Jζ²ₖ₊½
         a_Jζ²ₖ₋½ = edge_terms.a_Jζ²ₖ₋½
 
-        # #! format: off
-        # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i + 1, j + 1] - qⁿ[i + 1, j - 1])
-        # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ[i, j + 1] - qⁿ[i, j - 1] + qⁿ[i - 1, j + 1] - qⁿ[i - 1, j - 1])
-        # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j + 1] - qⁿ[i - 1, j + 1])
-        # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ[i + 1, j] - qⁿ[i - 1, j] + qⁿ[i + 1, j - 1] - qⁿ[i - 1, j - 1])
-
-        # # Gᵢ₊½ = a_Jξηᵢ₊½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i + 1, j - 1])
-        # # Gᵢ₋½ = a_Jξηᵢ₋½ * (qⁿ⁺¹[i, j + 1] - qⁿ[i, j - 1] + qⁿ⁺¹[i - 1, j + 1] - qⁿ[i - 1, j - 1])
-        # # Gⱼ₊½ = a_Jηξⱼ₊½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j + 1] - qⁿ⁺¹[i - 1, j + 1])
-        # # Gⱼ₋½ = a_Jηξⱼ₋½ * (qⁿ⁺¹[i + 1, j] - qⁿ[i - 1, j] + qⁿ⁺¹[i + 1, j - 1] - qⁿ[i - 1, j - 1])
-        # #! format: on
+        #! format: off
+        non_orth = (
+          0.25a_Jζηₖ₊½ * (  qⁿ[i, j + 1, k]   + qⁿ[i, j + 1, k + 1]) - #
+          0.25a_Jζηₖ₊½ * (qⁿ⁺¹[i, j - 1, k]   + qⁿ[i, j - 1, k + 1]) - #
+          0.25a_Jζηₖ₋½ * (  qⁿ[i, j + 1, k]   + qⁿ[i, j + 1, k - 1]) + #
+          0.25a_Jζηₖ₋½ * (qⁿ⁺¹[i, j - 1, k]   + qⁿ[i, j - 1, k - 1]) + #
+          0.25a_Jζξₖ₊½ * (  qⁿ[i + 1, j, k]   + qⁿ[i + 1, j, k + 1]) - #
+          0.25a_Jζξₖ₊½ * (qⁿ⁺¹[i - 1, j, k]   + qⁿ[i - 1, j, k + 1]) - #
+          0.25a_Jζξₖ₋½ * (  qⁿ[i + 1, j, k]   + qⁿ[i + 1, j, k - 1]) + #
+          0.25a_Jζξₖ₋½ * (qⁿ⁺¹[i - 1, j, k]   + qⁿ[i - 1, j, k - 1]) + #
+          0.25a_Jηζⱼ₊½ * (qⁿ[i, j + 1, k + 1] +   qⁿ[i, j, k + 1]) - #
+          0.25a_Jηζⱼ₊½ * (qⁿ[i, j + 1, k - 1] + qⁿ⁺¹[i, j, k - 1]) - #
+          0.25a_Jηζⱼ₋½ * (qⁿ[i, j - 1, k + 1] +   qⁿ[i, j, k + 1]) + #
+          0.25a_Jηζⱼ₋½ * (qⁿ[i, j - 1, k - 1] + qⁿ⁺¹[i, j, k - 1]) + #
+          0.25a_Jηξⱼ₊½ * (qⁿ[i + 1, j + 1, k] +   qⁿ[i + 1, j, k]) - #
+          0.25a_Jηξⱼ₊½ * (qⁿ[i - 1, j + 1, k] + qⁿ⁺¹[i - 1, j, k]) - #
+          0.25a_Jηξⱼ₋½ * (qⁿ[i + 1, j - 1, k] +   qⁿ[i + 1, j, k]) + #
+          0.25a_Jηξⱼ₋½ * (qⁿ[i - 1, j - 1, k] + qⁿ⁺¹[i - 1, j, k]) + #
+          0.25a_Jξζᵢ₊½ * (qⁿ[i + 1, j, k + 1] +   qⁿ[i, j, k + 1]) - #
+          0.25a_Jξζᵢ₊½ * (qⁿ[i + 1, j, k - 1] + qⁿ⁺¹[i, j, k - 1]) - #
+          0.25a_Jξζᵢ₋½ * (qⁿ[i - 1, j, k + 1] +   qⁿ[i, j, k + 1]) + #
+          0.25a_Jξζᵢ₋½ * (qⁿ[i - 1, j, k - 1] + qⁿ⁺¹[i, j, k - 1]) + #
+          0.25a_Jξηᵢ₊½ * (qⁿ[i + 1, j + 1, k] +   qⁿ[i, j + 1, k]) - #
+          0.25a_Jξηᵢ₊½ * (qⁿ[i + 1, j - 1, k] + qⁿ⁺¹[i, j - 1, k]) - #
+          0.25a_Jξηᵢ₋½ * (qⁿ[i - 1, j + 1, k] +   qⁿ[i, j + 1, k]) + #
+          0.25a_Jξηᵢ₋½ * (qⁿ[i - 1, j - 1, k] + qⁿ⁺¹[i, j - 1, k])   #
+        )
+        #! format: on
 
         qⁿᵢⱼₖ = qⁿ[i, j, k]
         qⁿ⁺¹[i, j, k] = (
@@ -516,6 +540,7 @@ function reverse_sweep!(qⁿ⁺¹::AbstractArray{T,3}, u, solver, limits, mesh, 
               a_Jξ²ᵢ₋½ * (qⁿᵢⱼₖ - qⁿ[i - 1, j, k]) - #
               a_Jη²ⱼ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j - 1, k]) - #
               a_Jζ²ₖ₋½ * (qⁿᵢⱼₖ - qⁿ[i, j, k - 1]) + # current n level
+              non_orth +
               # Gᵢ₊½ - Gᵢ₋½ + Gⱼ₊½ - Gⱼ₋½ # non-orthongonal terms at n
               Js
             )

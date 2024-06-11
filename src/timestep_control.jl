@@ -33,21 +33,18 @@ export next_dt
 function next_dt(
   uⁿ⁺¹,
   uⁿ,
-  mesh::AbstractCurvilinearGrid,
   Δt;
   u0=max,
   tol=1e-3,
   maximum_u_change=0.05,
   timestep_growth_factor=1.1,
+  kwargs...,
 )
-  domain = mesh.iterators.cell.domain
-  @views begin
-    umax = 0.5maximum(uⁿ[domain])
-  end
+  umax = maximum(uⁿ)
 
   backend = get_backend(uⁿ)
   u_0 = umax * tol
-  max_relative_Δu = _max_relative_change(uⁿ⁺¹, uⁿ, domain, u_0, backend)
+  max_relative_Δu = _max_relative_change(uⁿ⁺¹, uⁿ, u_0, backend)
 
   Δtⁿ⁺¹ = Δt * sqrt(maximum_u_change / max_relative_Δu)
 
@@ -56,24 +53,23 @@ function next_dt(
   return dt_next
 end
 
-@inline function _max_relative_change(uⁿ⁺¹, uⁿ, domain, u0, ::CPU)
+@inline function _max_relative_change(uⁿ⁺¹, uⁿ, u0, ::CPU)
   max_relative_Δu = -Inf
 
-  @inbounds for idx in domain
-    max_relative_Δu = max(max_relative_Δu, abs(uⁿ⁺¹[idx] - uⁿ[idx]) / (uⁿ⁺¹[idx] + u0))
+  for (i1, i2) in zip(eachindex(uⁿ), eachindex(uⁿ⁺¹))
+    δ = abs(uⁿ⁺¹[i2] - uⁿ[i1]) / (uⁿ⁺¹[i2] + u0)
+    max_relative_Δu = max(max_relative_Δu, δ * isfinite(δ))
   end
 
   return max_relative_Δu
 end
 
-@inline function _max_relative_change(uⁿ⁺¹, uⁿ, domain, u0, ::GPU)
-  f(a, b) = abs(a - b) / (a + u0)
-
-  @views begin
-    max_relative_Δu = mapreduce(f, max, uⁿ⁺¹[domain], uⁿ[domain])
+@inline function _max_relative_change(uⁿ⁺¹, uⁿ, u0, ::GPU)
+  function f(a, b)
+    δ = abs(a - b) / (a + u0)
+    return δ * isfinite(δ)
   end
-
-  return max_relative_Δu
+  return mapreduce(f, max, uⁿ⁺¹, uⁿ)
 end
 
 end
