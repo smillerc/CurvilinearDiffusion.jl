@@ -80,12 +80,14 @@ function solve!(
   domain = mesh.iterators.cell.domain
   copy!(solver.uⁿ⁺¹, u)
 
-  @timeit "reverse_sweep!" reverse_sweep!(
-    solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt
-  )
-  @timeit "forward_sweep!" forward_sweep!(
-    solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt
-  )
+  @sync begin
+    @timeit "reverse_sweep!" begin
+      @spawn reverse_sweep!(solver.qⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
+    end
+    @timeit "forward_sweep!" begin
+      @spawn forward_sweep!(solver.pⁿ⁺¹, solver.uⁿ⁺¹, solver, solver.limits, mesh, Δt)
+    end
+  end
 
   @batch for idx in mesh.iterators.cell.domain
     solver.uⁿ⁺¹[idx] = 0.5(solver.qⁿ⁺¹[idx] + solver.pⁿ⁺¹[idx])
@@ -95,10 +97,10 @@ function solve!(
     cutoff!(solver.uⁿ⁺¹)
   end
 
-  # L₂ = residual(u, solver.uⁿ⁺¹, mesh.iterators.cell.domain, Δt)
   @views begin
-    # L₂ = L₂norm(u[domain], solver.uⁿ⁺¹[domain])
-    L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
+    @timeit "L₂norm" begin
+      L₂ = L₂norm(solver.qⁿ⁺¹[domain], solver.pⁿ⁺¹[domain])
+    end
   end
 
   if show_convergence
@@ -114,30 +116,56 @@ function solve!(
   return L₂, next_Δt
 end
 
-function residual(uⁿ, uⁿ⁺¹, domain, Δt)
-  L₂ = 0.0
-  N = length(domain)
-  @inbounds for idx in domain
-    ϵ = abs(uⁿ⁺¹[idx] - uⁿ[idx]) #/ Δt
-    L₂ += ϵ^2
-  end
+# function residual(uⁿ, uⁿ⁺¹, domain, Δt)
+#   L₂ = 0.0
+#   N = length(domain)
+#   @inbounds for idx in domain
+#     ϵ = abs(uⁿ⁺¹[idx] - uⁿ[idx]) #/ Δt
+#     L₂ += ϵ^2
+#   end
 
-  return sqrt(L₂) / N
-end
+#   return sqrt(L₂) / N
+# end
+
+# function L₂norm(ϕ1, ϕn)
+#   denom = sqrt(mapreduce(x -> x^2, +, ϕ1))
+
+#   @batch for i in eachindex(ϕ1)
+#   end
+
+#   if isinf(denom) || iszero(denom)
+#     l2norm = -Inf
+#   else
+#     f(x, y) = (x - y)^2
+#     numerator = sqrt(mapreduce(f, +, ϕn, ϕ1))
+
+#     l2norm = numerator / denom
+#   end
+
+#   return l2norm
+# end
 
 function L₂norm(ϕ1, ϕn)
-  denom = sqrt(mapreduce(x -> x^2, +, ϕ1))
+  ϕ1_denom_t = @MVector zeros(nthreads())
+  numerator_t = @MVector zeros(nthreads())
+  ϕ1_denom = 0.0
 
-  if isinf(denom) || iszero(denom)
-    l2norm = -Inf
+  @batch for idx in eachindex(ϕ1)
+    ϕ1_denom_t[threadid()] += ϕ1[idx]^2
+  end
+  ϕ1_denom = sqrt(sum(ϕ1_denom_t))
+
+  if isinf(ϕ1_denom) || iszero(ϕ1_denom)
+    resid = -Inf
   else
-    f(x, y) = (x - y)^2
-    numerator = sqrt(mapreduce(f, +, ϕn, ϕ1))
+    @batch for idx in eachindex(ϕ1)
+      numerator_t[threadid()] += (ϕn[idx] - ϕ1[idx])^2
+    end
 
-    l2norm = numerator / denom
+    resid = sqrt(sum(numerator_t)) / ϕ1_denom
   end
 
-  return l2norm
+  return resid
 end
 
 # 1D
