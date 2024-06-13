@@ -34,7 +34,7 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj)
+function wavy_grid(ni, nj, nhalo)
   Lx = 12
   Ly = 12
   n_xy = 6
@@ -51,35 +51,38 @@ function wavy_grid(ni, nj)
   # Ax = 0.2 / Δx0
   # Ay = 0.4 / Δy0
 
-  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+  x = zeros(ni, nj)
+  y = zeros(ni, nj)
+  for j in 1:nj
+    for i in 1:ni
+      x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+      y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+    end
+  end
 
-  return (x, y)
+  return CurvilinearGrid2D(x, y, nhalo)
 end
 
-function uniform_grid(nx, ny)
+function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
 
-  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-  return (x, y)
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
 end
 
 function initialize_mesh()
   ni, nj = (101, 101)
   nhalo = 6
-  x, y = wavy_grid(ni, nj)
-  # x, y = uniform_grid(ni, nj)
-  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+  return wavy_grid(ni, nj, nhalo)
+  # return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
+  # mesh = adapt(ArrayT, initialize_mesh())
+  mesh = initialize_mesh()
 
   bcs = (
     ilo=NeumannBC(),  #
@@ -171,6 +174,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(500)
+  scheme, mesh, temperature = run(1500)
   nothing
 end
