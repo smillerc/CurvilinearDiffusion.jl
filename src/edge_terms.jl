@@ -79,6 +79,42 @@ These are essentially the edge diffusivity + grid metric terms
   return (; a_Jξ²ᵢ₊½, a_Jξ²ᵢ₋½, a_Jη²ⱼ₊½, a_Jη²ⱼ₋½, a_Jξηᵢ₊½, a_Jξηᵢ₋½, a_Jηξⱼ₊½, a_Jηξⱼ₋½)
 end
 
+@inline function non_conservative_metrics(
+  cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
+)
+  idim, jdim = (1, 2)
+  ᵢ₋₁ = shift(idx, idim, -1)
+  ⱼ₋₁ = shift(idx, jdim, -1)
+
+  Jᵢ₊½ = edge_metrics.i₊½.J[idx]
+  Jⱼ₊½ = edge_metrics.j₊½.J[idx]
+  Jᵢ₋½ = edge_metrics.i₊½.J[ᵢ₋₁]
+  Jⱼ₋½ = edge_metrics.j₊½.J[ⱼ₋₁]
+
+  return (
+    ξx=cell_center_metrics.ξ.x₁[idx],
+    ξy=cell_center_metrics.ξ.x₂[idx],
+    ηx=cell_center_metrics.η.x₁[idx],
+    ηy=cell_center_metrics.η.x₂[idx],
+    ξxᵢ₊½=edge_metrics.i₊½.ξ̂.x₁[idx] / Jᵢ₊½,
+    ξyᵢ₊½=edge_metrics.i₊½.ξ̂.x₂[idx] / Jᵢ₊½,
+    ηxᵢ₊½=edge_metrics.i₊½.η̂.x₁[idx] / Jᵢ₊½,
+    ηyᵢ₊½=edge_metrics.i₊½.η̂.x₂[idx] / Jᵢ₊½,
+    ξxᵢ₋½=edge_metrics.i₊½.ξ̂.x₁[ᵢ₋₁] / Jᵢ₋½,
+    ξyᵢ₋½=edge_metrics.i₊½.ξ̂.x₂[ᵢ₋₁] / Jᵢ₋½,
+    ηxᵢ₋½=edge_metrics.i₊½.η̂.x₁[ᵢ₋₁] / Jᵢ₋½,
+    ηyᵢ₋½=edge_metrics.i₊½.η̂.x₂[ᵢ₋₁] / Jᵢ₋½,
+    ξxⱼ₊½=edge_metrics.j₊½.ξ̂.x₁[idx] / Jⱼ₊½,
+    ξyⱼ₊½=edge_metrics.j₊½.ξ̂.x₂[idx] / Jⱼ₊½,
+    ηxⱼ₊½=edge_metrics.j₊½.η̂.x₁[idx] / Jⱼ₊½,
+    ηyⱼ₊½=edge_metrics.j₊½.η̂.x₂[idx] / Jⱼ₊½,
+    ξxⱼ₋½=edge_metrics.j₊½.ξ̂.x₁[ⱼ₋₁] / Jⱼ₋½,
+    ξyⱼ₋½=edge_metrics.j₊½.ξ̂.x₂[ⱼ₋₁] / Jⱼ₋½,
+    ηxⱼ₋½=edge_metrics.j₊½.η̂.x₁[ⱼ₋₁] / Jⱼ₋½,
+    ηyⱼ₋½=edge_metrics.j₊½.η̂.x₂[ⱼ₋₁] / Jⱼ₋½,
+  )
+end
+
 """
   conservative_edge_terms(edge_diffusivity::NTuple{6,T}, m) where {T}
 
