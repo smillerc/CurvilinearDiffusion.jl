@@ -34,62 +34,62 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-# function wavy_grid(ni, nj, nhalo)
-#   Lx = 12
-#   Ly = 12
-#   n_xy = 6
-#   n_yx = 6
-
-#   xmin = -Lx / 2
-#   ymin = -Ly / 2
-
-#   Δx0 = Lx / (ni - 1)
-#   Δy0 = Ly / (nj - 1)
-
-#   Ax = 0.4 / Δx0
-#   Ay = 0.8 / Δy0
-#   # Ax = 0.2 / Δx0
-#   # Ay = 0.4 / Δy0
-
-#   x = zeros(ni, nj)
-#   y = zeros(ni, nj)
-#   for j in 1:nj
-#     for i in 1:ni
-#       x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-#       y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-#     end
-#   end
-
-#   return CurvilinearGrid2D(x, y, nhalo)
-# end
-
 function wavy_grid(ni, nj, nhalo)
-  function init(ni, nj)
-    Lx = 12
-    Ly = 12
-    n_xy = 6
-    n_yx = 6
+  Lx = 12
+  Ly = 12
+  n_xy = 6
+  n_yx = 6
 
-    xmin = -Lx / 2
-    ymin = -Ly / 2
+  xmin = -Lx / 2
+  ymin = -Ly / 2
 
-    Δx0 = Lx / (ni - 1)
-    Δy0 = Ly / (nj - 1)
+  Δx0 = Lx / (ni - 1)
+  Δy0 = Ly / (nj - 1)
 
-    Ax = 0.4 / Δx0
-    Ay = 0.8 / Δy0
-    # Ax = 0.2 / Δx0
-    # Ay = 0.4 / Δy0
+  Ax = 0.4 / Δx0
+  Ay = 0.8 / Δy0
+  # Ax = 0.2 / Δx0
+  # Ay = 0.4 / Δy0
 
-    x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-    y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-    return (x, y)
+  x = zeros(ni, nj)
+  y = zeros(ni, nj)
+  for j in 1:nj
+    for i in 1:ni
+      x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+      y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+    end
   end
 
-  x, y = init(ni, nj)
-  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+  return CurvilinearGrid2D(x, y, nhalo)
 end
+
+# function wavy_grid(ni, nj, nhalo)
+#   function init(ni, nj)
+#     Lx = 12
+#     Ly = 12
+#     n_xy = 6
+#     n_yx = 6
+
+#     xmin = -Lx / 2
+#     ymin = -Ly / 2
+
+#     Δx0 = Lx / (ni - 1)
+#     Δy0 = Ly / (nj - 1)
+
+#     Ax = 0.4 / Δx0
+#     Ay = 0.8 / Δy0
+#     # Ax = 0.2 / Δx0
+#     # Ay = 0.4 / Δy0
+
+#     x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+#     y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+
+#     return (x, y)
+#   end
+
+#   x, y = init(ni, nj)
+#   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+# end
 
 function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
@@ -99,10 +99,10 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (500, 500)
+  ni, nj = (1000, 1000)
   nhalo = 6
-  return wavy_grid(ni, nj, nhalo)
-  # return uniform_grid(ni, nj, nhalo)
+  # return wavy_grid(ni, nj, nhalo)
+  return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -120,10 +120,14 @@ function init_state()
     # jhi=DirichletBC(100.0),  #
   )
   solver = ImplicitScheme(
-    mesh, bcs; backend=backend, face_conductivity=:arithmetic, direct_solve=true
+    mesh,
+    bcs;
+    backend=backend,
+    face_conductivity=:harmonic, #
+    direct_solve=false, #
   )
-  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
-  # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:harmonic)
+  # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:harmonic)
 
   # Temperature and density
   T_hot = 1e3
@@ -137,7 +141,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 # * temperature^3
+      return κ0 * temperature^3
     end
   end
 
@@ -161,13 +165,15 @@ function run(maxiter=Inf)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  global Δt = 1e-4
+  # global Δt = 1e-4
+  global Δt = 5e-5
   global t = 0.0
-  # global maxt = 0.2
-  global maxt = 0.005
+  global maxt = 0.01
+  # global maxt = 0.005
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
+  @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   while true
@@ -192,7 +198,7 @@ function run(maxiter=Inf)
     if iter >= maxiter - 1
       break
     end
-    Δt = next_dt
+    # Δt = next_dt
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -201,10 +207,28 @@ function run(maxiter=Inf)
   return scheme, mesh, T
 end
 
+using MPI
+MPI.Init()
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(5000)
+  scheme, mesh, temperature = run(1)
   nothing
 end
+
+# , MUMPS, TimerOutputs
+
+# mumps = Mumps{Float64}(mumps_unsymmetric, default_icntl, default_cntl64)
+
+# begin
+#   associate_matrix!(mumps, scheme.linear_problem.A)
+#   associate_rhs!(mumps, scheme.linear_problem.b)
+
+#   @timeit "factorize" MUMPS.factorize!(mumps)
+#   @timeit "solver!" MUMPS.solve!(mumps)
+#   x = get_solution(mumps)
+#   finalize(mumps)
+# end
+# MPI.Finalize()
+# print_timer()

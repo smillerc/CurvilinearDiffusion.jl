@@ -215,11 +215,7 @@ function solve!(
   end
 
   @timeit "next_dt" begin
-
-    next_Δt = next_dt(
-      scheme.linear_problem.u,
-      domain_u,
-      Δt; kwargs...)
+    next_Δt = next_dt(scheme.linear_problem.u, domain_u, Δt; kwargs...)
   end
 
   copyto!(domain_u, scheme.linear_problem.u) # update solution
@@ -246,7 +242,7 @@ function solve!(
 end
 
 @inline function preconditioner(A, ::CPU, τ=0.05)
-  p = ILUZero.ilu0(A)
+  p = ILUZero.ilu0 #(A)
   # p = IncompleteLU.ilu(A; τ=τ)
   # p = AlgebraicMultigrid.aspreconditioner(AlgebraicMultigrid.ruge_stuben(A))
   _ldiv = true

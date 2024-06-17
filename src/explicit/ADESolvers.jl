@@ -41,6 +41,7 @@ struct ADESolverNSweep{N,T,N2,AA<:AbstractArray{T,N},F,BC,IT,L,BE} <: AbstractAD
   iterators::IT
   limits::L
   backend::BE # GPU / CPU
+  nhalo::Int
 end
 
 include("../averaging.jl")
