@@ -3,11 +3,12 @@ module ImplicitSchemeType
 using CartesianDomains
 using CurvilinearGrids
 using ILUZero
-using IncompleteLU
+# using IncompleteLU
 using KernelAbstractions
 using Krylov
 using KrylovPreconditioners
 using LinearAlgebra
+using LinearOperators
 using LinearSolve
 using Printf
 using SparseArrays
@@ -134,9 +135,13 @@ function ImplicitScheme(
     algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
     linear_problem = init(LinearProblem(A, b), algorithm)
   else
-    Pr, _ldiv = preconditioner(A, backend)
-    algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
-    linear_problem = init(LinearProblem(A, b), algorithm; Pr=Pr)
+    # Pr, _ldiv = preconditioner(A, backend)
+    # algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
+
+    solver = GmresSolver(A, b)
+
+    F = ilu0(A)
+    linear_problem = (; solver, A, b, precon=F)
   end
 
   implicit_solver = ImplicitScheme(
@@ -169,7 +174,15 @@ function limits(CI::CartesianIndices{3})
   return (ilo=lo[1], jlo=lo[2], klo=lo[3], ihi=hi[1], jhi=hi[2], khi=hi[3])
 end
 
-function solve!(
+function solve!(scheme::ImplicitScheme, mesh, u, Δt; kwargs...)
+  if scheme.direct_solve
+    _direct_solve!(scheme, mesh, u, Δt; kwargs...)
+  else
+    _iterative_solve!(scheme, mesh, u, Δt; kwargs...)
+  end
+end
+
+function _direct_solve!(
   scheme::ImplicitScheme{N,T},
   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
   u,
@@ -239,6 +252,75 @@ function solve!(
     return -Inf, next_Δt
     # return -Inf, 1, true
   end
+end
+
+function _iterative_solve!(
+  scheme::ImplicitScheme{N,T},
+  mesh::CurvilinearGrids.AbstractCurvilinearGrid,
+  u,
+  Δt;
+  show_convergence=true,
+  cutoff=true,
+  kwargs...,
+) where {N,T}
+
+  #
+  domain_u = @views u[scheme.iterators.mesh]
+
+  @assert size(u) == size(mesh.iterators.cell.full)
+
+  # update the A matrix and b vector; A is a separate argument
+  # so we can dispatch on type for GPU vs CPU assembly
+  @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
+  KernelAbstractions.synchronize(scheme.backend)
+
+  # @timeit "ilu0!" Pᵣ = ilu0(scheme.linear_problem.A)
+
+  n = size(scheme.linear_problem.A, 1)
+  F = scheme.linear_problem.precon
+  @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
+
+  opM = LinearOperator(
+    Float64, n, n, false, false, (y, v) -> forward_substitution!(y, F, v)
+  )
+  opN = LinearOperator(
+    Float64, n, n, false, false, (y, v) -> backward_substitution!(y, F, v)
+  )
+  # opP = LinearOperator(Float64, n, n, false, false, (y, v) -> ldiv!(y, F, v))
+
+  @timeit "linear solve!" Krylov.solve!(
+    scheme.linear_problem.solver,
+    scheme.linear_problem.A,
+    scheme.linear_problem.b;
+    history=true,
+    M=opM,
+    N=opN,
+    # verbose=10,
+  )
+
+  # Apply a cutoff function to remove negative u values
+  if cutoff
+    cutoff!(scheme.linear_problem.solver.x)
+  end
+
+  @timeit "next_dt" begin
+    next_Δt = next_dt(scheme.linear_problem.solver.x, domain_u, Δt; kwargs...)
+  end
+
+  copyto!(domain_u, scheme.linear_problem.solver.x) # update solution
+
+  # L₂norm =  last(scheme.linear_problem.solver.residuals)
+  niter = scheme.linear_problem.solver.stats.niter
+  L₂norm = last(scheme.linear_problem.solver.stats.residuals)
+  # L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
+  # niter = scheme.linear_problem.cacheval.stats.niter
+
+  if show_convergence
+    @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
+  end
+
+  # return L₂norm, niter, true
+  return L₂norm, next_Δt
 end
 
 @inline function preconditioner(A, ::CPU, τ=0.05)

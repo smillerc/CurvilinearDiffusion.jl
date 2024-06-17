@@ -99,7 +99,7 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (1000, 1000)
+  ni, nj = (500, 500)
   nhalo = 6
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -141,7 +141,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 #* temperature^3
     end
   end
 
@@ -207,13 +207,11 @@ function run(maxiter=Inf)
   return scheme, mesh, T
 end
 
-using MPI
-MPI.Init()
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(1)
+  scheme, mesh, temperature = run(5)
   nothing
 end
 
