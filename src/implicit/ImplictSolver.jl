@@ -207,9 +207,7 @@ function _direct_solve!(
   # Setting isfresh=true will tell the direct solver that the 
   # A matrix has been changed. For iterative Krylov solvers, we don't need to 
   # do this
-  if scheme.direct_solve
-    scheme.linear_problem.isfresh = true
-  end
+  scheme.linear_problem.isfresh = true
 
   if !warmedup(scheme)
     if scheme.direct_solve
@@ -274,8 +272,6 @@ function _iterative_solve!(
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
   KernelAbstractions.synchronize(scheme.backend)
 
-  # @timeit "ilu0!" Pᵣ = ilu0(scheme.linear_problem.A)
-
   n = size(scheme.linear_problem.A, 1)
   F = scheme.linear_problem.precon
   @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
@@ -286,7 +282,6 @@ function _iterative_solve!(
   opN = LinearOperator(
     Float64, n, n, false, false, (y, v) -> backward_substitution!(y, F, v)
   )
-  # opP = LinearOperator(Float64, n, n, false, false, (y, v) -> ldiv!(y, F, v))
 
   @timeit "linear solve!" Krylov.solve!(
     scheme.linear_problem.solver,
@@ -295,7 +290,6 @@ function _iterative_solve!(
     history=true,
     M=opM,
     N=opN,
-    # verbose=10,
   )
 
   # Apply a cutoff function to remove negative u values
@@ -309,37 +303,22 @@ function _iterative_solve!(
 
   copyto!(domain_u, scheme.linear_problem.solver.x) # update solution
 
-  # L₂norm =  last(scheme.linear_problem.solver.residuals)
   niter = scheme.linear_problem.solver.stats.niter
   L₂norm = last(scheme.linear_problem.solver.stats.residuals)
-  # L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
-  # niter = scheme.linear_problem.cacheval.stats.niter
 
   if show_convergence
     @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
   end
 
-  # return L₂norm, niter, true
   return L₂norm, next_Δt
 end
 
-@inline function preconditioner(A, ::CPU, τ=0.05)
-  p = ILUZero.ilu0 #(A)
-  # p = IncompleteLU.ilu(A; τ=τ)
-  # p = AlgebraicMultigrid.aspreconditioner(AlgebraicMultigrid.ruge_stuben(A))
-  _ldiv = true
-  return p, _ldiv
-end
+preconditioner(A, ::CPU) = ILUZero.ilu0
 
-@inline function preconditioner(A, backend::GPU, τ=0.1)
+function preconditioner(A, backend::GPU, τ=0.1)
   p = KrylovPreconditioners.kp_ilu0(A)
-  _ldiv = true
-  # nblocks = 4
-
-  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, nblocks, backend)
-  # _ldiv = false
-
-  return p, _ldiv
+  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, backend)
+  return p
 end
 
 @inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
