@@ -144,6 +144,7 @@ end
       A_coeffs = _inner_diffusion_operator(edge_α, Δt, J, edge_metrics, mesh_idx)
 
       rhs_coeff = (source_term[diff_idx] * Δt + u[mesh_idx]) * J
+      # rhs_coeff = (source_term[diff_idx] + u[mesh_idx] / Δt) * J
 
       @inbounds for icol in 1:27
         ijk = diff_idx.I .+ offsets3d[icol]

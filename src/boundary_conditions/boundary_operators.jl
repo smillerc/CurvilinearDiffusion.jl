@@ -1,3 +1,8 @@
+module BoundaryConditions
+
+using CurvilinearGrids, UnPack
+
+export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
 abstract type AbstractBC end
 
@@ -204,3 +209,5 @@ end
 bc_rhs_coefficient(::NeumannBC, ::CartesianIndex, T) = zero(T)
 bc_rhs_coefficient(::PeriodicBC, ::CartesianIndex, T) = zero(T)
 bc_rhs_coefficient(bc::DirichletBC, ::CartesianIndex, T) = bc.val
+
+end

@@ -1,15 +1,16 @@
 using CurvilinearGrids, CurvilinearDiffusion
-using Printf, Adapt
+using WriteVTK, Printf, UnPack, Adapt
+using BlockHaloArrays
 using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-@static if Sys.islinux()
-  using MKL
-elseif Sys.isapple()
-  using AppleAccelerate
-end
+# @static if Sys.islinux()
+#   using MKL
+# elseif Sys.isapple()
+#   using AppleAccelerate
+# end
 
 NMAX = Sys.CPU_THREADS
 BLAS.set_num_threads(NMAX)
@@ -34,7 +35,7 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj, nhalo)
+function wavy_grid(ni, nj)
   Lx = 12
   Ly = 12
   n_xy = 6
@@ -51,89 +52,56 @@ function wavy_grid(ni, nj, nhalo)
   # Ax = 0.2 / Δx0
   # Ay = 0.4 / Δy0
 
-  x = zeros(ni, nj)
-  y = zeros(ni, nj)
-  for j in 1:nj
-    for i in 1:ni
-      x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-      y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-    end
-  end
+  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
 
-  return CurvilinearGrid2D(x, y, nhalo)
+  return (x, y)
 end
 
-# function wavy_grid(ni, nj, nhalo)
-#   function init(ni, nj)
-#     Lx = 12
-#     Ly = 12
-#     n_xy = 6
-#     n_yx = 6
-
-#     xmin = -Lx / 2
-#     ymin = -Ly / 2
-
-#     Δx0 = Lx / (ni - 1)
-#     Δy0 = Ly / (nj - 1)
-
-#     Ax = 0.4 / Δx0
-#     Ay = 0.8 / Δy0
-#     # Ax = 0.2 / Δx0
-#     # Ay = 0.4 / Δy0
-
-#     x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-#     y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-#     return (x, y)
-#   end
-
-#   x, y = init(ni, nj)
-#   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
-# end
-
-function uniform_grid(nx, ny, nhalo)
+function uniform_grid(nx, ny)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
 
-  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
+  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
+  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+
+  return (x, y)
 end
 
 function initialize_mesh()
-  ni, nj = (500, 500)
+  ni, nj = (101, 101)
   nhalo = 6
-  # return wavy_grid(ni, nj, nhalo)
-  return uniform_grid(ni, nj, nhalo)
+  x, y = wavy_grid(ni, nj)
+  # x, y = uniform_grid(ni, nj)
+  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  # mesh = adapt(ArrayT, initialize_mesh())
-  mesh = initialize_mesh()
-
+  mesh = adapt(ArrayT, initialize_mesh())
   bcs = (
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
-    # jhi=DirichletBC(100.0),  #
   )
-  solver = ImplicitScheme(
+
+  # solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
+  solver = ADESolver(
     mesh,
     bcs;
     backend=backend,
-    face_conductivity=:harmonic, #
-    direct_solve=false, #
+    face_conductivity=:arithmetic, # :harmonic won't work for T=0
   )
-  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:harmonic)
-  # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:harmonic)
 
   # Temperature and density
-  T_hot = 1e3
+  T_hot = 1e2
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = similar(solver.source_term)
   cₚ = 1.0
 
   # Define the conductivity model
@@ -141,18 +109,22 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 #* temperature^3
+      return κ0 * temperature^3
     end
   end
 
+  # Gaussian source term
   fwhm = 0.5
   x0 = 0.0
   y0 = 0.0
-  for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
+  for (idx, midx) in zip(solver.iterators.domain.cartesian, mesh.iterators.cell.domain)
+    x⃗c = centroid(mesh, midx)
 
-    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    source_term[idx] =
+      T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
+
+  copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -161,19 +133,16 @@ end
 # Solve
 # ------------------------------------------------------------
 function run(maxiter=Inf)
-  casename = "wavy_mesh_2d_no_source"
+  casename = "wavy_mesh_2d_with_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  # global Δt = 1e-4
-  global Δt = 5e-5
+  global Δt = 1e-4
   global t = 0.0
-  global maxt = 0.01
-  # global maxt = 0.005
+  global maxt = 1.0
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
-  @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   while true
@@ -181,8 +150,9 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
+    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true)
+
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true)
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -198,7 +168,6 @@ function run(maxiter=Inf)
     if iter >= maxiter - 1
       break
     end
-    # Δt = next_dt
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -211,22 +180,12 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(5)
+  solver, mesh, temperature = run(Inf)
   nothing
 end
 
-# , MUMPS, TimerOutputs
+# T_cpu = Array(temperature)
+# using Plots: heatmap
 
-# mumps = Mumps{Float64}(mumps_unsymmetric, default_icntl, default_cntl64)
-
-# begin
-#   associate_matrix!(mumps, scheme.linear_problem.A)
-#   associate_rhs!(mumps, scheme.linear_problem.b)
-
-#   @timeit "factorize" MUMPS.factorize!(mumps)
-#   @timeit "solver!" MUMPS.solve!(mumps)
-#   x = get_solution(mumps)
-#   finalize(mumps)
-# end
-# MPI.Finalize()
-# print_timer()
+# heatmap(T_cpu)
+# solver, mesh, T, ρ, cₚ, κ = init_state();

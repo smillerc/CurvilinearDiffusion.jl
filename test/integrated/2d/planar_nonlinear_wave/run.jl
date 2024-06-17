@@ -156,4 +156,6 @@ begin
   )
   vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
   savefig(f, "planar_nonlinear_heat_front.png")
+
+  f
 end

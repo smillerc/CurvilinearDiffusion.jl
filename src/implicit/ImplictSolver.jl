@@ -3,11 +3,11 @@ module ImplicitSchemeType
 using CartesianDomains
 using CurvilinearGrids
 using ILUZero
-using IncompleteLU
 using KernelAbstractions
 using Krylov
 using KrylovPreconditioners
 using LinearAlgebra
+using LinearOperators
 using LinearSolve
 using Printf
 using SparseArrays
@@ -17,18 +17,23 @@ using TimerOutputs
 using UnPack
 using Pardiso
 
+using ..BoundaryConditions
+using ..BoundaryConditions: bc_rhs_coefficient
+using ..TimeStepControl: next_dt
+
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
-struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L}
+struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L,BE}
   linear_problem::ST # linear solver, e.g. GMRES, CG, etc.
+  # uⁿ⁺¹::AA
   α::AA # cell-centered diffusivity
   source_term::AA # cell-centered source term
   mean_func::F
   bcs::BC
   iterators::IT
   limits::L
-  backend # GPU / CPU
+  backend::BE # GPU / CPU
   warmed_up::Vector{Bool}
   direct_solve::Bool
 end
@@ -121,6 +126,8 @@ function ImplicitScheme(
 
   b = KernelAbstractions.zeros(backend, T, length(full_CI))
   diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
+  uⁿ⁺¹ = KernelAbstractions.zeros(backend, T, size(full_CI))
+
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   if direct_solve
@@ -131,13 +138,18 @@ function ImplicitScheme(
 
     linear_problem = init(LinearProblem(A, b), algorithm)
   else
-    Pl, _ldiv = preconditioner(A, backend)
-    algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
-    linear_problem = init(LinearProblem(A, b), algorithm; Pl=Pl)
+    # Pr, _ldiv = preconditioner(A, backend)
+    # algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
+
+    solver = GmresSolver(A, b)
+
+    F = ilu0(A)
+    linear_problem = (; solver, A, b, precon=F)
   end
 
   implicit_solver = ImplicitScheme(
     linear_problem,
+    # uⁿ⁺¹,
     diffusivity,
     source_term,
     mean_func,
@@ -165,7 +177,15 @@ function limits(CI::CartesianIndices{3})
   return (ilo=lo[1], jlo=lo[2], klo=lo[3], ihi=hi[1], jhi=hi[2], khi=hi[3])
 end
 
-function solve!(
+function solve!(scheme::ImplicitScheme, mesh, u, Δt; kwargs...)
+  if scheme.direct_solve
+    _direct_solve!(scheme, mesh, u, Δt; kwargs...)
+  else
+    _iterative_solve!(scheme, mesh, u, Δt; kwargs...)
+  end
+end
+
+function _direct_solve!(
   scheme::ImplicitScheme{N,T},
   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
   u,
@@ -174,9 +194,9 @@ function solve!(
   cutoff=true,
   kwargs...,
 ) where {N,T}
-  #
 
-  domain_u = @view u[scheme.iterators.mesh]
+  #
+  domain_u = @views u[scheme.iterators.mesh]
 
   @assert size(u) == size(mesh.iterators.cell.full)
 
@@ -190,9 +210,7 @@ function solve!(
   # Setting isfresh=true will tell the direct solver that the 
   # A matrix has been changed. For iterative Krylov solvers, we don't need to 
   # do this
-  if scheme.direct_solve
-    scheme.linear_problem.isfresh = true
-  end
+  scheme.linear_problem.isfresh = true
 
   if !warmedup(scheme)
     if scheme.direct_solve
@@ -209,13 +227,18 @@ function solve!(
   if cutoff
     cutoff!(scheme.linear_problem.u)
   end
+
+  @timeit "next_dt" begin
+    next_Δt = next_dt(scheme.linear_problem.u, domain_u, Δt; kwargs...)
+  end
+
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
   if !scheme.direct_solve
-    if !scheme.linear_problem.cacheval.stats.solved
-      @show scheme.linear_problem.cacheval.stats
-      error("The solver didn't converge")
-    end
+    # if !scheme.linear_problem.cacheval.stats.solved
+    #   @show scheme.linear_problem.cacheval.stats
+    #   error("The solver didn't converge")
+    # end
 
     L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
     niter = scheme.linear_problem.cacheval.stats.niter
@@ -224,28 +247,81 @@ function solve!(
       @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
     end
 
-    return L₂norm, niter, true
+    # return L₂norm, niter, true
+    return L₂norm, next_Δt
   else
-    return -Inf, 1, true
+    return -Inf, next_Δt
+    # return -Inf, 1, true
   end
 end
 
-@inline function preconditioner(A, ::CPU, τ=0.1)
-  p = ILUZero.ilu0(A)
-  # p = IncompleteLU.ilu(A)
-  _ldiv = true
-  return p, _ldiv
+function _iterative_solve!(
+  scheme::ImplicitScheme{N,T},
+  mesh::CurvilinearGrids.AbstractCurvilinearGrid,
+  u,
+  Δt;
+  show_convergence=true,
+  cutoff=true,
+  kwargs...,
+) where {N,T}
+
+  #
+  domain_u = @views u[scheme.iterators.mesh]
+
+  @assert size(u) == size(mesh.iterators.cell.full)
+
+  # update the A matrix and b vector; A is a separate argument
+  # so we can dispatch on type for GPU vs CPU assembly
+  @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
+  KernelAbstractions.synchronize(scheme.backend)
+
+  n = size(scheme.linear_problem.A, 1)
+  F = scheme.linear_problem.precon
+  @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
+
+  opM = LinearOperator(
+    Float64, n, n, false, false, (y, v) -> forward_substitution!(y, F, v)
+  )
+  opN = LinearOperator(
+    Float64, n, n, false, false, (y, v) -> backward_substitution!(y, F, v)
+  )
+
+  @timeit "linear solve!" Krylov.solve!(
+    scheme.linear_problem.solver,
+    scheme.linear_problem.A,
+    scheme.linear_problem.b;
+    history=true,
+    M=opM,
+    N=opN,
+  )
+
+  # Apply a cutoff function to remove negative u values
+  if cutoff
+    cutoff!(scheme.linear_problem.solver.x)
+  end
+
+  @timeit "next_dt" begin
+    next_Δt = next_dt(scheme.linear_problem.solver.x, domain_u, Δt; kwargs...)
+  end
+
+  copyto!(domain_u, scheme.linear_problem.solver.x) # update solution
+
+  niter = scheme.linear_problem.solver.stats.niter
+  L₂norm = last(scheme.linear_problem.solver.stats.residuals)
+
+  if show_convergence
+    @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
+  end
+
+  return L₂norm, next_Δt
 end
 
-@inline function preconditioner(A, backend::GPU, τ=0.1)
+preconditioner(A, ::CPU) = ILUZero.ilu0
+
+function preconditioner(A, backend::GPU, τ=0.1)
   p = KrylovPreconditioners.kp_ilu0(A)
-  _ldiv = true
-  # nblocks = 4
-
-  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, nblocks, backend)
-  # _ldiv = false
-
-  return p, _ldiv
+  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, backend)
+  return p
 end
 
 @inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)

@@ -1,7 +1,7 @@
 
 include("stencils.jl")
 include("inner_operators.jl")
-include("boundary_operators.jl")
+# include("boundary_operators.jl")
 
 function assemble!(
   A::SparseMatrixCSC, u::AbstractArray{T,2}, scheme::ImplicitScheme{2}, mesh, Δt

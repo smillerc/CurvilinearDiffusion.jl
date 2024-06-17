@@ -4,22 +4,30 @@ using UnPack
 using CartesianDomains
 using KernelAbstractions
 
+include("timestep_control.jl")
+using .TimeStepControl
+export next_dt
+
+include("boundary_conditions/boundary_operators.jl")
+using .BoundaryConditions
+export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
+
 include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
-export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
-include("nonlinear_thermal_conduction.jl")
-export nonlinear_thermal_conduction_step!
-
-# include("explicit/ADESolvers.jl")
+include("explicit/ADESolvers.jl")
+using .ADESolvers
+export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
+export solve!, validate_diffusivity
 
 include("conductivity.jl")
 export update_conductivity!
 
-include("max_dt.jl")
-using .TimeStepControl
-export max_dt
+include("validity_checks.jl")
+
+include("nonlinear_thermal_conduction.jl")
+export nonlinear_thermal_conduction_step!
 
 include("vtk.jl")
 using .VTKOutput

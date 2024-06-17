@@ -4,34 +4,65 @@ using .Threads
 using BlockHaloArrays
 using CurvilinearGrids
 using Polyester, StaticArrays
+using KernelAbstractions
 using UnPack
-using ..Partitioning
+using TimerOutputs
+using Printf
+# using ..Partitioning
 
-export ADESolver
-export BlockADESolver
-export solve!, update_conductivity!, update_mesh_metrics!
+using ..TimeStepControl: next_dt
 
-struct ADESolver{T,N,EM,F,NT,BC}
-  qⁿ⁺¹::Array{T,N}
-  pⁿ⁺¹::Array{T,N}
-  J::Array{T,N} # cell-centered Jacobian
-  metrics::Array{EM,N}
-  a₋ⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  a₊ⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  aⁿ⁺¹::Array{T,N} # cell-centered diffusivity
-  source_term::Array{T,N} # cell-centered source term
+export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
+export solve!, validate_diffusivity
+
+abstract type AbstractADESolver{N,T} end
+
+struct ADESolver{N,T,AA<:AbstractArray{T,N},F,BC,IT,L,BE} <: AbstractADESolver{N,T}
+  uⁿ⁺¹::AA
+  qⁿ⁺¹::AA
+  pⁿ⁺¹::AA
+  α::AA # cell-centered diffusivity
+  source_term::AA # cell-centered source term
   mean_func::F
-  limits::NT
   bcs::BC
+  iterators::IT
+  limits::L
+  backend::BE # GPU / CPU
   nhalo::Int
-  conservative::Bool # uses the conservative form
 end
 
-include("averaging.jl")
+struct ADESolverNSweep{N,T,N2,AA<:AbstractArray{T,N},F,BC,IT,L,BE} <: AbstractADESolver{N,T}
+  uⁿ⁺¹::AA
+  usweepᵏ::NTuple{N2,AA}
+  α::AA # cell-centered diffusivity
+  source_term::AA # cell-centered source term
+  mean_func::F
+  bcs::BC
+  iterators::IT
+  limits::L
+  backend::BE # GPU / CPU
+  nhalo::Int
+end
+
+include("../averaging.jl")
+include("../edge_terms.jl")
 include("boundary_conditions.jl")
-include("mesh_metrics.jl")
-include("conductivity.jl")
 include("ADESolver.jl")
-include("BlockADESolver.jl")
+include("ADESolverNSweep.jl")
+
+function cutoff!(a)
+  backend = KernelAbstractions.get_backend(a)
+  cutoff_kernel!(backend)(a; ndrange=size(a))
+  return nothing
+end
+
+@kernel function cutoff_kernel!(a)
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    _a = cutoff(a[idx])
+    a[idx] = _a
+  end
+end
 
 end
