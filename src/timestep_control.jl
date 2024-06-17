@@ -46,7 +46,7 @@ function next_dt(
   u_0 = umax * tol
   max_relative_Δu = _max_relative_change(uⁿ⁺¹, uⁿ, u_0, backend)
 
-  Δtⁿ⁺¹ = Δt * sqrt(maximum_u_change / max_relative_Δu)
+  Δtⁿ⁺¹ = Δt * sqrt(abs(maximum_u_change / max_relative_Δu))
 
   dt_next = min(Δtⁿ⁺¹, timestep_growth_factor * Δt)
 
