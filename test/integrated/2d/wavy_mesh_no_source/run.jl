@@ -141,7 +141,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 #* temperature^3
+      return κ0 * temperature^3
     end
   end
 
@@ -211,7 +211,7 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(5)
+  scheme, mesh, temperature = run(10)
   nothing
 end
 
