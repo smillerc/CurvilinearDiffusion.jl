@@ -262,7 +262,9 @@ function _iterative_solve!(
   Δt;
   show_convergence=true,
   cutoff=true,
-  precon_iter_threshold=50,
+  precon_iter_threshold=30,
+  atol=1e-16,
+  rtol=1e-16,
   kwargs...,
 ) where {N,T}
 
@@ -292,6 +294,7 @@ function _iterative_solve!(
   end
 
   if scheme.linear_problem.solver.stats.niter > precon_iter_threshold
+    @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
     @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
   end
 
@@ -299,11 +302,15 @@ function _iterative_solve!(
     scheme.linear_problem.solver,
     scheme.linear_problem.A,
     scheme.linear_problem.b;
+    atol=atol,
+    rtol=rtol,
+    # verbose=1,
     history=true,
     M=opM,
     N=opN,
   )
 
+  # @show scheme.linear_problem.solver.stats
   # Apply a cutoff function to remove negative u values
   if cutoff
     cutoff!(scheme.linear_problem.solver.x)
