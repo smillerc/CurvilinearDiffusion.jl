@@ -1,23 +1,12 @@
 
 @testset "ImplicitScheme 2D construction" begin
-  function uniform_grid(nx, ny)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
 
-    x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
+  ni, nj = (6, 6)
+  nhalo = 2
 
-    return (x, y)
-  end
-
-  function initialize_mesh()
-    ni, nj = (7, 7)
-    nhalo = 2
-    x, y = uniform_grid(ni, nj)
-    return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
-  end
-
-  mesh = initialize_mesh()
+  mesh = RectlinearGrid((x0, y0), (x1, y1), (ni, nj), nhalo)
 
   bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
   scheme = ImplicitScheme(mesh, bcs)
@@ -37,28 +26,13 @@
 end
 
 @testset "ImplicitScheme 3D construction" begin
-  function uniform_grid(nx, ny, nz)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
-    z0, z1 = (-6, 6)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
+  z0, z1 = (-6, 6)
+  ni = nj = nk = 6
+  nhalo = 4
 
-    x(i, j, k) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y(i, j, k) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-    z(i, j, k) = @. z0 + (z1 - z0) * ((k - 1) / (nz - 1))
-
-    return (x, y, z)
-  end
-
-  function initialize_mesh()
-    ni = nj = nk = 7
-    nhalo = 4
-    x, y, z = uniform_grid(ni, nj, nk)
-    mesh = CurvilinearGrid3D(x, y, z, (ni, nj, nk), nhalo)
-
-    return mesh
-  end
-
-  mesh = initialize_mesh()
+  mesh = RectlinearGrid((x0, y0, z0), (x1, y1, z1), (ni, nj, nk), nhalo)
 
   bcs = (
     ilo=NeumannBC(),

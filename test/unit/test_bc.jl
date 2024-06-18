@@ -1,24 +1,9 @@
 
 @testset "1D Boundary Conditions" begin
-  function uniform_grid(nx)
-    x0, x1 = (-6, 6)
-
-    x(i) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-
-    return x
-  end
-
-  function initialize_mesh()
-    ni = 7
-    nhalo = 4
-    x = uniform_grid(ni)
-    mesh = CurvilinearGrid1D(x, ni, nhalo)
-
-    return mesh
-  end
-
-  mesh = initialize_mesh()
-
+  x0, x1 = (-6, 6)
+  ni = 7
+  nhalo = 4
+  mesh = RectlinearGrid(x0, x1, ni, nhalo)
   domain = mesh.iterators.cell.domain
 
   u = zeros(cellsize_withhalo(mesh)...)
@@ -57,26 +42,11 @@
 end
 
 @testset "2D Boundary Conditions" begin
-  function uniform_grid(nx, ny)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
-
-    x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-    return (x, y)
-  end
-
-  function initialize_mesh()
-    ni = nj = 7
-    nhalo = 4
-    x, y = uniform_grid(ni, nj)
-    mesh = CurvilinearGrid2D(x, y, (ni, nj), nhalo)
-
-    return mesh
-  end
-
-  mesh = initialize_mesh()
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
+  ni = nj = 6
+  nhalo = 4
+  mesh = RectlinearGrid((x0, y0), (x1, y1), (ni, nj), nhalo)
 
   domain = mesh.iterators.cell.domain
 
@@ -124,28 +94,13 @@ end
 end
 
 @testset "3D Boundary Conditions" begin
-  function uniform_grid(nx, ny, nz)
-    x0, x1 = (-6, 6)
-    y0, y1 = (-6, 6)
-    z0, z1 = (-6, 6)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
+  z0, z1 = (-6, 6)
+  ni = nj = nk = 6
+  nhalo = 4
 
-    x(i, j, k) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-    y(i, j, k) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-    z(i, j, k) = @. z0 + (z1 - z0) * ((k - 1) / (nz - 1))
-
-    return (x, y, z)
-  end
-
-  function initialize_mesh()
-    ni = nj = nk = 7
-    nhalo = 4
-    x, y, z = uniform_grid(ni, nj, nk)
-    mesh = CurvilinearGrid3D(x, y, z, (ni, nj, nk), nhalo)
-
-    return mesh
-  end
-
-  mesh = initialize_mesh()
+  mesh = RectlinearGrid((x0, y0, z0), (x1, y1, z1), (ni, nj, nk), nhalo)
 
   domain = mesh.iterators.cell.domain
 
