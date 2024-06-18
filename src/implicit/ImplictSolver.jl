@@ -262,6 +262,7 @@ function _iterative_solve!(
   Δt;
   show_convergence=true,
   cutoff=true,
+  precon_iter_threshold=50,
   kwargs...,
 ) where {N,T}
 
@@ -277,7 +278,6 @@ function _iterative_solve!(
 
   n = size(scheme.linear_problem.A, 1)
   F = scheme.linear_problem.precon
-  @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
 
   opM = LinearOperator(
     Float64, n, n, false, false, (y, v) -> forward_substitution!(y, F, v)
@@ -286,7 +286,16 @@ function _iterative_solve!(
     Float64, n, n, false, false, (y, v) -> backward_substitution!(y, F, v)
   )
 
-  @timeit "linear solve!" Krylov.solve!(
+  if !warmedup(scheme)
+    @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
+    warmup!(scheme)
+  end
+
+  if scheme.linear_problem.solver.stats.niter > precon_iter_threshold
+    @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
+  end
+
+  @timeit "linear solve" Krylov.solve!(
     scheme.linear_problem.solver,
     scheme.linear_problem.A,
     scheme.linear_problem.b;
