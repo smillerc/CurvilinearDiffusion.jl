@@ -190,7 +190,6 @@ function _direct_solve!(
   mesh::CurvilinearGrids.AbstractCurvilinearGrid,
   u,
   Δt;
-  show_convergence=true,
   cutoff=true,
   kwargs...,
 ) where {N,T}
@@ -213,9 +212,7 @@ function _direct_solve!(
   scheme.linear_problem.isfresh = true
 
   if !warmedup(scheme)
-    if scheme.direct_solve
-      @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
-    end
+    @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
 
     @timeit "linear solve (cold)" LinearSolve.solve!(scheme.linear_problem; kwargs...)
     warmup!(scheme)
@@ -234,25 +231,7 @@ function _direct_solve!(
 
   copyto!(domain_u, scheme.linear_problem.u) # update solution
 
-  if !scheme.direct_solve
-    # if !scheme.linear_problem.cacheval.stats.solved
-    #   @show scheme.linear_problem.cacheval.stats
-    #   error("The solver didn't converge")
-    # end
-
-    L₂norm = last(scheme.linear_problem.cacheval.stats.residuals)
-    niter = scheme.linear_problem.cacheval.stats.niter
-
-    if show_convergence
-      @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
-    end
-
-    # return L₂norm, niter, true
-    return L₂norm, next_Δt
-  else
-    return -Inf, next_Δt
-    # return -Inf, 1, true
-  end
+  return nothing, next_Δt
 end
 
 function _iterative_solve!(
@@ -329,7 +308,7 @@ function _iterative_solve!(
     @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
   end
 
-  return L₂norm, next_Δt
+  return scheme.linear_problem.solver.stats, next_Δt
 end
 
 preconditioner(A, ::CPU) = ILUZero.ilu0

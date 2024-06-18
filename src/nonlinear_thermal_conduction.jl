@@ -31,7 +31,7 @@ function nonlinear_thermal_conduction_step!(
     scheme.α, domain, nhalo, :diffusivity, enforce_positivity=true
   )
   @timeit "solve!" begin
-    L2, next_Δt = ImplicitSchemeType.solve!(
+    stats, next_Δt = ImplicitSchemeType.solve!(
       scheme,
       mesh,
       T,
@@ -42,7 +42,7 @@ function nonlinear_thermal_conduction_step!(
     )
   end
 
-  return next_Δt
+  return stats, next_Δt
 end
 
 function nonlinear_thermal_conduction_step!(
@@ -78,7 +78,7 @@ function nonlinear_thermal_conduction_step!(
   )
 
   @timeit "solve!" begin
-    L2, next_Δt = ADESolvers.solve!(
+    stats, next_Δt = ADESolvers.solve!(
       solver,
       mesh,
       T,
@@ -93,7 +93,7 @@ function nonlinear_thermal_conduction_step!(
     T, domain, nhalo, :temperature, enforce_positivity=true
   )
 
-  return next_Δt
+  return stats, next_Δt
 end
 
 function validate_diffusivity(solver)
