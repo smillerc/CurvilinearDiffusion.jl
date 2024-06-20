@@ -5,8 +5,7 @@ function validate_scalar(
   α_domain = @view α[domain]
 
   if enforce_positivity
-    # domain_valid = (all(isfinite.(α_domain)) && all(map(x -> x > 0, α_domain)))
-    domain_valid = (all(isfinite.(α_domain)) && all(map(x -> x >= 0, α_domain)))
+    domain_valid = (all(isfinite.(α_domain)) && all(map(x -> x > 0, α_domain)))
   else
     domain_valid = (all(isfinite.(α_domain)))
   end
@@ -25,8 +24,8 @@ function validate_scalar(
     α_hi = @view α[hi_edge]
 
     if enforce_positivity
-      α_lo_valid = (all(isfinite.(α_lo)) && all(map(x -> x >= 0, α_lo)))
-      α_hi_valid = (all(isfinite.(α_hi)) && all(map(x -> x >= 0, α_hi)))
+      α_lo_valid = (all(isfinite.(α_lo)) && all(map(x -> x > 0, α_lo)))
+      α_hi_valid = (all(isfinite.(α_hi)) && all(map(x -> x > 0, α_hi)))
     else
       α_lo_valid = all(isfinite.(α_lo))
       α_hi_valid = all(isfinite.(α_hi))
