@@ -99,7 +99,7 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (500, 500)
+  ni, nj = (150, 150)
   nhalo = 6
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -214,19 +214,3 @@ begin
   scheme, mesh, temperature = run(10)
   nothing
 end
-
-# , MUMPS, TimerOutputs
-
-# mumps = Mumps{Float64}(mumps_unsymmetric, default_icntl, default_cntl64)
-
-# begin
-#   associate_matrix!(mumps, scheme.linear_problem.A)
-#   associate_rhs!(mumps, scheme.linear_problem.b)
-
-#   @timeit "factorize" MUMPS.factorize!(mumps)
-#   @timeit "solver!" MUMPS.solve!(mumps)
-#   x = get_solution(mumps)
-#   finalize(mumps)
-# end
-# MPI.Finalize()
-# print_timer()
