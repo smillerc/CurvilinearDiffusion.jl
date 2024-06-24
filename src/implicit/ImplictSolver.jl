@@ -242,8 +242,8 @@ function _iterative_solve!(
   show_convergence=true,
   cutoff=true,
   precon_iter_threshold=30,
-  atol=1e-16,
-  rtol=1e-16,
+  atol=1e-9,
+  rtol=1e-9,
   kwargs...,
 ) where {N,T}
 
@@ -280,7 +280,8 @@ function _iterative_solve!(
   @timeit "linear solve" Krylov.solve!(
     scheme.linear_problem.solver,
     scheme.linear_problem.A,
-    scheme.linear_problem.b;
+    scheme.linear_problem.b,
+    scheme.linear_problem.solver.x;
     atol=atol,
     rtol=rtol,
     # verbose=1,
