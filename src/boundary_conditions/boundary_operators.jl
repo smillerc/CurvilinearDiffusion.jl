@@ -7,8 +7,12 @@ export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivit
 abstract type AbstractBC end
 
 struct DirichletBC{T} <: AbstractBC
-  val::T
+  val::Vector{T}
+  is_const::Bool
 end
+
+DirichletBC(v::Real) = DirichletBC([v], true)
+DirichletBC(v::Real, is_const) = DirichletBC([v], is_const)
 
 struct NeumannBC <: AbstractBC end
 struct PeriodicBC <: AbstractBC end

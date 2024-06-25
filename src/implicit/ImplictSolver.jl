@@ -36,6 +36,7 @@ struct ImplicitScheme{N,T,AA<:AbstractArray{T,N},ST,F,BC,IT,L,BE}
   backend::BE # GPU / CPU
   warmed_up::Vector{Bool}
   direct_solve::Bool
+  overlap::Int
 end
 
 warmedup(scheme::ImplicitScheme) = scheme.warmed_up[1]
@@ -55,8 +56,10 @@ function ImplicitScheme(
   face_conductivity::Symbol=:harmonic,
   T=Float64,
   backend=CPU(),
+  overlap=0,
 )
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
+  @assert 0 <= overlap <= 1 "Overlap must be either 0 or 1"
 
   if face_conductivity === :harmonic
     mean_func = harmonic_mean
@@ -159,6 +162,7 @@ function ImplicitScheme(
     backend,
     [false],
     direct_solve,
+    overlap,
   )
 
   @info "Initialization finished"
