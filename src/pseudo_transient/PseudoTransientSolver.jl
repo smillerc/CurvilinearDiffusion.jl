@@ -7,7 +7,7 @@ struct PseudoTransientSolver{N,T,AA<:AbstractArray{T,N},NT1}
   H::AA
   H_old::AA
   qH::NT1
-  qH²::NT1
+  qH_2::NT1
   res::AA
   Re::AA
   α::AA
@@ -99,17 +99,50 @@ function update_iteration_params!(θr_dτ, dτ_ρ, Vpdτ)
   dτ_ρ .= Vpdτ .* lx ./ max.(D[2:(end - 1)], ε) ./ Re[2:(end - 1)]
 end
 
-function update_flux!(Hᵏ, Hᵏ⁻¹)
+function update_flux!(solver::PseudoTransientSolver{2,T}, Hᵏ) where {T}
+  qHx = solver.qH.x
+  qHy = solver.qH.y
+
+  θr_dτ = solver.θr_dτ
+  qHx_2 = solver.qH_2.x
+  qHy_2 = solver.qH_2.y
+
   # fluxes are on the edge, H_i+1/2
   for idx in domain
-    ᵢ₊₁ = shift(idx, +1, 1)
+    ᵢ₊₁ = shift(idx, 1, +1)
+    ⱼ₊₁ = shift(idx, 2, +1)
+
     αᵢ₊½ = 0.5(α[idx] + α[ᵢ₊₁])
-    qHx = qHx + 1 / θr_dτ * (-qHx - av(D) * diff(H) / dx)
+    αⱼ₊½ = 0.5(α[idx] + α[ⱼ₊₁])
 
-    dτ_ρᵢ = dτ_ρ[idx]
+    ∂H∂x = (Hᵏ[ᵢ₊₁] - Hᵏ[idx]) / dx
+    ∂H∂y = (Hᵏ[ⱼ₊₁] - Hᵏ[idx]) / dy
 
-    Hᵏ[idx] = (Hᵏ[idx] + dτ_ρᵢ * (Hᵏ⁻¹[idx] / dt - ∇q)) / (1.0 + dτ_ρᵢ / dt)
+    qHx[idx] = (qHx[idx] * θr_dτ[idx] - αᵢ₊½ * ∂H∂x) / (1.0 + θr_dτ[idx])
+    qHy[idx] = (qHy[idx] * θr_dτ[idx] - αⱼ₊½ * ∂H∂y) / (1.0 + θr_dτ[idx])
+    qHx_2[idx] = -αᵢ₊½ * ∂H∂x
+    qHy_2[idx] = -αⱼ₊½ * ∂H∂y
   end
+
+  return nothing
+end
+
+function compute_update!(solver::PseudoTransientSolver{2,T}, H, H_prev, dt) where {T}
+
+  #
+
+  qHx = solver.qH.x
+  qHy = solver.qH.y
+
+  for idx in domain
+    ∂qH∂x = (qHx[ᵢ₊₁] - qHx[idx]) / dx
+    ∂qH∂y = (qHy[ⱼ₊₁] - qHy[idx]) / dy
+
+    ∇qH = ∂qH∂x + ∂qH∂y
+    H[idx] = (H[idx] + dτ_ρ[idx] * (H_prev[idx] / dt - ∇qH)) / (1.0 + dτ_ρ[idx] / dt)
+  end
+
+  return nothing
 end
 
 function check_residual() end
