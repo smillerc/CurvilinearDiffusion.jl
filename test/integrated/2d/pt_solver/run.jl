@@ -115,7 +115,7 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
 
-    T[idx] = exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) #+ T_cold
+    T[idx] = exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
   end
 
   #   T[idx] = exp(-(xc - lx / 2) .^ 2 - ((yc - ly / 2)') .^ 2)
@@ -131,53 +131,52 @@ function run(maxiter=Inf)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  # global Δt = 1e-4
-  global Δt = 0.02
+  global Δt = 1e-4
+  #   global Δt = 0.02
   global t = 0.0
-  global maxt = 0.01
+  global maxt = 0.5
 
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
-  copy!(scheme.H, T)
-  CurvilinearDiffusion.PseudoTransientScheme.solve!(
-    scheme, mesh, Δt; max_iter=1e5, tol=1e-8, error_check_interval=1
-  )
 
   #   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
 
-  #   while true
-  #     if iter == 0
-  #       reset_timer!()
-  #     end
+  while true
+    if iter == 0
+      reset_timer!()
+    end
 
-  #     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-  #     next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true)
+    err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e5, tol=1e-8, error_check_interval=1
+    )
+    # @show err, subiter
+    @printf "cycle: %i t: %.4e, Δt: %.3e, L2: %.3e, %i\n" iter t Δt err subiter
 
-  #     if t + Δt > io_next
-  #       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
-  #       global io_next += io_interval
-  #     end
+    if t + Δt > io_next
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      global io_next += io_interval
+    end
 
-  #     if t >= maxt
-  #       break
-  #     end
+    if t >= maxt
+      break
+    end
 
-  global iter += 1
-  global t += Δt
-  #     if iter >= maxiter - 1
-  #       break
-  #     end
-  #     # Δt = next_dt
-  #   end
+    global iter += 1
+    global t += Δt
+    if iter >= maxiter - 1
+      break
+    end
+    # Δt = next_dt
+  end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
     scheme, scheme.H, mesh, iter, t, casename
   )
 
-  #   print_timer()
+  print_timer()
   return scheme, mesh, T
 end
 
@@ -185,6 +184,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(1)
+  scheme, mesh, temperature = run(Inf)
   nothing
 end

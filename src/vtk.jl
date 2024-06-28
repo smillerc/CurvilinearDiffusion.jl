@@ -47,7 +47,7 @@ function save_vtk(
   @views vtk_grid(fn, coords...) do vtk
     vtk["TimeValue"] = t
     vtk["u"] = Array{T}(u[domain])
-    vtk["diffusivity"] = Array{T}(scheme.D[domain])
+    vtk["diffusivity"] = Array{T}(scheme.α[domain])
 
     vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
     vtk["θr_dτ"] = Array{T}(scheme.θr_dτ[domain])

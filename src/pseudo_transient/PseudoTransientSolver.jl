@@ -2,16 +2,21 @@ module PseudoTransientScheme
 
 using LinearAlgebra: norm
 
-using CartesianDomains: expand, shift, expand_lower
+using CartesianDomains: expand, shift, expand_lower, haloedge_regions
 using CurvilinearGrids: CurvilinearGrid2D, cellsize_withhalo, coords
-using KernelAbstractions: CPU
+using KernelAbstractions
+using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
+using UnPack: @unpack
 
 using ..BoundaryConditions
 
+include("../averaging.jl")
+include("../validity_checks.jl")
+
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,AA<:AbstractArray{T,N},NT1,DM,B}
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   H::AA
   H_prev::AA
   source_term::AA
@@ -19,17 +24,19 @@ struct PseudoTransientSolver{N,T,AA<:AbstractArray{T,N},NT1,DM,B}
   qH_2::NT1
   res::AA
   Re::AA
-  D::AA # diffusivity
+  α::AA # diffusivity
   θr_dτ::AA
   dτ_ρ::AA
   spacing::NTuple{N,T}
   L::T
-  domain::DM
+  iterators::DM
   bcs::B # boundary conditions
+  mean::F
+  backend::BE
 end
 
 function PseudoTransientSolver(
-  mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:harmonic
+  mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:arithmetic, T=Float64
 )
   #
   #         H
@@ -37,48 +44,85 @@ function PseudoTransientSolver(
   #           q_i+1/2
   #
 
-  ni, nj = cellsize_withhalo(mesh)
+  iterators = (
+    domain=(cartesian=mesh.iterators.cell.domain,),
+    full=(cartesian=mesh.iterators.cell.full,),
+  )
 
   # cell-based
-  H = zeros(ni, nj)
-  H_prev = zeros(ni, nj)
-  S = zeros(ni, nj) # source term
+  H = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  H_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
 
   # edge-based
-  qH = (x=zeros(ni, nj), y=zeros(ni, nj))
-  qH² = (x=zeros(ni, nj), y=zeros(ni, nj))
-  res = zeros(ni, nj)
-  Re = zeros(ni, nj)
-  D = ones(ni, nj)
-  θr_dτ = zeros(ni, nj)
-  dτ_ρ = zeros(ni, nj)
+  qH = (
+    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+  )
+  qH² = (
+    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+  )
+
+  res = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  Re = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+
+  α = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+
+  θr_dτ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
 
   x, y = coords(mesh)
-  spacing = (
-    round(minimum(diff(x; dims=1)); sigdigits=10),
-    round(minimum(diff(y; dims=2)); sigdigits=10),
-  )
+  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2)))
   min_x, max_x = extrema(x)
   min_y, max_y = extrema(y)
   L = max(abs(max_x - min_x), abs(max_y - min_y))
-  domain = mesh.iterators.cell.domain
+
+  if face_diffusivity === :harmonic
+    mean_func = harmonic_mean # from ../averaging.jl
+  else
+    mean_func = arithmetic_mean # from ../averaging.jl
+  end
 
   return PseudoTransientSolver(
-    H, H_prev, S, qH, qH², res, Re, D, θr_dτ, dτ_ρ, spacing, L, domain, bcs
+    H,
+    H_prev,
+    S,
+    qH,
+    qH²,
+    res,
+    Re,
+    α,
+    θr_dτ,
+    dτ_ρ,
+    spacing,
+    L,
+    iterators,
+    bcs,
+    mean_func,
+    backend,
   )
 end
 
 # solve a single time-step dt
-function solve!(
-  solver::PseudoTransientSolver{N,T},
+function step!(
+  solver::PseudoTransientSolver{N},
   mesh,
+  T,
+  ρ,
+  cₚ,
+  κ,
   dt;
   max_iter=1e5,
   tol=1e-8,
   error_check_interval=10,
-) where {N,T}
+  cutoff=true,
+) where {N}
 
   #
+  domain = solver.iterators.domain.cartesian
+  nhalo = 1
+
   iter = 0
   err = 2 * tol
 
@@ -87,48 +131,46 @@ function solve!(
   dx, dy = solver.spacing
   Vpdτ = CFL * min(dx, dy)
 
+  copy!(solver.H, T)
   copy!(solver.H_prev, solver.H)
 
+  update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+
+  validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
+  validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
+  # display(solver.α)
+  validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
+
   # Pseudo-transient iteration
-  while err > tol && iter < max_iter
-    @info "Iter: $iter"
+  while err > tol && iter < max_iter && isfinite(err)
     iter += 1
 
-    @show extrema(solver.H_prev[solver.domain])
-    @show extrema(solver.H[solver.domain])
     # Diffusion coefficient
-    # update_conductivity!(solver, mesh, T, ρ, cₚ, κ)
+    if iter > 1
+      update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+    end
     applybcs!(solver.bcs, mesh, solver.H)
 
-    update_iteration_params!(solver, Vpdτ, dt)
-    # @show extrema(Vpdτ)
-    # @show extrema(solver.D[solver.domain])
-    # @show extrema(solver.Re[solver.domain])
-    # @show extrema(solver.θr_dτ[solver.domain])
-    # @show extrema(solver.dτ_ρ[solver.domain])
+    update_iteration_params!(solver, ρ, Vpdτ, dt)
 
-    # @show extrema(solver.H[solver.domain])
-    # error("done")
-
-    applybcs!(solver.bcs, mesh, solver.D)
+    applybcs!(solver.bcs, mesh, solver.α)
     applybcs!(solver.bcs, mesh, solver.dτ_ρ)
     applybcs!(solver.bcs, mesh, solver.θr_dτ)
 
     compute_flux!(solver)
     compute_update!(solver, dt)
 
-    # Check error (explicit residual)
     if iter % error_check_interval == 0
       update_residual!(solver, dt)
 
-      res = @view solver.res[solver.domain]
+      res = @view solver.res[solver.iterators.domain.cartesian]
       err = norm(res) / sqrt(length(res))
 
-      @show err norm(res) sqrt(length(res))
+      if !isfinite(err)
+        error("Non-finite error detected! ($err)")
+      end
     end
   end
-
-  copy!(solver.H_prev, solver.H)
 
   if iter == max_iter
     @error(
@@ -136,26 +178,33 @@ function solve!(
     )
   end
 
+  # Apply a cutoff function to remove negative u values
+  if cutoff
+    cutoff!(solver.H)
+  end
+
+  validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
+  copy!(solver.H_prev, solver.H)
+  copy!(T, solver.H)
+
   return err, iter
 end
 
 function update_iteration_params!(
   solver,
+  ρ,
   Vpdτ,
   dt,
   # β=1 / 1.2, # iteration scaling parameter
   β=1, # iteration scaling parameter
 )
-  for idx in solver.domain
-    solver.Re[idx] = π + sqrt(π^2 + (solver.L^2 / solver.D[idx] / dt))
+  @inbounds for idx in solver.iterators.domain.cartesian
+    solver.Re[idx] = π + sqrt(π^2 + (solver.L^2 * ρ[idx]) / (solver.α[idx] * dt))
   end
 
-  for idx in solver.domain
-    solver.dτ_ρ[idx] = Vpdτ * solver.L / solver.D[idx] / solver.Re[idx] * β
-  end
-
-  for idx in solver.domain
-    solver.θr_dτ[idx] = solver.L / Vpdτ / solver.Re[idx] * β
+  @inbounds for idx in solver.iterators.domain.cartesian
+    solver.dτ_ρ[idx] = (Vpdτ * solver.L / (solver.α[idx] * solver.Re[idx])) * β
+    solver.θr_dτ[idx] = (solver.L / (Vpdτ * solver.Re[idx])) * β
   end
 
   return nothing
@@ -174,23 +223,29 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}) where {T}
 
   dx, dy = solver.spacing
 
-  ᵢ₊½_domain = expand_lower(solver.domain, i, +1)
-  @show solver.domain
-  @show ᵢ₊½_domain
-  for idx in ᵢ₊½_domain
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, i, +1)
+  @inbounds for idx in ᵢ₊½_domain
     ᵢ₊₁ = shift(idx, i, +1)
-    αᵢ₊½ = (solver.D[idx] + solver.D[ᵢ₊₁]) / 2
-    θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
+
+    # edge diffusivity / iter params
+    αᵢ₊½ = solver.mean(solver.α[idx], solver.α[ᵢ₊₁])
+    θr_dτ_ᵢ₊½ = arithmetic_mean(θr_dτ[idx], θr_dτ[ᵢ₊₁])
+
     ∂H∂xᵢ₊½ = (solver.H[ᵢ₊₁] - solver.H[idx]) / dx
+
     qHxᵢ₊½[idx] = (qHxᵢ₊½[idx] * θr_dτ_ᵢ₊½ - αᵢ₊½ * ∂H∂xᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+
     qHx_2ᵢ₊½[idx] = -αᵢ₊½ * ∂H∂xᵢ₊½
   end
 
-  ⱼ₊½_domain = expand_lower(solver.domain, j, +1)
-  for idx in ⱼ₊½_domain
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, j, +1)
+  @inbounds for idx in ⱼ₊½_domain
     ⱼ₊₁ = shift(idx, j, +1)
-    αⱼ₊½ = (solver.D[idx] + solver.D[ⱼ₊₁]) / 2
-    θr_dτ_ⱼ₊½ = (θr_dτ[idx] + θr_dτ[ⱼ₊₁]) / 2
+
+    # edge diffusivity / iter params
+    αⱼ₊½ = solver.mean(solver.α[idx], solver.α[ⱼ₊₁])
+    θr_dτ_ⱼ₊½ = arithmetic_mean(θr_dτ[idx], θr_dτ[ⱼ₊₁])
+
     ∂H∂yⱼ₊½ = (solver.H[ⱼ₊₁] - solver.H[idx]) / dy
 
     qHyⱼ₊½[idx] = (qHyⱼ₊½[idx] * θr_dτ_ⱼ₊½ - αⱼ₊½ * ∂H∂yⱼ₊½) / (1 + θr_dτ_ⱼ₊½)
@@ -198,12 +253,6 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}) where {T}
     qHy_2ⱼ₊½[idx] = -αⱼ₊½ * ∂H∂yⱼ₊½
   end
 
-  @show extrema(view(qHxᵢ₊½, ᵢ₊½_domain))
-  @show extrema(view(qHyⱼ₊½, ⱼ₊½_domain))
-  @show extrema(view(qHx_2ᵢ₊½, ᵢ₊½_domain))
-  @show extrema(view(qHy_2ⱼ₊½, ⱼ₊½_domain))
-
-  # @show qHx[solver.domain][49, 50]
   return nothing
 end
 
@@ -216,11 +265,9 @@ function compute_update!(solver::PseudoTransientSolver{2,T}, dt) where {T}
   i, j = (1, 2)
   dx, dy = solver.spacing
 
-  for idx in solver.domain
+  @inbounds for idx in solver.iterators.domain.cartesian
     ᵢ₋₁ = shift(idx, i, -1)
     ⱼ₋₁ = shift(idx, j, -1)
-    ᵢ₊₁ = shift(idx, i, +1)
-    ⱼ₊₁ = shift(idx, j, +1)
 
     ∇qH = (
       (qHx[idx] - qHx[ᵢ₋₁]) / dx + # ∂qH∂x
@@ -245,11 +292,9 @@ function update_residual!(solver::PseudoTransientSolver{2,T}, dt) where {T}
   i, j = (1, 2)
   dx, dy = solver.spacing
 
-  for idx in solver.domain
+  for idx in solver.iterators.domain.cartesian
     ᵢ₋₁ = shift(idx, i, -1)
     ⱼ₋₁ = shift(idx, j, -1)
-    ᵢ₊₁ = shift(idx, i, +1)
-    ⱼ₊₁ = shift(idx, j, +1)
 
     ∇qH = (
       (qHx_2[idx] - qHx_2[ᵢ₋₁]) / dx + # ∂qH∂x
@@ -260,6 +305,87 @@ function update_residual!(solver::PseudoTransientSolver{2,T}, dt) where {T}
   end
 
   return nothing
+end
+
+function update_conductivity!(
+  scheme, mesh, temperature, density, cₚ::Real, κ::F
+) where {F<:Function}
+  @unpack diff_domain, domain = _domain_pairs(scheme, mesh)
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, cₚ, κ; ndrange=size(α))
+
+  KernelAbstractions.synchronize(backend)
+
+  return nothing
+end
+
+function update_conductivity!(
+  scheme, mesh, temperature, density, cₚ::AbstractArray, κ::F
+) where {F<:Function}
+  @unpack diff_domain, domain = _domain_pairs(scheme, mesh)
+
+  α = @view scheme.α[diff_domain]
+  T = @view temperature[domain]
+  _cₚ = @view cₚ[domain]
+  ρ = @view density[domain]
+
+  backend = scheme.backend
+  conductivity_kernel(backend)(α, T, ρ, _cₚ, κ; ndrange=size(α))
+
+  KernelAbstractions.synchronize(backend)
+
+  return nothing
+end
+
+function _domain_pairs(scheme::PseudoTransientSolver, mesh)
+  diff_domain = scheme.iterators.full.cartesian
+  domain = mesh.iterators.cell.full
+
+  return (; diff_domain, domain)
+end
+
+# conductivity with array-valued cₚ
+@kernel function conductivity_kernel(
+  α, temperature, density, cₚ::AbstractArray{T,N}, κ::F
+) where {T,N,F<:Function}
+  idx = @index(Global)
+
+  @inbounds begin
+    α[idx] = κ(density[idx], temperature[idx]) / (density[idx] * cₚ[idx])
+  end
+end
+
+# conductivity with single-valued cₚ
+@kernel function conductivity_kernel(
+  α, temperature, density, cₚ::Real, κ::F
+) where {F<:Function}
+  idx = @index(Global)
+
+  @inbounds begin
+    α[idx] = abs(κ(density[idx], temperature[idx]) / (density[idx] * cₚ))
+  end
+end
+
+@inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
+
+function cutoff!(a)
+  backend = KernelAbstractions.get_backend(a)
+  cutoff_kernel!(backend)(a; ndrange=size(a))
+  return nothing
+end
+
+@kernel function cutoff_kernel!(a)
+  idx = @index(Global, Linear)
+
+  @inbounds begin
+    _a = cutoff(a[idx])
+    a[idx] = _a
+  end
 end
 
 end # module
