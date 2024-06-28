@@ -21,6 +21,10 @@ using .ADESolvers
 export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
 export solve!, validate_diffusivity
 
+include("pseudo_transient/PseudoTransientSolver.jl")
+using .PseudoTransientScheme
+export PseudoTransientSolver
+
 include("conductivity.jl")
 export update_conductivity!
 
