@@ -6,6 +6,7 @@ version = "0.2.1"
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
 BlockHaloArrays = "8029ca6b-11ad-4a59-88a2-2e6eee4ef8a2"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CartesianDomains = "31d3d393-e656-4614-8ab7-f376885a6db2"
 CurvilinearGrids = "58b19789-dd19-4aa2-839c-c763a7b10301"
 ILUZero = "88f59080-6952-5380-9ea5-54057fb9a43f"
@@ -26,11 +27,11 @@ TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
-[weakdeps]
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+# [weakdeps]
+# CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 
-[extensions]
-CurvilinearDiffusionCUDAExt = "CUDA"
+# [extensions]
+# CurvilinearDiffusionCUDAExt = "CUDA"
 
 [compat]
 julia = "1.9"

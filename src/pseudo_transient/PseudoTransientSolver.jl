@@ -256,31 +256,55 @@ end
   end
 end
 
+@kernel function flux_kernel!(
+  qHxᵢ₊½,
+  qHx_2ᵢ₊½,
+  @Const(H),
+  @Const(α),
+  @Const(θr_dτ),
+  cell_center_metrics,
+  axis,
+  I0,
+  # mean_func::F,
+)
+  idx = @index(Global, Cartesian)
+  idx += I0
+
+  harmon_mean(a, b) = (2a * b) / (a + b)
+
+  @inbounds begin
+    # m = non_conservative_metrics_iso(cell_center_metrics, edge_metrics, idx)
+
+    if axis == 1
+      ξx = cell_center_metrics.ξ.x₁[idx]
+      ξy = cell_center_metrics.ξ.x₂[idx]
+      mᵢ₊½ = ξx + ξy
+    else
+      ηx = cell_center_metrics.η.x₁[idx]
+      ηy = cell_center_metrics.η.x₂[idx]
+      mᵢ₊½ = ηx + ηy
+    end
+
+    # mᵢ₊½ = metric(m, axis, idx)
+
+    ᵢ₊₁ = shift(idx, axis, +1)
+
+    # edge diffusivity / iter params
+    αᵢ₊½ = harmon_mean(α[idx], α[ᵢ₊₁])
+    θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
+
+    ∂H∂xᵢ₊½ = mᵢ₊½ * (H[ᵢ₊₁] - H[idx])
+
+    qHxᵢ₊½[idx] = (qHxᵢ₊½[idx] * θr_dτ_ᵢ₊½ - αᵢ₊½ * ∂H∂xᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+    qHx_2ᵢ₊½[idx] = -αᵢ₊½ * ∂H∂xᵢ₊½
+  end
+end
+
+@inline harm_mean(a, b) = (2a * b) / (a + b)
+
 function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
 
   #
-  @kernel function _flux_kernel!(
-    qHxᵢ₊½, qHx_2ᵢ₊½, H, α, θr_dτ, cell_center_metrics, edge_metrics, axis, I0, mean_func
-  )
-    idx = @index(Global, Cartesian)
-    idx += I0
-
-    @inbounds begin
-      m = non_conservative_metrics_iso(cell_center_metrics, edge_metrics, idx)
-      mᵢ₊½ = metric(m, axis, idx)
-
-      ᵢ₊₁ = shift(idx, axis, +1)
-
-      # edge diffusivity / iter params
-      αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-      θr_dτ_ᵢ₊½ = arithmetic_mean(θr_dτ[idx], θr_dτ[ᵢ₊₁])
-
-      ∂H∂xᵢ₊½ = mᵢ₊½ * (H[ᵢ₊₁] - H[idx])
-
-      qHxᵢ₊½[idx] = (qHxᵢ₊½[idx] * θr_dτ_ᵢ₊½ - αᵢ₊½ * ∂H∂xᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
-      qHx_2ᵢ₊½[idx] = -αᵢ₊½ * ∂H∂xᵢ₊½
-    end
-  end
 
   iaxis = 1
   jaxis = 2
@@ -291,31 +315,29 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
   ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
   ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
 
-  _flux_kernel!(solver.backend)(
+  flux_kernel!(solver.backend)(
     solver.qH.x,
     solver.qH_2.x,
     solver.H,
     solver.α,
     solver.θr_dτ,
     mesh.cell_center_metrics,
-    mesh.edge_metrics,
     iaxis,
-    ᵢ₊½_idx_offset,
-    solver.mean;
+    ᵢ₊½_idx_offset;
+    # solver.mean;
     ndrange=size(ᵢ₊½_domain),
   )
 
-  _flux_kernel!(solver.backend)(
+  flux_kernel!(solver.backend)(
     solver.qH.y,
     solver.qH_2.y,
     solver.H,
     solver.α,
     solver.θr_dτ,
     mesh.cell_center_metrics,
-    mesh.edge_metrics,
     jaxis,
-    ⱼ₊½_idx_offset,
-    solver.mean;
+    ⱼ₊½_idx_offset;
+    # solver.mean;
     ndrange=size(ⱼ₊½_domain),
   )
 
@@ -370,23 +392,30 @@ end
 
 #
 @kernel function _update_kernel!(
-  H, @Const(H_prev), grid, @Const(qH), @Const(dτ_ρ), @Const(source_term), dt, I0
+  H,
+  @Const(H_prev),
+  cell_center_metrics,
+  @Const(qH),
+  @Const(dτ_ρ),
+  @Const(source_term),
+  dt,
+  I0,
 )
   idx = @index(Global, Cartesian)
   idx += I0
 
   @inbounds begin
-    ∇qH = flux_divergence(qH, grid, idx)
+    # ∇qH = flux_divergence(qH, grid, idx)
 
     qHx = qH.x
     qHy = qH.y
 
-    m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+    # m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
 
-    # ξx = cell_center_metrics.ξ.x₁[idx]
-    # ξy = cell_center_metrics.ξ.x₂[idx]
-    # ηx = cell_center_metrics.η.x₁[idx]
-    # ηy = cell_center_metrics.η.x₂[idx]
+    ξx = cell_center_metrics.ξ.x₁[idx]
+    ξy = cell_center_metrics.ξ.x₂[idx]
+    ηx = cell_center_metrics.η.x₁[idx]
+    ηy = cell_center_metrics.η.x₂[idx]
 
     iaxis = 1
     jaxis = 2
@@ -394,8 +423,8 @@ end
     ⱼ₋₁ = shift(idx, jaxis, -1)
 
     ∇qH = (
-      (m.ξx + m.ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
-      (m.ηx + m.ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+      (ξx + ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+      (ηx + ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
     )
 
     H[idx] = (
@@ -416,7 +445,7 @@ function compute_update!(solver, mesh, Δt)
   _update_kernel!(solver.backend)(
     solver.H,
     solver.H_prev,
-    mesh,
+    mesh.cell_center_metrics,
     solver.qH,
     solver.dτ_ρ,
     solver.source_term,
@@ -493,27 +522,51 @@ function flux_divergence(qH, mesh, idx::CartesianIndex{2})
   return ∇qH
 end
 
+@kernel function _update_resid!(
+  resid, cell_center_metrics, H, H_prev, flux, source_term, dt, I0
+)
+  idx = @index(Global, Cartesian)
+  idx += I0
+
+  qHx = flux.x
+  qHy = flux.y
+
+  @inbounds begin
+
+    # m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+
+    ξx = cell_center_metrics.ξ.x₁[idx]
+    ξy = cell_center_metrics.ξ.x₂[idx]
+    ηx = cell_center_metrics.η.x₁[idx]
+    ηy = cell_center_metrics.η.x₂[idx]
+
+    iaxis = 1
+    jaxis = 2
+    ᵢ₋₁ = shift(idx, iaxis, -1)
+    ⱼ₋₁ = shift(idx, jaxis, -1)
+
+    ∇qH = (
+      (ξx + ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+      (ηx + ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+    )
+
+    # ∇qH = flux_divergence(flux, grid, idx)
+
+    resid[idx] = -(H[idx] - H_prev[idx]) / dt - ∇qH + source_term[idx]
+  end
+end
+
 """
     update_residual!(solver::PseudoTransientSolver, mesh, Δt)
 
 """
 function update_residual!(solver::PseudoTransientSolver, mesh, Δt)
-  @kernel function _update_resid!(resid, grid, H, H_prev, flux, source_term, dt, I0)
-    idx = @index(Global, Cartesian)
-    idx += I0
-
-    @inbounds begin
-      ∇qH = flux_divergence(flux, grid, idx)
-      resid[idx] = -(H[idx] - H_prev[idx]) / dt - ∇qH + source_term[idx]
-    end
-  end
-
   domain = solver.iterators.domain.cartesian
   idx_offset = first(domain) - oneunit(first(domain))
 
   _update_resid!(solver.backend)(
     solver.res,
-    mesh,
+    mesh.cell_center_metrics,
     solver.H,
     solver.H_prev,
     solver.qH_2,
