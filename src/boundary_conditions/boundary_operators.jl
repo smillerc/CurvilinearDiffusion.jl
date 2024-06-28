@@ -26,7 +26,9 @@ function applybcs!(bcs, mesh, u::AbstractArray)
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+function applybc!(
+  ::NeumannBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int, nhalo=1
+)
   @unpack ilo, ihi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,
@@ -34,16 +36,20 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1] = u[ilo]
+      for nh in 1:nhalo
+        u[ilo - nh] = u[ilo]
+      end
     elseif loc == IHI_BC_LOC
-      u[ihi + 1] = u[ihi]
+      for nh in 1:nhalo
+        u[ihi + nh] = u[ihi]
+      end
     else
       error("Bad 1d boundary location value $(loc), must be 1 or 2")
     end
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int, nhalo=1)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,
@@ -51,20 +57,28 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::I
 
   @views begin
     if loc == ILO_BC_LOC
-      copy!(u[ilo - 1, jlo:jhi], u[ilo, jlo:jhi])
+      for nh in 1:nhalo
+        copy!(u[ilo - nh, jlo:jhi], u[ilo, jlo:jhi])
+      end
     elseif loc == IHI_BC_LOC
-      copy!(u[ihi + 1, jlo:jhi], u[ihi, jlo:jhi])
+      for nh in 1:nhalo
+        copy!(u[ihi + nh, jlo:jhi], u[ihi, jlo:jhi])
+      end
     elseif loc == JLO_BC_LOC
-      copy!(u[ilo:ihi, jlo - 1], u[ilo:ihi, jlo])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jlo - nh], u[ilo:ihi, jlo])
+      end
     elseif loc == JHI_BC_LOC
-      copy!(u[ilo:ihi, jhi + 1], u[ilo:ihi, jhi])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jhi + nh], u[ilo:ihi, jhi])
+      end
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
   end
 end
 
-function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int, nhalo=1)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,
@@ -72,17 +86,29 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::I
 
   @views begin
     if loc == ILO_BC_LOC
-      copy!(u[ilo - 1, jlo:jhi, klo:khi], u[ilo, jlo:jhi, klo:khi])
+      for nh in 1:nhalo
+        copy!(u[ilo - nh, jlo:jhi, klo:khi], u[ilo, jlo:jhi, klo:khi])
+      end
     elseif loc == IHI_BC_LOC
-      copy!(u[ihi + 1, jlo:jhi, klo:khi], u[ihi, jlo:jhi, klo:khi])
+      for nh in 1:nhalo
+        copy!(u[ihi + nh, jlo:jhi, klo:khi], u[ihi, jlo:jhi, klo:khi])
+      end
     elseif loc == JLO_BC_LOC
-      copy!(u[ilo:ihi, jlo - 1, klo:khi], u[ilo:ihi, jlo, klo:khi])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jlo - nh, klo:khi], u[ilo:ihi, jlo, klo:khi])
+      end
     elseif loc == JHI_BC_LOC
-      copy!(u[ilo:ihi, jhi + 1, klo:khi], u[ilo:ihi, jhi, klo:khi])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jhi + nh, klo:khi], u[ilo:ihi, jhi, klo:khi])
+      end
     elseif loc == KLO_BC_LOC
-      copy!(u[ilo:ihi, jlo:jhi, klo - 1], u[ilo:ihi, jlo:jhi, klo])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jlo:jhi, klo - nh], u[ilo:ihi, jlo:jhi, klo])
+      end
     elseif loc == KHI_BC_LOC
-      copy!(u[ilo:ihi, jlo:jhi, khi + 1], u[ilo:ihi, jlo:jhi, khi])
+      for nh in 1:nhalo
+        copy!(u[ilo:ihi, jlo:jhi, khi + nh], u[ilo:ihi, jlo:jhi, khi])
+      end
     else
       error("Bad 3d boundary location value $(loc), must be 1-6")
     end
