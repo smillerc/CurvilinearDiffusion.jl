@@ -71,7 +71,7 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (100, 100)
+  ni, nj = (1000, 1000)
   nhalo = 1
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -143,7 +143,7 @@ function run(maxiter=Inf)
   global io_interval = 0.01
   global io_next = io_interval
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   while true
     if iter == 0
@@ -152,14 +152,14 @@ function run(maxiter=Inf)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=2
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=20
     )
     @printf "\tL2: %.3e, %i\n" err subiter
 
-    if t + Δt > io_next
-      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
-      global io_next += io_interval
-    end
+    # if t + Δt > io_next
+    #   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+    #   global io_next += io_interval
+    # end
 
     if t >= maxt
       break
@@ -173,9 +173,9 @@ function run(maxiter=Inf)
     # Δt = next_dt
   end
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
-    scheme, scheme.H, mesh, iter, t, casename
-  )
+  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+  #   scheme, scheme.H, mesh, iter, t, casename
+  # )
 
   print_timer()
   return scheme, mesh, T
@@ -185,6 +185,8 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(1500)
+  scheme, mesh, temperature = run(10)
   nothing
 end
+
+@profview run(10)

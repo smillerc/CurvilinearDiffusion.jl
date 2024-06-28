@@ -118,22 +118,22 @@ end
 @inline function non_conservative_metrics_iso(
   cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
 )
-  Jᵢ₊½ = edge_metrics.i₊½.J[idx]
-  Jⱼ₊½ = edge_metrics.j₊½.J[idx]
+  # Jᵢ₊½ = edge_metrics.i₊½.J[idx]
+  # Jⱼ₊½ = edge_metrics.j₊½.J[idx]
 
   return (
     ξx=cell_center_metrics.ξ.x₁[idx],
     ξy=cell_center_metrics.ξ.x₂[idx],
     ηx=cell_center_metrics.η.x₁[idx],
     ηy=cell_center_metrics.η.x₂[idx],
-    ξxᵢ₊½=edge_metrics.i₊½.ξ̂.x₁[idx] / Jᵢ₊½,
-    ξyᵢ₊½=edge_metrics.i₊½.ξ̂.x₂[idx] / Jᵢ₊½,
-    ηxᵢ₊½=edge_metrics.i₊½.η̂.x₁[idx] / Jᵢ₊½,
-    ηyᵢ₊½=edge_metrics.i₊½.η̂.x₂[idx] / Jᵢ₊½,
-    ξxⱼ₊½=edge_metrics.j₊½.ξ̂.x₁[idx] / Jⱼ₊½,
-    ξyⱼ₊½=edge_metrics.j₊½.ξ̂.x₂[idx] / Jⱼ₊½,
-    ηxⱼ₊½=edge_metrics.j₊½.η̂.x₁[idx] / Jⱼ₊½,
-    ηyⱼ₊½=edge_metrics.j₊½.η̂.x₂[idx] / Jⱼ₊½,
+    # ξxᵢ₊½=edge_metrics.i₊½.ξ̂.x₁[idx] / Jᵢ₊½,
+    # ξyᵢ₊½=edge_metrics.i₊½.ξ̂.x₂[idx] / Jᵢ₊½,
+    # ηxᵢ₊½=edge_metrics.i₊½.η̂.x₁[idx] / Jᵢ₊½,
+    # ηyᵢ₊½=edge_metrics.i₊½.η̂.x₂[idx] / Jᵢ₊½,
+    # ξxⱼ₊½=edge_metrics.j₊½.ξ̂.x₁[idx] / Jⱼ₊½,
+    # ξyⱼ₊½=edge_metrics.j₊½.ξ̂.x₂[idx] / Jⱼ₊½,
+    # ηxⱼ₊½=edge_metrics.j₊½.η̂.x₁[idx] / Jⱼ₊½,
+    # ηyⱼ₊½=edge_metrics.j₊½.η̂.x₂[idx] / Jⱼ₊½,
   )
 end
 
