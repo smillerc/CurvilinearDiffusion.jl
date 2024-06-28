@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.42
+# v0.19.43
 
 using Markdown
 using InteractiveUtils
@@ -16,7 +16,7 @@ using Latexify
 # ╔═╡ 90b35e26-c0c0-45f1-82a3-858fe4f38c8f
 html"""<style>
 main {
-    max-width: 1800px;
+    max-width: 1000px;
 }
 """
 
@@ -106,7 +106,21 @@ begin
 end
 
 # ╔═╡ 61da9e46-2bbc-44c9-88a5-b553c9f96ca1
-diff2d |> simplify
+_d2d = diff2d |> simplify
+
+# ╔═╡ 4a425646-82ba-4abb-abcf-6e5b9839ca1d
+# q_i = -a * D[1](u)
+
+# ╔═╡ e6c2f27a-0aff-49dc-9d3c-06f70243c114
+@variables q_i q_j
+
+# ╔═╡ fe0dd7dc-6e4c-4c51-930a-64c33a01d3b0
+substitute(_d2d, 
+	Dict(
+		a*D[1](u) => q_i,
+		a*D[2](u) => q_j
+	)
+)
 
 # ╔═╡ 788c2865-05e3-4e02-bc72-8a55aab9fcc8
 @variables aᵢ₊½ aᵢ₋½ aⱼ₊½ aⱼ₋½ aₖ₊½ aₖ₋½ α β γ
@@ -1124,6 +1138,9 @@ version = "17.4.0+2"
 # ╠═d2a5d698-a0b7-4113-8eec-d1ba9e0aaea2
 # ╠═403d1615-aa9e-4b2b-af0f-cb52e858e881
 # ╠═61da9e46-2bbc-44c9-88a5-b553c9f96ca1
+# ╠═fe0dd7dc-6e4c-4c51-930a-64c33a01d3b0
+# ╠═4a425646-82ba-4abb-abcf-6e5b9839ca1d
+# ╠═e6c2f27a-0aff-49dc-9d3c-06f70243c114
 # ╠═788c2865-05e3-4e02-bc72-8a55aab9fcc8
 # ╠═5a542599-21ab-4409-9f32-73b44a31248f
 # ╠═d33cf295-0179-4ea9-8dd2-4663032b0a6b

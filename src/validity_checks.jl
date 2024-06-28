@@ -12,8 +12,8 @@ function validate_scalar(
   end
 
   if !domain_valid
-    @show extrema(α_domain)
-    error("Invalid $name in the domain")
+    _min, _max = extrema(α_domain)
+    error("Invalid $name in the domain extrema -> $((_min, _max))")
   end
 
   for axis in 1:N

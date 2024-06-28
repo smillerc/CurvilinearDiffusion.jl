@@ -98,6 +98,7 @@ function init_state()
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = zeros(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
 
   # Define the conductivity model
@@ -115,10 +116,12 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
 
-    T[idx] = exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    # T[idx] = exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) #+ T_cold
+    source_term[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) #+ T_cold
   end
 
   #   T[idx] = exp(-(xc - lx / 2) .^ 2 - ((yc - ly / 2)') .^ 2)
+  copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -142,18 +145,16 @@ function run(maxiter=Inf)
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
-  #   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-
   while true
     if iter == 0
       reset_timer!()
     end
 
+    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e5, tol=1e-8, error_check_interval=1
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=2
     )
-    # @show err, subiter
-    @printf "cycle: %i t: %.4e, Δt: %.3e, L2: %.3e, %i\n" iter t Δt err subiter
+    @printf "\tL2: %.3e, %i\n" err subiter
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -184,6 +185,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(Inf)
+  scheme, mesh, temperature = run(1500)
   nothing
 end

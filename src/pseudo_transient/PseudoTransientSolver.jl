@@ -2,6 +2,7 @@ module PseudoTransientScheme
 
 using LinearAlgebra: norm
 
+using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
 using CurvilinearGrids: CurvilinearGrid2D, cellsize_withhalo, coords
 using KernelAbstractions
@@ -13,6 +14,7 @@ using ..BoundaryConditions
 
 include("../averaging.jl")
 include("../validity_checks.jl")
+include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
@@ -138,7 +140,6 @@ function step!(
 
   validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
   validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
-  # display(solver.α)
   validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
 
   # Pseudo-transient iteration
@@ -151,36 +152,36 @@ function step!(
     end
     applybcs!(solver.bcs, mesh, solver.H)
 
-    update_iteration_params!(solver, ρ, Vpdτ, dt)
+    @timeit "update_iteration_params!" update_iteration_params!(solver, mesh, ρ, Vpdτ, dt)
 
     applybcs!(solver.bcs, mesh, solver.α)
     applybcs!(solver.bcs, mesh, solver.dτ_ρ)
     applybcs!(solver.bcs, mesh, solver.θr_dτ)
 
-    compute_flux!(solver)
-    compute_update!(solver, dt)
+    @timeit "compute_flux!" compute_flux!(solver, mesh)
+    @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
-    if iter % error_check_interval == 0
-      update_residual!(solver, dt)
+    # Apply a cutoff function to remove negative
+    # if cutoff
+    cutoff!(solver.H)
+    # end
 
-      res = @view solver.res[solver.iterators.domain.cartesian]
-      err = norm(res) / sqrt(length(res))
+    # if iter % error_check_interval == 0
+    @timeit "update_residual!" update_residual!(solver, mesh, dt)
 
-      if !isfinite(err)
-        error("Non-finite error detected! ($err)")
-      end
+    res = @view solver.res[solver.iterators.domain.cartesian]
+    err = norm(res) / sqrt(length(res))
+
+    if !isfinite(err)
+      error("Non-finite error detected! ($err)")
     end
+    # end
   end
 
   if iter == max_iter
     @error(
       "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
     )
-  end
-
-  # Apply a cutoff function to remove negative u values
-  if cutoff
-    cutoff!(solver.H)
   end
 
   validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
@@ -192,17 +193,18 @@ end
 
 function update_iteration_params!(
   solver,
+  mesh,
   ρ,
   Vpdτ,
   dt,
   # β=1 / 1.2, # iteration scaling parameter
   β=1, # iteration scaling parameter
 )
-  @inbounds for idx in solver.iterators.domain.cartesian
+  for idx in solver.iterators.domain.cartesian
     solver.Re[idx] = π + sqrt(π^2 + (solver.L^2 * ρ[idx]) / (solver.α[idx] * dt))
   end
 
-  @inbounds for idx in solver.iterators.domain.cartesian
+  for idx in solver.iterators.domain.cartesian
     solver.dτ_ρ[idx] = (Vpdτ * solver.L / (solver.α[idx] * solver.Re[idx])) * β
     solver.θr_dτ[idx] = (solver.L / (Vpdτ * solver.Re[idx])) * β
   end
@@ -210,7 +212,7 @@ function update_iteration_params!(
   return nothing
 end
 
-function compute_flux!(solver::PseudoTransientSolver{2,T}) where {T}
+function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
   qHxᵢ₊½ = solver.qH.x
   qHyⱼ₊½ = solver.qH.y
 
@@ -219,34 +221,38 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}) where {T}
   qHy_2ⱼ₊½ = solver.qH_2.y
 
   # fluxes are on the edge, H_i+1/2
-  i, j = (1, 2)
+  iaxis, jaxis = (1, 2)
 
   dx, dy = solver.spacing
 
-  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, i, +1)
-  @inbounds for idx in ᵢ₊½_domain
-    ᵢ₊₁ = shift(idx, i, +1)
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  for idx in ᵢ₊½_domain
+    m = non_conservative_metrics_iso(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+    ᵢ₊₁ = shift(idx, iaxis, +1)
 
     # edge diffusivity / iter params
     αᵢ₊½ = solver.mean(solver.α[idx], solver.α[ᵢ₊₁])
     θr_dτ_ᵢ₊½ = arithmetic_mean(θr_dτ[idx], θr_dτ[ᵢ₊₁])
 
-    ∂H∂xᵢ₊½ = (solver.H[ᵢ₊₁] - solver.H[idx]) / dx
+    # ∂H∂xᵢ₊½ = (solver.H[ᵢ₊₁] - solver.H[idx]) / dx
+    ∂H∂xᵢ₊½ = (m.ξx + m.ξy) * (solver.H[ᵢ₊₁] - solver.H[idx])
 
     qHxᵢ₊½[idx] = (qHxᵢ₊½[idx] * θr_dτ_ᵢ₊½ - αᵢ₊½ * ∂H∂xᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
 
     qHx_2ᵢ₊½[idx] = -αᵢ₊½ * ∂H∂xᵢ₊½
   end
 
-  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, j, +1)
-  @inbounds for idx in ⱼ₊½_domain
-    ⱼ₊₁ = shift(idx, j, +1)
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+  for idx in ⱼ₊½_domain
+    m = non_conservative_metrics_iso(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+    ⱼ₊₁ = shift(idx, jaxis, +1)
 
     # edge diffusivity / iter params
     αⱼ₊½ = solver.mean(solver.α[idx], solver.α[ⱼ₊₁])
     θr_dτ_ⱼ₊½ = arithmetic_mean(θr_dτ[idx], θr_dτ[ⱼ₊₁])
 
-    ∂H∂yⱼ₊½ = (solver.H[ⱼ₊₁] - solver.H[idx]) / dy
+    # ∂H∂yⱼ₊½ = (solver.H[ⱼ₊₁] - solver.H[idx]) / dy
+    ∂H∂yⱼ₊½ = (m.ηx + m.ηy) * (solver.H[ⱼ₊₁] - solver.H[idx])
 
     qHyⱼ₊½[idx] = (qHyⱼ₊½[idx] * θr_dτ_ⱼ₊½ - αⱼ₊½ * ∂H∂yⱼ₊½) / (1 + θr_dτ_ⱼ₊½)
 
@@ -256,7 +262,7 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}) where {T}
   return nothing
 end
 
-function compute_update!(solver::PseudoTransientSolver{2,T}, dt) where {T}
+function compute_update!(solver::PseudoTransientSolver{2,T}, mesh, dt) where {T}
 
   #
   qHx = solver.qH.x
@@ -265,43 +271,89 @@ function compute_update!(solver::PseudoTransientSolver{2,T}, dt) where {T}
   i, j = (1, 2)
   dx, dy = solver.spacing
 
-  @inbounds for idx in solver.iterators.domain.cartesian
-    ᵢ₋₁ = shift(idx, i, -1)
-    ⱼ₋₁ = shift(idx, j, -1)
+  for idx in solver.iterators.domain.cartesian
+    # ᵢ₋₁ = shift(idx, i, -1)
+    # ⱼ₋₁ = shift(idx, j, -1)
 
-    ∇qH = (
-      (qHx[idx] - qHx[ᵢ₋₁]) / dx + # ∂qH∂x
-      (qHy[idx] - qHy[ⱼ₋₁]) / dy   # ∂qH∂y
-    )
+    # m = non_conservative_metrics_iso(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+
+    # ∇qH = (
+    #   (m.ξx^2 + m.ξy^2) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+    #   (m.ηx^2 + m.ηy^2) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+    # ) # + solver.source_term[idx]
+    # ∇qH = (
+    #   (qHx[idx] - qHx[ᵢ₋₁]) / dx + # ∂qH∂x
+    #   (qHy[idx] - qHy[ⱼ₋₁]) / dy   # ∂qH∂y
+    # ) # + solver.source_term[idx]
+
+    ∇qH = flux_divergence(solver.qH, mesh, idx)
 
     solver.H[idx] = (
-      (solver.H[idx] + solver.dτ_ρ[idx] * (solver.H_prev[idx] / dt - ∇qH)) /
-      (1 + solver.dτ_ρ[idx] / dt)
+      (
+        solver.H[idx] +
+        solver.dτ_ρ[idx] * (solver.H_prev[idx] / dt - ∇qH + solver.source_term[idx])
+      ) / (1 + solver.dτ_ρ[idx] / dt)
     )
   end
 
   return nothing
 end
 
-function update_residual!(solver::PseudoTransientSolver{2,T}, dt) where {T}
+@inline function flux_divergence(qH, mesh, idx)
+  qHx = qH.x
+  qHy = qH.y
+
+  m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+
+  iaxis = 1
+  jaxis = 2
+  ᵢ₋₁ = shift(idx, iaxis, -1)
+  ⱼ₋₁ = shift(idx, jaxis, -1)
+
+  αᵢⱼ = (
+    m.ξx * (m.ξxᵢ₊½ - m.ξxᵢ₋½) +
+    m.ξy * (m.ξyᵢ₊½ - m.ξyᵢ₋½) +
+    m.ηx * (m.ξxⱼ₊½ - m.ξxⱼ₋½) +
+    m.ηy * (m.ξyⱼ₊½ - m.ξyⱼ₋½)
+  )
+
+  βᵢⱼ = (
+    m.ξx * (m.ηxᵢ₊½ - m.ηxᵢ₋½) +
+    m.ξy * (m.ηyᵢ₊½ - m.ηyᵢ₋½) +
+    m.ηx * (m.ηxⱼ₊½ - m.ηxⱼ₋½) +
+    m.ηy * (m.ηyⱼ₊½ - m.ηyⱼ₋½)
+  )
+
+  ∇qH = (
+    (m.ξx + m.ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+    (m.ηx + m.ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+  )
+
+  return ∇qH
+end
+
+function update_residual!(solver::PseudoTransientSolver{2,T}, mesh, dt) where {T}
 
   #
-  qHx_2 = solver.qH_2.x
-  qHy_2 = solver.qH_2.y
+  # qHx_2 = solver.qH_2.x
+  # qHy_2 = solver.qH_2.y
 
-  i, j = (1, 2)
-  dx, dy = solver.spacing
+  # i, j = (1, 2)
+  # dx, dy = solver.spacing
 
   for idx in solver.iterators.domain.cartesian
-    ᵢ₋₁ = shift(idx, i, -1)
-    ⱼ₋₁ = shift(idx, j, -1)
 
-    ∇qH = (
-      (qHx_2[idx] - qHx_2[ᵢ₋₁]) / dx + # ∂qH∂x
-      (qHy_2[idx] - qHy_2[ⱼ₋₁]) / dy   # ∂qH∂y
-    )
+    # ᵢ₋₁ = shift(idx, i, -1)
+    # ⱼ₋₁ = shift(idx, j, -1)
+    # ∇qH_orig = (
+    #   (qHx_2[idx] - qHx_2[ᵢ₋₁]) / dx + # ∂qH∂x
+    #   (qHy_2[idx] - qHy_2[ⱼ₋₁]) / dy   # ∂qH∂y
+    # )
 
-    solver.res[idx] = -(solver.H[idx] - solver.H_prev[idx]) / dt - ∇qH
+    ∇qH = flux_divergence(solver.qH_2, mesh, idx)
+
+    solver.res[idx] =
+      -(solver.H[idx] - solver.H_prev[idx]) / dt - ∇qH + solver.source_term[idx]
   end
 
   return nothing
