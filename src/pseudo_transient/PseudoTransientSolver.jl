@@ -75,10 +75,10 @@ function PseudoTransientSolver(
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
 
   x, y = coords(mesh)
-  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2)))
+  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
   min_x, max_x = extrema(x)
   min_y, max_y = extrema(y)
-  L = max(abs(max_x - min_x), abs(max_y - min_y))
+  L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
 
   if face_diffusivity === :harmonic
     mean_func = harmonic_mean # from ../averaging.jl
@@ -169,9 +169,13 @@ function step!(
     if iter % error_check_interval == 0
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
 
-      res = @view solver.res[solver.iterators.domain.cartesian]
-      err = norm(res) / sqrt(length(res))
+      @timeit "norm" begin
+        res = @view solver.res[solver.iterators.domain.cartesian]
 
+        err = L2_norm(res)
+
+        # err = norm(res) / sqrt(length(res))
+      end
       if !isfinite(err)
         error("Non-finite error detected! ($err)")
       end
@@ -189,6 +193,11 @@ function step!(
   copy!(T, solver.H)
 
   return err, iter
+end
+
+function L2_norm(A)
+  _norm = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
+  return _norm
 end
 
 function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
@@ -359,27 +368,50 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
   return nothing
 end
 
+#
+@kernel function _update_kernel!(
+  H, @Const(H_prev), grid, @Const(qH), @Const(dτ_ρ), @Const(source_term), dt, I0
+)
+  idx = @index(Global, Cartesian)
+  idx += I0
+
+  @inbounds begin
+    ∇qH = flux_divergence(qH, grid, idx)
+
+    qHx = qH.x
+    qHy = qH.y
+
+    m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+
+    # ξx = cell_center_metrics.ξ.x₁[idx]
+    # ξy = cell_center_metrics.ξ.x₂[idx]
+    # ηx = cell_center_metrics.η.x₁[idx]
+    # ηy = cell_center_metrics.η.x₂[idx]
+
+    iaxis = 1
+    jaxis = 2
+    ᵢ₋₁ = shift(idx, iaxis, -1)
+    ⱼ₋₁ = shift(idx, jaxis, -1)
+
+    ∇qH = (
+      (m.ξx + m.ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+      (m.ηx + m.ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+    )
+
+    H[idx] = (
+      (H[idx] + dτ_ρ[idx] * (H_prev[idx] / dt - ∇qH + source_term[idx])) /
+      (1 + dτ_ρ[idx] / dt)
+    )
+  end
+end
+
 """
 """
 function compute_update!(solver, mesh, Δt)
-
-  #
-  @kernel function _update_kernel!(H, H_prev, grid, qH, dτ_ρ, source_term, dt, I0)
-    idx = @index(Global, Cartesian)
-    idx += I0
-
-    @inbounds begin
-      ∇qH = flux_divergence(qH, grid, idx)
-
-      H[idx] = (
-        (H[idx] + dτ_ρ[idx] * (H_prev[idx] / dt - ∇qH + source_term[idx])) /
-        (1 + dτ_ρ[idx] / dt)
-      )
-    end
-  end
-
   domain = solver.iterators.domain.cartesian
   idx_offset = first(domain) - oneunit(first(domain))
+
+  workgroup = (32, 32)
 
   _update_kernel!(solver.backend)(
     solver.H,

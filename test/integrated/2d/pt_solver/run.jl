@@ -4,6 +4,7 @@ using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
+using NVTX
 
 @static if Sys.islinux()
   using MKL
@@ -17,7 +18,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :CPU
+dev = :GPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -71,7 +72,7 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (1000, 1000)
+  ni, nj = (2000, 2000)
   nhalo = 1
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -81,8 +82,8 @@ end
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  # mesh = adapt(ArrayT, initialize_mesh())
-  mesh = initialize_mesh()
+  mesh = adapt(ArrayT, initialize_mesh())
+  # mesh = initialize_mesh()
 
   bcs = (
     ilo=NeumannBC(),  #
@@ -91,14 +92,15 @@ function init_state()
     jhi=NeumannBC(),  #
   )
 
-  solver = PseudoTransientSolver(mesh, bcs)
+  solver = PseudoTransientSolver(mesh, bcs; backend=backend)
 
+  @show size(mesh.iterators.cell.full)
   # Temperature and density
   T_hot = 1e3
   T_cold = 1e-2
-  T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
-  ρ = ones(Float64, cellsize_withhalo(mesh))
-  source_term = zeros(Float64, cellsize_withhalo(mesh))
+  T = ones(size(mesh.iterators.cell.full)) * T_cold
+  ρ = ones(size(mesh.iterators.cell.full))
+  source_term = ones(size(mesh.iterators.cell.full))
   cₚ = 1.0
 
   # Define the conductivity model
@@ -113,15 +115,17 @@ function init_state()
   fwhm = 1.0
   x0 = 5.0
   y0 = 5.0
+  xc = Array(mesh.centroid_coordinates.x)
+  yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
+    # T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
 
-    # T[idx] = exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) #+ T_cold
-    source_term[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) #+ T_cold
+    source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
   #   T[idx] = exp(-(xc - lx / 2) .^ 2 - ((yc - ly / 2)') .^ 2)
   copy!(solver.source_term, source_term) # move to gpu (if need be)
+  # copy!(solver.T, T) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -143,7 +147,7 @@ function run(maxiter=Inf)
   global io_interval = 0.01
   global io_next = io_interval
 
-  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   while true
     if iter == 0
@@ -152,14 +156,14 @@ function run(maxiter=Inf)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=20
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=5
     )
     @printf "\tL2: %.3e, %i\n" err subiter
 
-    # if t + Δt > io_next
-    #   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
-    #   global io_next += io_interval
-    # end
+    if t + Δt > io_next
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      global io_next += io_interval
+    end
 
     if t >= maxt
       break
@@ -173,9 +177,9 @@ function run(maxiter=Inf)
     # Δt = next_dt
   end
 
-  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
-  #   scheme, scheme.H, mesh, iter, t, casename
-  # )
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+    scheme, scheme.H, mesh, iter, t, casename
+  )
 
   print_timer()
   return scheme, mesh, T
@@ -185,8 +189,21 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
+  # NVTX.@range "my message" begin
   scheme, mesh, temperature = run(10)
   nothing
+  # end
 end
 
-@profview run(10)
+# run(5)
+
+# function L2_norm(A)
+#   _norm = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
+#   return _norm
+# end
+
+# A = rand(50, 50);
+
+# err1 = norm(A) / sqrt(length(A))
+
+# L2_norm(A)
