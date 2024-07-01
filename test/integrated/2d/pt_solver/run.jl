@@ -18,7 +18,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :GPU
+dev = :CPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -47,10 +47,10 @@ function wavy_grid(ni, nj, nhalo)
   Δx0 = Lx / (ni - 1)
   Δy0 = Ly / (nj - 1)
 
-  Ax = 0.4 / Δx0
-  Ay = 0.8 / Δy0
-  # Ax = 0.2 / Δx0
-  # Ay = 0.4 / Δy0
+  # Ax = 0.4 / Δx0
+  # Ay = 0.8 / Δy0
+  Ax = 0.2 / Δx0
+  Ay = 0.4 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -65,14 +65,16 @@ function wavy_grid(ni, nj, nhalo)
 end
 
 function uniform_grid(nx, ny, nhalo)
-  x0, x1 = (0, 10)
-  y0, y1 = (0, 10)
+  x0, x1 = (-5, 5)
+  y0, y1 = (-5, 5)
+  # x0, x1 = (0, 10)
+  # y0, y1 = (0, 10)
 
   return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (2000, 2000)
+  ni, nj = (150, 150)
   nhalo = 1
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -94,7 +96,6 @@ function init_state()
 
   solver = PseudoTransientSolver(mesh, bcs; backend=backend)
 
-  @show size(mesh.iterators.cell.full)
   # Temperature and density
   T_hot = 1e3
   T_cold = 1e-2
@@ -108,24 +109,22 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 #* temperature^3
     end
   end
 
   fwhm = 1.0
-  x0 = 5.0
-  y0 = 5.0
+  x0 = 0.0
+  y0 = 0.0
   xc = Array(mesh.centroid_coordinates.x)
   yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
-    # T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
+    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
 
-    source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
+    # source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
-  #   T[idx] = exp(-(xc - lx / 2) .^ 2 - ((yc - ly / 2)') .^ 2)
   copy!(solver.source_term, source_term) # move to gpu (if need be)
-  # copy!(solver.T, T) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -138,7 +137,7 @@ function run(maxiter=Inf)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  global Δt = 1e-4
+  global Δt = 1e-5
   #   global Δt = 0.02
   global t = 0.0
   global maxt = 0.5
@@ -156,7 +155,7 @@ function run(maxiter=Inf)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1e3, tol=1e-8, error_check_interval=5
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=25, tol=1e-8, error_check_interval=2
     )
     @printf "\tL2: %.3e, %i\n" err subiter
 
@@ -190,20 +189,7 @@ begin
   rm.(glob("*.vts"))
 
   # NVTX.@range "my message" begin
-  scheme, mesh, temperature = run(10)
+  scheme, mesh, temperature = run(50)
   nothing
   # end
 end
-
-# run(5)
-
-# function L2_norm(A)
-#   _norm = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
-#   return _norm
-# end
-
-# A = rand(50, 50);
-
-# err1 = norm(A) / sqrt(length(A))
-
-# L2_norm(A)

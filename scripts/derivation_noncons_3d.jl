@@ -85,7 +85,9 @@ begin
 		term1 = 0
 		for j in 1:2
 			for i in 1:2
+				
 				term1 += a2d[i] ⋅ a2d[j] * D[i](a * D[j](u))
+				
 			end
 		end
 
@@ -100,10 +102,19 @@ begin
 		end
 		term2 *= a
 		
-		diffusion2d = term1 + term2
+		diffusion2d = term1  + term2
 	end
 	diff2d = diff2deq()
 end
+
+# ╔═╡ 2e11e078-2950-4a3c-bbfc-4b0d99287eb0
+
+
+# ╔═╡ 0798e039-192d-49d0-ac54-722fad69d86c
+a2d[1] * (a * D[1](u))
+
+# ╔═╡ 1bed917e-85b8-4c5a-ac3f-dc9bb0b2306e
+
 
 # ╔═╡ 61da9e46-2bbc-44c9-88a5-b553c9f96ca1
 _d2d = diff2d |> simplify
@@ -121,6 +132,7 @@ substitute(_d2d,
 		a*D[2](u) => q_j
 	)
 )
+
 
 # ╔═╡ 788c2865-05e3-4e02-bc72-8a55aab9fcc8
 @variables aᵢ₊½ aᵢ₋½ aⱼ₊½ aⱼ₋½ aₖ₊½ aₖ₋½ α β γ
@@ -1137,6 +1149,9 @@ version = "17.4.0+2"
 # ╠═00044dca-056c-4c0e-a49d-924e9591b552
 # ╠═d2a5d698-a0b7-4113-8eec-d1ba9e0aaea2
 # ╠═403d1615-aa9e-4b2b-af0f-cb52e858e881
+# ╠═2e11e078-2950-4a3c-bbfc-4b0d99287eb0
+# ╠═0798e039-192d-49d0-ac54-722fad69d86c
+# ╠═1bed917e-85b8-4c5a-ac3f-dc9bb0b2306e
 # ╠═61da9e46-2bbc-44c9-88a5-b553c9f96ca1
 # ╠═fe0dd7dc-6e4c-4c51-930a-64c33a01d3b0
 # ╠═4a425646-82ba-4abb-abcf-6e5b9839ca1d
