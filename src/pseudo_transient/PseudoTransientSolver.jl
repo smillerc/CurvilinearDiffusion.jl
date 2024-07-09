@@ -137,6 +137,8 @@ function step!(
   copy!(solver.H_prev, solver.H)
 
   update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+  # display(solver.α)
+  # error("done")
 
   validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
   validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
@@ -144,7 +146,7 @@ function step!(
 
   # Pseudo-transient iteration
   while err > tol && iter < max_iter && isfinite(err)
-    @info "Iter: $iter, Err: $err"
+    # @info "Iter: $iter, Err: $err"
     iter += 1
 
     # Diffusion coefficient
@@ -185,7 +187,7 @@ function step!(
   end
 
   if iter == max_iter
-    @error(
+    error(
       "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
     )
   end
@@ -250,7 +252,7 @@ function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
   # return nothing
 end
 
-@kernel function flux_kernel!(
+@kernel function flux_kernel_cons!(
   qᵢ₊½::AbstractArray{T,2},
   q′ᵢ₊½::AbstractArray{T,2},
   H,
@@ -281,11 +283,13 @@ end
     Jηx_ⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j]
     Jηy_ⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j]
 
-    a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
-    a_Jη²ⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
+    a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½ + Jξy_ᵢ₊½) / Jᵢ₊½
+    a_Jη²ⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½ + Jηy_ⱼ₊½) / Jⱼ₊½
+    # a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
+    # a_Jη²ⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
 
     # edge diffusivity / iter params
-    αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
+    # αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
     θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
 
     # ∇Hᵢ₊½ = mᵢ₊½ * (H[ᵢ₊₁] - H[idx])
@@ -300,45 +304,85 @@ end
   end
 end
 
-# @kernel function flux_kernel_nc!(
-#   qᵢ₊½::AbstractArray{T,2},
-#   q′ᵢ₊½::AbstractArray{T,2},
-#   @Const(H),
-#   @Const(α),
-#   @Const(θr_dτ),
-#   cell_center_metrics,
-#   axis,
-#   I0,
-#   mean_func::F,
-# ) where {T,F}
-#   idx = @index(Global, Cartesian)
-#   idx += I0
+@kernel function flux_kernel_noncons!(
+  qᵢ₊½::AbstractArray{T,2},
+  q′ᵢ₊½::AbstractArray{T,2},
+  H,
+  α,
+  θr_dτ,
+  cell_center_metrics,
+  axis,
+  I0,
+  mean_func::F,
+) where {T,F}
+  idx = @index(Global, Cartesian)
+  idx += I0
 
-#   @inbounds begin
-#     if axis == 1
-#       ξx = cell_center_metrics.ξ.x₁[idx]
-#       ξy = cell_center_metrics.ξ.x₂[idx]
-#       mᵢ₊½ = ξx + ξy
-#       # mᵢ₊½ = ξx
-#     else
-#       ηx = cell_center_metrics.η.x₁[idx]
-#       ηy = cell_center_metrics.η.x₂[idx]
-#       mᵢ₊½ = ηx + ηy
-#       # mᵢ₊½ = ηy
-#     end
+  @inbounds begin
+    ᵢ₊₁ = shift(idx, axis, +1)
 
-#     ᵢ₊₁ = shift(idx, axis, +1)
+    # edge diffusivity / iter params
+    αᵢ₊½ = (α[idx] + α[ᵢ₊₁]) / 2
+    θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
 
-#     # edge diffusivity / iter params
-#     αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-#     θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
+    if axis == 1
+      ξx = cell_center_metrics.ξ.x₁[idx]
+      ξy = cell_center_metrics.ξ.x₂[idx]
+      _qᵢ₊½ = -αᵢ₊½ * (ξx + ξy) * (H[ᵢ₊₁] - H[idx])
+    else
+      ηx = cell_center_metrics.η.x₁[idx]
+      ηy = cell_center_metrics.η.x₂[idx]
+      _qᵢ₊½ = -αᵢ₊½ * (ηx + ηy) * (H[ᵢ₊₁] - H[idx])
+    end
 
-#     ∇Hᵢ₊½ = mᵢ₊½ * (H[ᵢ₊₁] - H[idx])
+    qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+    q′ᵢ₊½[idx] = _qᵢ₊½
+  end
+end
 
-#     qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ - αᵢ₊½ * ∇Hᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
-#     q′ᵢ₊½[idx] = -αᵢ₊½ * ∇Hᵢ₊½
-#   end
-# end
+function compute_flux_noncons!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
+
+  #
+
+  iaxis = 1
+  jaxis = 2
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+
+  # domain = solver.iterators.domain.cartesian
+  ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
+  ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
+
+  flux_kernel_noncons!(solver.backend)(
+    solver.qH.x,
+    solver.qH_2.x,
+    solver.H,
+    solver.α,
+    solver.θr_dτ,
+    mesh.cell_center_metrics,
+    iaxis,
+    ᵢ₊½_idx_offset,
+    solver.mean;
+    ndrange=size(ᵢ₊½_domain),
+  )
+
+  flux_kernel_noncons!(solver.backend)(
+    solver.qH.y,
+    solver.qH_2.y,
+    solver.H,
+    solver.α,
+    solver.θr_dτ,
+    mesh.cell_center_metrics,
+    jaxis,
+    ⱼ₊½_idx_offset,
+    solver.mean;
+    ndrange=size(ⱼ₊½_domain),
+  )
+
+  KernelAbstractions.synchronize(solver.backend)
+
+  return nothing
+end
 
 function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
 
@@ -353,28 +397,26 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}, mesh) where {T}
   ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
   ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
 
-  flux_kernel!(solver.backend)(
+  flux_kernel_cons!(solver.backend)(
     solver.qH.x,
     solver.qH_2.x,
     solver.H,
     solver.α,
     solver.θr_dτ,
     mesh.edge_metrics,
-    # mesh.cell_center_metrics,
     iaxis,
     ᵢ₊½_idx_offset,
     solver.mean;
     ndrange=size(ᵢ₊½_domain),
   )
 
-  flux_kernel!(solver.backend)(
+  flux_kernel_cons!(solver.backend)(
     solver.qH.y,
     solver.qH_2.y,
     solver.H,
     solver.α,
     solver.θr_dτ,
     mesh.edge_metrics,
-    # mesh.cell_center_metrics,
     jaxis,
     ⱼ₊½_idx_offset,
     solver.mean;
@@ -444,7 +486,7 @@ end
 
 Compute the divergence of the flux, e.g. ∇⋅(α∇H), where the flux is `qH = α∇H`
 """
-function flux_divergence(
+function flux_divergence_cons(
   (qᵢ, qⱼ), H, α, cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
 )
   i, j = idx.I
@@ -479,10 +521,10 @@ function flux_divergence(
   Jηx_ⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1]
   Jηy_ⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1]
 
-  # a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
-  # a_Jξ²ᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
-  # a_Jη²ⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
-  # a_Jη²ⱼ₋½ = αⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
+  a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½^2 + Jξy_ᵢ₊½^2) / Jᵢ₊½
+  a_Jξ²ᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½^2 + Jξy_ᵢ₋½^2) / Jᵢ₋½
+  a_Jη²ⱼ₊½ = αⱼ₊½ * (Jηx_ⱼ₊½^2 + Jηy_ⱼ₊½^2) / Jⱼ₊½
+  a_Jη²ⱼ₋½ = αⱼ₋½ * (Jηx_ⱼ₋½^2 + Jηy_ⱼ₋½^2) / Jⱼ₋½
 
   a_Jξηᵢ₊½ = αᵢ₊½ * (Jξx_ᵢ₊½ * Jηx_ᵢ₊½ + Jξy_ᵢ₊½ * Jηy_ᵢ₊½) / (4Jᵢ₊½)
   a_Jξηᵢ₋½ = αᵢ₋½ * (Jξx_ᵢ₋½ * Jηx_ᵢ₋½ + Jξy_ᵢ₋½ * Jηy_ᵢ₋½) / (4Jᵢ₋½)
@@ -491,22 +533,23 @@ function flux_divergence(
 
   # flux divergence
 
+  ∇q = (
+    (a_Jξ²ᵢ₊½ * (H[i + 1, j] - H[i, j]) - a_Jξ²ᵢ₋½ * (H[i, j] - H[i - 1, j])) +
+    (a_Jη²ⱼ₊½ * (H[i, j + 1] - H[i, j]) - a_Jη²ⱼ₋½ * (H[i, j] - H[i, j - 1]))
+    # +
+    # a_Jξηᵢ₊½ * (H[i, j + 1] - H[i, j - 1] + H[i + 1, j + 1] - H[i + 1, j - 1]) -
+    # a_Jξηᵢ₋½ * (H[i, j + 1] - H[i, j - 1] + H[i - 1, j + 1] - H[i - 1, j - 1]) +
+    # a_Jηξⱼ₊½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j + 1] - H[i - 1, j + 1]) -
+    # a_Jηξⱼ₋½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j - 1] - H[i - 1, j - 1])
+  )
   # ∇q = (
-  #   (a_Jξ²ᵢ₊½ * (H[i + 1, j] - H[i, j]) - a_Jξ²ᵢ₋½ * (H[i, j] - H[i - 1, j])) +
-  #   (a_Jη²ⱼ₊½ * (H[i, j + 1] - H[i, j]) - a_Jη²ⱼ₋½ * (H[i, j] - H[i, j - 1])) +
+  #   (qᵢ[i, j] - qᵢ[i - 1, j]) + # 
+  #   (qⱼ[i, j] - qⱼ[i, j - 1]) + # 
   #   a_Jξηᵢ₊½ * (H[i, j + 1] - H[i, j - 1] + H[i + 1, j + 1] - H[i + 1, j - 1]) -
   #   a_Jξηᵢ₋½ * (H[i, j + 1] - H[i, j - 1] + H[i - 1, j + 1] - H[i - 1, j - 1]) +
   #   a_Jηξⱼ₊½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j + 1] - H[i - 1, j + 1]) -
   #   a_Jηξⱼ₋½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j - 1] - H[i - 1, j - 1])
   # )
-  ∇q = (
-    (qᵢ[i, j] - qᵢ[i - 1, j]) + # 
-    (qⱼ[i, j] - qⱼ[i, j - 1]) + # 
-    a_Jξηᵢ₊½ * (H[i, j + 1] - H[i, j - 1] + H[i + 1, j + 1] - H[i + 1, j - 1]) -
-    a_Jξηᵢ₋½ * (H[i, j + 1] - H[i, j - 1] + H[i - 1, j + 1] - H[i - 1, j - 1]) +
-    a_Jηξⱼ₊½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j + 1] - H[i - 1, j + 1]) -
-    a_Jηξⱼ₋½ * (H[i + 1, j] - H[i - 1, j] + H[i + 1, j - 1] - H[i - 1, j - 1])
-  )
 
   # ∇q = ∂qᵢ∂ξ + ∂qⱼ∂η + ∂qᵢ∂η + ∂qⱼ∂ξ + ∂H∂ξ + ∂H∂η
   return ∇q
@@ -638,38 +681,37 @@ function flux_divergence_noncon(
   return ∇q
 end
 
-# function flux_divergence(qH, mesh, idx::CartesianIndex{2})
-#   qHx = qH.x
-#   qHy = qH.y
+function flux_divergence(
+  (qHx, qHy), H, α, cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
+)
+  m = non_conservative_metrics(cell_center_metrics, edge_metrics, idx)
 
-#   m = non_conservative_metrics(mesh.cell_center_metrics, mesh.edge_metrics, idx)
+  iaxis = 1
+  jaxis = 2
+  ᵢ₋₁ = shift(idx, iaxis, -1)
+  ⱼ₋₁ = shift(idx, jaxis, -1)
 
-#   iaxis = 1
-#   jaxis = 2
-#   ᵢ₋₁ = shift(idx, iaxis, -1)
-#   ⱼ₋₁ = shift(idx, jaxis, -1)
+  # αᵢⱼ = (
+  #   m.ξx * (m.ξxᵢ₊½ - m.ξxᵢ₋½) +
+  #   m.ξy * (m.ξyᵢ₊½ - m.ξyᵢ₋½) +
+  #   m.ηx * (m.ξxⱼ₊½ - m.ξxⱼ₋½) +
+  #   m.ηy * (m.ξyⱼ₊½ - m.ξyⱼ₋½)
+  # )
 
-#   # αᵢⱼ = (
-#   #   m.ξx * (m.ξxᵢ₊½ - m.ξxᵢ₋½) +
-#   #   m.ξy * (m.ξyᵢ₊½ - m.ξyᵢ₋½) +
-#   #   m.ηx * (m.ξxⱼ₊½ - m.ξxⱼ₋½) +
-#   #   m.ηy * (m.ξyⱼ₊½ - m.ξyⱼ₋½)
-#   # )
+  # βᵢⱼ = (
+  #   m.ξx * (m.ηxᵢ₊½ - m.ηxᵢ₋½) +
+  #   m.ξy * (m.ηyᵢ₊½ - m.ηyᵢ₋½) +
+  #   m.ηx * (m.ηxⱼ₊½ - m.ηxⱼ₋½) +
+  #   m.ηy * (m.ηyⱼ₊½ - m.ηyⱼ₋½)
+  # )
 
-#   # βᵢⱼ = (
-#   #   m.ξx * (m.ηxᵢ₊½ - m.ηxᵢ₋½) +
-#   #   m.ξy * (m.ηyᵢ₊½ - m.ηyᵢ₋½) +
-#   #   m.ηx * (m.ηxⱼ₊½ - m.ηxⱼ₋½) +
-#   #   m.ηy * (m.ηyⱼ₊½ - m.ηyⱼ₋½)
-#   # )
+  ∇qH = (
+    (m.ξx + m.ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
+    (m.ηx + m.ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
+  )
 
-#   ∇qH = (
-#     (m.ξx + m.ξy) * (qHx[idx] - qHx[ᵢ₋₁]) + # ∂qH∂x
-#     (m.ηx + m.ηy) * (qHy[idx] - qHy[ⱼ₋₁])   # ∂qH∂y
-#   )
-
-#   return ∇qH
-# end
+  return ∇qH
+end
 
 @kernel function _update_resid!(
   resid::AbstractArray{T,2},
