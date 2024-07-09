@@ -113,7 +113,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 #* temperature^3
+      return κ0 * temperature^3
     end
   end
 
@@ -181,7 +181,7 @@ function run(maxiter=Inf)
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
-    scheme, scheme.H, mesh, iter, t, casename
+    scheme, scheme.u, mesh, iter, t, casename
   )
 
   print_timer()
