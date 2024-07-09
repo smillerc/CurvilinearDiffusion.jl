@@ -81,23 +81,39 @@ I use the ξ̂ terms to signify the Jξ terms that Huang and Russell have in the
 """
 
 # ╔═╡ 403d1615-aa9e-4b2b-af0f-cb52e858e881
-# begin
-# 	diffusion2d = 0 #Symbolics.Num
-# 	for j in 1:2
-# 		for i in 1:2
-# 			diffusion2d += D[i](
-# 				a * J * a2d[i] ⋅ a2d[j] *  D[j](u)
-# 			)
-# 		end
-# 	end
-# 	diffusion2d 
-# end
+begin
+	diffusion2d = 0 #Symbolics.Num
+	for j in 1:2
+		for i in 1:2
+			diffusion2d += 
+				D[i](
+				a * J * a2d[i] ⋅ a2d[j] *  D[j](u)
+			)
+		end
+	end
+	diffusion2d 
+end
+
+# ╔═╡ 9e5c8cda-0fe5-40d9-8f59-b65e70ef3ddf
+_d2d = diffusion2d
 
 # ╔═╡ d7f35a79-70cf-428c-96dc-649a362c313c
 a * J * a2d[2] *  D[2](u)
 
-# ╔═╡ 39429545-7cba-4410-967c-c6dd6f80b0ed
+# ╔═╡ fe11a36e-c070-4b20-8330-c5106426bef8
+@variables q_i q_j
 
+# ╔═╡ de5adadf-e9bd-4b72-b90a-bf11ec3dcdd8
+substitute(_d2d, 
+	Dict(
+		a*J*D[1](u) => q_i,
+		a*J*D[2](u) => q_j
+	)
+)
+
+
+# ╔═╡ 5b17b9a4-507e-456e-9157-8b2df4e6b825
+@variables αᵢ₊½ Jξ_x_ᵢ₊½ Jξ_y_ᵢ₊½ Jᵢ₊½
 
 # ╔═╡ 2d6e3786-5580-479a-a97a-a9a56131ba9f
 
@@ -106,18 +122,27 @@ a * J * a2d[2] *  D[2](u)
 
 
 # ╔═╡ b456d95f-ff23-4cae-98ef-f08b70a60310
-begin
-	diffusion3d = 0 #Symbolics.Num
-	for j in 1:3
-		for i in 1:3
-			diffusion3d += D[i](
-				a * J * a3d[i] ⋅ a3d[j] *  D[j](u)
-			)
-			# diffusion += α * Ja[i] ⋅ a[j] * D[j](u)
-		end
-	end
-	diffusion3d # |> latexify  |> print
-end
+# begin
+# 	diffusion3d = 0 #Symbolics.Num
+# 	for j in 1:3
+# 		for i in 1:3
+# 			diffusion3d += D[i](
+# 				a * J * a3d[i] ⋅ a3d[j] *  D[j](u)
+# 			)
+# 			# diffusion += α * Ja[i] ⋅ a[j] * D[j](u)
+# 		end
+# 	end
+# 	diffusion3d # |> latexify  |> print
+# end
+
+# ╔═╡ a36443bc-34bf-4982-a16c-e452446c573a
+a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξ_x_ᵢ₊½^2 + Jξ_y_ᵢ₊½^2) / Jᵢ₊½
+
+# ╔═╡ 39429545-7cba-4410-967c-c6dd6f80b0ed
+# ╠═╡ disabled = true
+#=╠═╡
+a_Jξ²ᵢ₊½ = αᵢ₊½ * (Jξ_x_ᵢ₊½ + Jξ_y_ᵢ₊½) / Jᵢ₊½
+  ╠═╡ =#
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -992,8 +1017,13 @@ version = "17.4.0+2"
 # ╠═82ec6781-85f4-4b6f-9ff9-07c041e44cbe
 # ╠═6ccc5e5d-8f38-428d-8c3d-ac9ce24e9b19
 # ╠═403d1615-aa9e-4b2b-af0f-cb52e858e881
+# ╠═9e5c8cda-0fe5-40d9-8f59-b65e70ef3ddf
+# ╠═de5adadf-e9bd-4b72-b90a-bf11ec3dcdd8
 # ╠═d7f35a79-70cf-428c-96dc-649a362c313c
+# ╠═fe11a36e-c070-4b20-8330-c5106426bef8
+# ╠═5b17b9a4-507e-456e-9157-8b2df4e6b825
 # ╠═39429545-7cba-4410-967c-c6dd6f80b0ed
+# ╠═a36443bc-34bf-4982-a16c-e452446c573a
 # ╠═2d6e3786-5580-479a-a97a-a9a56131ba9f
 # ╠═2885a017-409d-4d62-93b9-5507fb030592
 # ╠═b456d95f-ff23-4cae-98ef-f08b70a60310

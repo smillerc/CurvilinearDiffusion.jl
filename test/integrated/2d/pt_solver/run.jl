@@ -76,10 +76,10 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (150, 50)
+  ni, nj = (150, 150)
   nhalo = 1
-  # return wavy_grid(ni, nj, nhalo)
-  return uniform_grid(ni, nj, nhalo)
+  return wavy_grid(ni, nj, nhalo)
+  # return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -90,10 +90,10 @@ function init_state()
   # mesh = initialize_mesh()
 
   bcs = (
-    # ilo=NeumannBC(),  #
-    # ihi=NeumannBC(),  #
-    ilo=DirichletBC(1.0),  #
-    ihi=DirichletBC(0.0),  #
+    ilo=NeumannBC(),  #
+    ihi=NeumannBC(),  #
+    # ilo=DirichletBC(1.0),  #
+    # ihi=DirichletBC(0.0),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
   )
@@ -113,20 +113,20 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 #* temperature^3
     end
   end
 
-  # fwhm = 1.0
-  # x0 = 0.0
-  # y0 = 0.0
-  # xc = Array(mesh.centroid_coordinates.x)
-  # yc = Array(mesh.centroid_coordinates.y)
-  # for idx in mesh.iterators.cell.domain
-  #   T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
+  fwhm = 1.0
+  x0 = 0.0
+  y0 = 0.0
+  xc = Array(mesh.centroid_coordinates.x)
+  yc = Array(mesh.centroid_coordinates.y)
+  for idx in mesh.iterators.cell.domain
+    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
 
-  #   # source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
-  # end
+    # source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
+  end
 
   # copy!(solver.source_term, source_term) # move to gpu (if need be)
 
@@ -144,7 +144,7 @@ function run(maxiter=Inf)
   global Δt = 1e-4
   #   global Δt = 0.02
   global t = 0.0
-  global maxt = 1.0
+  global maxt = 0.6
 
   global iter = 0
   global io_interval = 0.01
@@ -159,7 +159,7 @@ function run(maxiter=Inf)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=150, tol=1e-8, error_check_interval=2
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1500, tol=1e-8, error_check_interval=2
     )
     @printf "\tL2: %.3e, %i\n" err subiter
 
