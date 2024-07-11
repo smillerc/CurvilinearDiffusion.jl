@@ -47,10 +47,10 @@ function wavy_grid(ni, nj, nhalo)
   Δx0 = Lx / (ni - 1)
   Δy0 = Ly / (nj - 1)
 
-  # Ax = 0.4 / Δx0
-  # Ay = 0.8 / Δy0
-  Ax = 0.2 / Δx0
-  Ay = 0.4 / Δy0
+  Ax = 0.4 / Δx0
+  Ay = 0.8 / Δy0
+  # Ax = 0.2 / Δx0
+  # Ay = 0.4 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -110,10 +110,12 @@ function init_state()
 
   # Define the conductivity model
   @inline function κ(ρ, temperature, κ0=1.0)
-    if !isfinite(temperature)
-      return 0.0
+    kappa = κ0 * temperature #^3
+
+    if !isfinite(kappa)
+      return zero(temperature)
     else
-      return κ0 * temperature^3
+      return kappa
     end
   end
 
@@ -141,7 +143,7 @@ function run(maxiter=Inf)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  global Δt = 1e-4
+  global Δt = 1e-6
   #   global Δt = 0.02
   global t = 0.0
   global maxt = 0.6
@@ -159,7 +161,7 @@ function run(maxiter=Inf)
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1500, tol=1e-8, error_check_interval=2
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=50, tol=1e-8, error_check_interval=2
     )
     @printf "\tL2: %.3e, %i\n" err subiter
 
