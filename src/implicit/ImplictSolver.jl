@@ -277,18 +277,30 @@ function _iterative_solve!(
     @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
   end
 
-  @timeit "linear solve" Krylov.solve!(
-    scheme.linear_problem.solver,
-    scheme.linear_problem.A,
-    scheme.linear_problem.b,
-    scheme.linear_problem.solver.x;
-    atol=atol,
-    rtol=rtol,
-    # verbose=1,
-    history=true,
-    M=opM,
-    N=opN,
-  )
+  if !warmedup(scheme)
+    @timeit "linear solve" Krylov.solve!(
+      scheme.linear_problem.solver,
+      scheme.linear_problem.A,
+      scheme.linear_problem.b,
+      atol=atol,
+      rtol=rtol,
+      history=true,
+      M=opM,
+      N=opN,
+    )
+  else
+    @timeit "linear solve" Krylov.solve!(
+      scheme.linear_problem.solver,
+      scheme.linear_problem.A,
+      scheme.linear_problem.b,
+      scheme.linear_problem.solver.x;
+      atol=atol,
+      rtol=rtol,
+      history=true,
+      M=opM,
+      N=opN,
+    )
+  end
 
   # @show scheme.linear_problem.solver.stats
   # Apply a cutoff function to remove negative u values
