@@ -40,12 +40,6 @@ end
   @inbounds begin
     @inline ∇q = _orthogonal_flux_divergence(q, u, α, cell_center_metrics, idx)
 
-    # if abs(∇q) > 0
-    #   @show u[idx] dτ_ρ[idx] * (u_prev[idx] / dt - ∇q) dτ_ρ[idx] u_prev[idx] / dt ∇q u_prev[idx]
-    #   @show dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])
-    #   @show dτ_ρ[idx] (u_prev[idx] / dt - ∇q + source_term[idx])
-    #   error("done")
-    # end
     u[idx] = (
       (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) /
       (1 + dτ_ρ[idx] / dt)
@@ -57,34 +51,34 @@ function compute_update!(solver, mesh, Δt)
   domain = solver.iterators.domain.cartesian
   idx_offset = first(domain) - oneunit(first(domain))
 
-  # if mesh.is_orthogonal
-  #   _update_kernel_orth_mesh!(solver.backend)(
-  #     solver.u,
-  #     solver.u_prev,
-  #     mesh.cell_center_metrics,
-  #     solver.α,
-  #     solver.q,
-  #     solver.dτ_ρ,
-  #     solver.source_term,
-  #     Δt,
-  #     idx_offset;
-  #     ndrange=size(domain),
-  #   )
-  # else
-  _update_kernel_arb_mesh!(solver.backend)(
-    solver.u,
-    solver.u_prev,
-    mesh.cell_center_metrics,
-    mesh.edge_metrics,
-    solver.α,
-    solver.q,
-    solver.dτ_ρ,
-    solver.source_term,
-    Δt,
-    idx_offset;
-    ndrange=size(domain),
-  )
-  # end
+  if mesh.is_orthogonal
+    _update_kernel_orth_mesh!(solver.backend)(
+      solver.u,
+      solver.u_prev,
+      mesh.cell_center_metrics,
+      solver.α,
+      solver.q,
+      solver.dτ_ρ,
+      solver.source_term,
+      Δt,
+      idx_offset;
+      ndrange=size(domain),
+    )
+  else
+    _update_kernel_arb_mesh!(solver.backend)(
+      solver.u,
+      solver.u_prev,
+      mesh.cell_center_metrics,
+      mesh.edge_metrics,
+      solver.α,
+      solver.q,
+      solver.dτ_ρ,
+      solver.source_term,
+      Δt,
+      idx_offset;
+      ndrange=size(domain),
+    )
+  end
 
   KernelAbstractions.synchronize(solver.backend)
   return nothing

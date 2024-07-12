@@ -9,18 +9,14 @@ using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
 using UnPack: @unpack
+using Printf
 
 using ..BoundaryConditions
+using ..TimeStepControl
 
 include("../averaging.jl")
 include("../validity_checks.jl")
 include("../edge_terms.jl")
-
-include("conductivity.jl")
-include("flux.jl")
-include("flux_divergence.jl")
-include("residuals.jl")
-include("update.jl")
 
 export PseudoTransientSolver
 
@@ -44,8 +40,14 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,MC,B,F}
   backend::BE
 end
 
+include("conductivity.jl")
+include("flux.jl")
+include("flux_divergence.jl")
+include("residuals.jl")
+include("update.jl")
+
 function PseudoTransientSolver(
-  mesh, bcs; backend=CPU(), face_diffusivity=:arithmetic, T=Float64
+  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
 )
   #
   #         u
@@ -69,10 +71,10 @@ function PseudoTransientSolver(
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
 
   # edge-based; same dims as the cell-based arrays, but each entry stores the {i,j,k}+1/2 value
-  q = flux_tuple(mesh)
-  q′ = flux_tuple(mesh)
+  q = flux_tuple(mesh, backend, T)
+  q′ = flux_tuple(mesh, backend, T)
 
-  L, spacing = phys_dims(mesh)
+  L, spacing = phys_dims(mesh, T)
   if face_diffusivity === :harmonic
     mean_func = harmonic_mean # from ../averaging.jl
   else
@@ -102,7 +104,7 @@ function PseudoTransientSolver(
   )
 end
 
-function phys_dims(mesh::CurvilinearGrid2D)
+function phys_dims(mesh::CurvilinearGrid2D, T)
   x, y = coords(mesh)
   spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
   min_x, max_x = extrema(x)
@@ -113,7 +115,7 @@ function phys_dims(mesh::CurvilinearGrid2D)
   return L, spacing
 end
 
-function phys_dims(mesh::CurvilinearGrid3D)
+function phys_dims(mesh::CurvilinearGrid3D, T)
   x, y, z = coords(mesh)
   spacing =
     (minimum(diff(x; dims=1)), minimum(diff(y; dims=2)), minimum(diff(z; dims=3))) .|> T
@@ -127,14 +129,14 @@ function phys_dims(mesh::CurvilinearGrid3D)
   return L, spacing
 end
 
-function flux_tuple(mesh::CurvilinearGrid2D)
+function flux_tuple(mesh::CurvilinearGrid2D, backend, T)
   return (
     x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
     y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
 end
 
-function flux_tuple(mesh::CurvilinearGrid3D)
+function flux_tuple(mesh::CurvilinearGrid3D, backend, T)
   return (
     x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
     y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
@@ -154,9 +156,11 @@ function step!(
   κ,
   dt;
   max_iter=1e5,
-  tol=1e-8,
+  rel_tol=5e-6,
+  abs_tol=1e-9,
   error_check_interval=10,
   cutoff=true,
+  kwargs...,
 ) where {N}
 
   #
@@ -164,7 +168,9 @@ function step!(
   nhalo = 1
 
   iter = 0
-  err = 2 * tol
+  rel_err = 2 * rel_tol
+  abs_err = 2 * abs_tol
+  init_L₂ = Inf
 
   CFL = (1 / sqrt(N))
 
@@ -182,7 +188,8 @@ function step!(
   validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
 
   # Pseudo-transient iteration
-  while err > tol && iter < max_iter && isfinite(err)
+  # while err > tol && iter < max_iter && isfinite(err)
+  while true
     # @info "Iter: $iter"
     iter += 1
 
@@ -208,43 +215,56 @@ function step!(
 
     if iter % error_check_interval == 0 || iter == 1
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
+
       @timeit "norm" begin
         inner_dom = solver.iterators.domain.cartesian
         residual = @view solver.residual[inner_dom]
-        err2 = L2_norm(residual)
-        derr = abs(err - err2)
-        if derr < 1
-          break
+        # L₂norm = L2_norm(residual)
+        L₂norm = norm(residual, 2) / sqrt(length(residual))
+
+        if iter == 1
+          init_L₂ = L₂norm
         end
-        # @info "\tErr: $err2, $derr"
-        err = err2
+
+        rel_err = L₂norm / init_L₂
+        abs_err = L₂norm
       end
-      if !isfinite(err)
-        @show extrema(solver.residual)
-        error("Non-finite error detected! ($err)")
-      end
+    end
+
+    if !isfinite(rel_err) || !isfinite(abs_err)
+      @show extrema(solver.residual)
+      error("Non-finite error detected! abs_err = $abs_err, rel_err = $rel_err, exiting...")
+    end
+
+    if iter > max_iter
+      error(
+        "Maximum iteration limit reached ($max_iter), abs_err = $abs_err, rel_err = $rel_err, exiting...",
+      )
+    end
+
+    if rel_err <= rel_tol || abs_err <= abs_tol
+      # if abs_err <= abs_tol
+      break
     end
   end
 
-  if iter == max_iter
-    @error(
-      "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
-    )
+  @printf "\t rel_err: %.2e, abs_err: %.2e\n" rel_err abs_err
+  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
+
+  @timeit "next_dt" begin
+    next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
   end
 
-  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
   copy!(solver.u_prev, solver.u)
   copy!(T, solver.u)
 
-  return err, iter
+  stats = (rel_err=min(rel_err, abs_err), niter=iter)
+  return stats, next_Δt
 end
 
 # ------------------------------------------------------------------------------------------------
 
-function L2_norm(A)
-  _norm = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
-  return _norm
-end
+L2_norm(A) = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
 
 function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
   @kernel function _iter_param_kernel!(
