@@ -10,6 +10,7 @@ using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
 using UnPack: @unpack
 using Printf
+using WriteVTK
 
 using ..BoundaryConditions
 using ..TimeStepControl
@@ -206,29 +207,40 @@ function step!(
     applybcs!(solver.bcs, mesh, solver.θr_dτ)
 
     @timeit "compute_flux!" compute_flux!(solver, mesh)
-    @timeit "compute_update!" compute_update!(solver, mesh, dt)
+    validate_scalar(solver.q.x, domain, nhalo, :qx; enforce_positivity=false)
+    validate_scalar(solver.q.y, domain, nhalo, :qy; enforce_positivity=false)
 
-    # Apply a cutoff function to remove negative
-    if cutoff
-      cutoff!(solver.u)
+    @timeit "compute_update!" compute_update!(solver, mesh, dt)
+    # cutoff!(solver.u)
+    try
+      validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
+    catch
+      to_vtk(solver, mesh, iter, iter)
+      validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
+      error()
     end
 
-    if iter % error_check_interval == 0 || iter == 1
-      @timeit "update_residual!" update_residual!(solver, mesh, dt)
+    # Apply a cutoff function to remove negative
+    # if cutoff
+    # end
 
-      @timeit "norm" begin
-        inner_dom = solver.iterators.domain.cartesian
-        residual = @view solver.residual[inner_dom]
-        # L₂norm = L2_norm(residual)
-        L₂norm = norm(residual, 2) / sqrt(length(residual))
+    # if iter % error_check_interval == 0 || iter == 1
+    @timeit "update_residual!" update_residual!(solver, mesh, dt)
+    validate_scalar(solver.residual, domain, nhalo, :resid; enforce_positivity=false)
 
-        if iter == 1
-          init_L₂ = L₂norm
-        end
+    @timeit "norm" begin
+      inner_dom = solver.iterators.domain.cartesian
+      residual = @view solver.residual[inner_dom]
+      # L₂norm = L2_norm(residual)
+      L₂norm = norm(residual, 2) / sqrt(length(residual))
 
-        rel_err = L₂norm / init_L₂
-        abs_err = L₂norm
+      if iter == 1
+        init_L₂ = L₂norm
       end
+
+      rel_err = L₂norm / init_L₂
+      abs_err = L₂norm
+      # end
     end
 
     if !isfinite(rel_err) || !isfinite(abs_err)
@@ -237,6 +249,8 @@ function step!(
     end
 
     if iter > max_iter
+      @printf "\t rel_err: %.2e, abs_err: %.2e\n" rel_err abs_err
+      to_vtk(solver, mesh, iter, iter)
       error(
         "Maximum iteration limit reached ($max_iter), abs_err = $abs_err, rel_err = $rel_err, exiting...",
       )
@@ -248,7 +262,6 @@ function step!(
     end
   end
 
-  @printf "\t rel_err: %.2e, abs_err: %.2e\n" rel_err abs_err
   validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
 
   @timeit "next_dt" begin
@@ -316,6 +329,45 @@ end
   @inbounds begin
     _a = cutoff(a[idx])
     a[idx] = _a
+  end
+end
+
+get_filename(iteration) = file_prefix * @sprintf("%07i", iteration)
+
+function get_filename(iteration, name::String)
+  name = replace(name, " " => "_")
+  if !endswith(name, "_")
+    name = name * "_"
+  end
+  return name * @sprintf("%07i", iteration)
+end
+
+function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
+  fn = get_filename(iteration, name)
+  @info "Writing to $fn"
+
+  domain = mesh.iterators.cell.domain
+
+  _coords = Array{T}.(coords(mesh))
+
+  @views vtk_grid(fn, _coords...) do vtk
+    vtk["TimeValue"] = t
+    vtk["u"] = Array{T}(scheme.u[domain])
+    vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
+    vtk["qi"] = Array{T}(scheme.q[1][domain])
+    vtk["qj"] = Array{T}(scheme.q[2][domain])
+    vtk["q2i"] = Array{T}(scheme.q′[1][domain])
+    vtk["q2j"] = Array{T}(scheme.q′[2][domain])
+
+    vtk["residual"] = Array{T}(scheme.residual[domain])
+    vtk["Reynolds_number"] = Array{T}(scheme.Reynolds_number[domain])
+
+    vtk["diffusivity"] = Array{T}(scheme.α[domain])
+
+    vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
+    vtk["θr_dτ"] = Array{T}(scheme.θr_dτ[domain])
+
+    vtk["source_term"] = Array{T}(scheme.source_term[domain])
   end
 end
 

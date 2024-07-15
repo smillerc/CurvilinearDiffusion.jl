@@ -47,6 +47,7 @@ function save_vtk(
   @views vtk_grid(fn, coords...) do vtk
     vtk["TimeValue"] = t
     vtk["u"] = Array{T}(u[domain])
+    vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["qi"] = Array{T}(scheme.q[1][domain])
     vtk["qj"] = Array{T}(scheme.q[2][domain])
     vtk["q2i"] = Array{T}(scheme.q′[1][domain])

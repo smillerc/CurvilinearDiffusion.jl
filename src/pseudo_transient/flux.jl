@@ -9,12 +9,13 @@
 
     # edge diffusivity / iter params
     αᵢ₊½ = mean_func(α[ᵢ], α[ᵢ₊₁])
+    θr_dτ_ᵢ₊½ = mean_func(θr_dτ[ᵢ], θr_dτ[ᵢ₊₁])
     # θr_dτ_ᵢ₊½ = (θr_dτ[ᵢ] + θr_dτ[ᵢ₊₁]) / 2
-    θr_dτ_ᵢ₊½ = max(θr_dτ[ᵢ], θr_dτ[ᵢ₊₁])
+    # θr_dτ_ᵢ₊½ = max(θr_dτ[ᵢ], θr_dτ[ᵢ₊₁])
 
     du = (u[ᵢ₊₁] - u[ᵢ])
     du = du * (abs(du) >= 1e-14)
-    _qᵢ₊½ = -αᵢ₊½ * du
+    _qᵢ₊½ = -αᵢ₊½ * du * isfinite(du)
 
     qᵢ₊½[ᵢ] = (qᵢ₊½[ᵢ] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
     q′ᵢ₊½[ᵢ] = _qᵢ₊½
