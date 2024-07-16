@@ -52,6 +52,7 @@ function ImplicitScheme(
   mesh,
   bcs;
   direct_solve=false,
+  direct_solver=:pardiso,
   face_conductivity::Symbol=:harmonic,
   T=Float64,
   backend=CPU(),
@@ -126,24 +127,15 @@ function ImplicitScheme(
 
   b = KernelAbstractions.zeros(backend, T, length(full_CI))
   diffusivity = KernelAbstractions.zeros(backend, T, size(full_CI))
-  uⁿ⁺¹ = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   if direct_solve
-    # algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
-    # algorithm = KLUFactorization(; reuse_symbolic=true, check_pattern=true)
-    # algorithm = MKLPardisoFactorize()
-    algorithm = MKLPardisoIterate()
-
-    linear_problem = init(LinearProblem(A, b), algorithm)
+    alg = direct_solver_alg(direct_solver, backend)
+    linear_problem = init(LinearProblem(A, b), alg)
   else
-    # Pr, _ldiv = preconditioner(A, backend)
-    # algorithm = KrylovJL_GMRES(; history=true, ldiv=_ldiv) # krylov solver
-
     solver = GmresSolver(A, b)
-
-    F = ilu0(A)
+    F = preconditioner(A, backend)
     linear_problem = (; solver, A, b, precon=F)
   end
 
@@ -163,6 +155,23 @@ function ImplicitScheme(
 
   @info "Initialization finished"
   return implicit_solver
+end
+
+function direct_solver_alg(algorithm, ::CPU)
+  if algorithm === :pardiso
+    @info "Using the MKLPardisoIterate direct solver"
+    return MKLPardisoIterate()
+  elseif algorithm === :klu
+    @info "Using the KLUFactorization direct solver"
+    return KLUFactorization(; reuse_symbolic=true, check_pattern=true)
+  else # if algorithm === :umfpack
+    @info "Using the UMFPACKFactorization direct solver"
+    return UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
+  end
+end
+
+function direct_solver_alg(algorithm, ::GPU)
+  error("No direct solver for the GPU is set up yet")
 end
 
 function limits(CI::CartesianIndices{2})
@@ -257,25 +266,19 @@ function _iterative_solve!(
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
   KernelAbstractions.synchronize(scheme.backend)
 
-  n = size(scheme.linear_problem.A, 1)
-  F = scheme.linear_problem.precon
-
-  opM = LinearOperator(
-    Float64, n, n, false, false, (y, v) -> forward_substitution!(y, F, v)
-  )
-  opN = LinearOperator(
-    Float64, n, n, false, false, (y, v) -> backward_substitution!(y, F, v)
-  )
-
   if !warmedup(scheme)
-    @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
-    warmup!(scheme)
+    refresh = true
+  else
+    refresh = scheme.linear_problem.solver.stats.niter > precon_iter_threshold
+
+    if refresh
+      @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
+    end
   end
 
-  if scheme.linear_problem.solver.stats.niter > precon_iter_threshold
-    @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
-    @timeit "ilu0!" ilu0!(F, scheme.linear_problem.A)
-  end
+  precon, _ldiv = update_precon(
+    scheme.linear_problem.A, scheme.linear_problem.precon, refresh, scheme.backend
+  )
 
   if !warmedup(scheme)
     @timeit "linear solve" Krylov.solve!(
@@ -285,9 +288,10 @@ function _iterative_solve!(
       atol=atol,
       rtol=rtol,
       history=true,
-      M=opM,
-      N=opN,
+      N=precon,
+      ldiv=_ldiv,
     )
+    warmup!(scheme)
   else
     @timeit "linear solve" Krylov.solve!(
       scheme.linear_problem.solver,
@@ -297,8 +301,8 @@ function _iterative_solve!(
       atol=atol,
       rtol=rtol,
       history=true,
-      M=opM,
-      N=opN,
+      N=precon,
+      ldiv=_ldiv,
     )
   end
 
@@ -324,12 +328,32 @@ function _iterative_solve!(
   return scheme.linear_problem.solver.stats, next_Δt
 end
 
-preconditioner(A, ::CPU) = ILUZero.ilu0
+preconditioner(A, ::CPU) = ILUZero.ilu0(A)
+preconditioner(A, ::GPU, τ=0.1) = KrylovPreconditioners.kp_ilu0(A)
 
-function preconditioner(A, backend::GPU, τ=0.1)
-  p = KrylovPreconditioners.kp_ilu0(A)
-  # p = KrylovPreconditioners.BlockJacobiPreconditioner(A, backend)
-  return p
+function update_precon(A, P, refresh, ::CPU)
+  _ldiv = false
+  n = size(A, 1)
+
+  opN = LinearOperator(
+    Float64, n, n, false, false, (y, v) -> backward_substitution!(y, P, v)
+  )
+  if refresh
+    @timeit "preconditioner" begin
+      ilu0!(P, A)
+    end
+  end
+  return opN, _ldiv
+end
+
+function update_precon(A, P, refresh, ::GPU)
+  _ldiv = true
+  if refresh
+    @timeit "preconditioner" begin
+      KrylovPreconditioners.update!(P, A)
+    end
+  end
+  return P, _ldiv
 end
 
 @inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
