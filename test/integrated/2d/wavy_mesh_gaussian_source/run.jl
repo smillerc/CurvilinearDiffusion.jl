@@ -172,4 +172,4 @@ else
   ArrayT = Array
 end
 
-run(dev, false, true);
+run(dev, false, false);

@@ -329,7 +329,7 @@ function _iterative_solve!(
 end
 
 preconditioner(A, ::CPU) = ILUZero.ilu0(A)
-preconditioner(A, ::GPU, τ=0.1) = KrylovPreconditioners.kp_ilu0(A)
+preconditioner(A, ::GPU) = KrylovPreconditioners.kp_ilu0(A)
 
 function update_precon(A, P, refresh, ::CPU)
   _ldiv = false
