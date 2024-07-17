@@ -3,9 +3,8 @@
 
 Compute the divergence of the flux, e.g. ∇⋅(α∇H), where the flux is `q = α∇H`
 """
-# non-conservative form
-function flux_divergence(
-  (qᵢ, qⱼ), u, α, cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
+@inbounds function flux_divergence(
+  (qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
 )
   i, j = idx.I
 
