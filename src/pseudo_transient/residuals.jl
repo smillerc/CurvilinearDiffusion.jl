@@ -4,12 +4,12 @@ function L2_norm(A)
 end
 
 @kernel function _update_resid!(
-  resid::AbstractArray{T,2},
+  residuals::AbstractArray{T,2},
   cell_center_metrics,
   edge_metrics,
   α,
-  H,
-  H_prev,
+  u,
+  u_prev,
   flux,
   source_term,
   dt,
@@ -21,9 +21,11 @@ end
   qᵢ = flux.x
   qⱼ = flux.y
 
-  ∇q = flux_divergence((qᵢ, qⱼ), H, α, cell_center_metrics, edge_metrics, idx)
+  @inbounds begin
+    @inline ∇q = flux_divergence((qᵢ, qⱼ), u, α, cell_center_metrics, edge_metrics, idx)
 
-  resid[idx] = -(H[idx] - H_prev[idx]) / dt - ∇q + source_term[idx]
+    residuals[idx] = -(u[idx] - u_prev[idx]) / dt - ∇q + source_term[idx]
+  end
 end
 
 """
@@ -39,9 +41,9 @@ function update_residual!(solver::PseudoTransientSolver, mesh, Δt)
     mesh.cell_center_metrics,
     mesh.edge_metrics,
     solver.α,
-    solver.H,
-    solver.H_prev,
-    solver.qH_2,
+    solver.u,
+    solver.u_prev,
+    solver.q′,
     solver.source_term,
     Δt,
     idx_offset;

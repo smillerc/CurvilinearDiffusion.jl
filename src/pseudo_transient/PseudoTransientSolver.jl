@@ -23,11 +23,11 @@ include("../edge_terms.jl")
 export PseudoTransientSolver
 
 struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
-  H::AA
-  H_prev::AA
+  u::AA
+  u_prev::AA
   source_term::AA
-  qH::NT1
-  qH_2::NT1
+  q::NT1
+  q′::NT1
   res::AA
   Re::AA
   α::AA # diffusivity
@@ -45,7 +45,7 @@ function PseudoTransientSolver(
   mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
 )
   #
-  #         H
+  #         u
   #     |--------|--------|--------|--------|
   #           q_i+1/2
   #
@@ -56,16 +56,16 @@ function PseudoTransientSolver(
   )
 
   # cell-based
-  H = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-  H_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  u = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  u_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
 
   # edge-based
-  qH = (
+  q = (
     x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
     y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
-  qH² = (
+  q′ = (
     x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
     y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
@@ -91,11 +91,11 @@ function PseudoTransientSolver(
   end
 
   return PseudoTransientSolver(
-    H,
-    H_prev,
+    u,
+    u_prev,
     S,
-    qH,
-    qH²,
+    q,
+    q′,
     res,
     Re,
     α,
@@ -150,14 +150,14 @@ function step!(
   dx, dy = solver.spacing
   Vpdτ = CFL * min(dx, dy)
 
-  copy!(solver.H, T)
-  copy!(solver.H_prev, T)
+  copy!(solver.u, T)
+  copy!(solver.u_prev, T)
 
-  update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+  update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
   # display(solver.α)
   # error("done")
 
-  validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
+  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
   validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
   validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
 
@@ -170,10 +170,10 @@ function step!(
     # Diffusion coefficient
     if subcycle_conductivity
       if iter > 1
-        update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+        update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
       end
     end
-    applybcs!(solver.bcs, mesh, solver.H)
+    applybcs!(solver.bcs, mesh, solver.u)
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
 
@@ -186,7 +186,7 @@ function step!(
 
     # Apply a cutoff function to remove negative
     # if cutoff
-    cutoff!(solver.H)
+    cutoff!(solver.u)
     # end
 
     @timeit "update_residual!" update_residual!(solver, mesh, dt)
@@ -237,14 +237,14 @@ function step!(
   #   )
   # end
 
-  validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
+  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
 
   @timeit "next_dt" begin
-    next_Δt = next_dt(solver.H, solver.H_prev, dt; kwargs...)
+    next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
   end
 
-  copy!(solver.H_prev, solver.H)
-  copy!(T, solver.H)
+  copy!(solver.u_prev, solver.u)
+  copy!(T, solver.u)
 
   stats = (rel_err=min(rel_err, abs_err), niter=iter)
   return stats, next_Δt
@@ -291,13 +291,13 @@ function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
 
   @views vtk_grid(fn, _coords...) do vtk
     vtk["TimeValue"] = t
-    vtk["H"] = Array{T}(scheme.H[domain])
-    vtk["H_prev"] = Array{T}(scheme.H_prev[domain])
+    vtk["u"] = Array{T}(scheme.u[domain])
+    vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["residual"] = Array{T}(scheme.res[domain])
-    vtk["qi"] = Array{T}(scheme.qH[1][domain])
-    vtk["qj"] = Array{T}(scheme.qH[2][domain])
-    vtk["q2i"] = Array{T}(scheme.qH_2[1][domain])
-    vtk["q2j"] = Array{T}(scheme.qH_2[2][domain])
+    vtk["qi"] = Array{T}(scheme.q[1][domain])
+    vtk["qj"] = Array{T}(scheme.q[2][domain])
+    vtk["q2i"] = Array{T}(scheme.q′[1][domain])
+    vtk["q2j"] = Array{T}(scheme.q′[2][domain])
     vtk["diffusivity"] = Array{T}(scheme.α[domain])
 
     vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
