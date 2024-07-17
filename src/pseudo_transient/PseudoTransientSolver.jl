@@ -180,7 +180,7 @@ function step!(
 
     # Apply a cutoff function to remove negative / non-finite values
     if apply_cutoff
-      cutoff!(solver.u)
+      @timeit "cutoff!" cutoff!(solver.u, solver.backend)
     end
 
     if iter % error_check_interval == 0 || iter == 1
@@ -241,21 +241,17 @@ end
 #
 # ------------------------------------------------------------------------------------------------
 
-@inline cutoff(a) = (0.5(abs(a) + a)) * isfinite(a)
+function cutoff!(A, ::CPU)
+  @batch for idx in eachindex(A)
+    a = A[idx]
+    A[idx] = (0.5(abs(a) + a)) * isfinite(a)
+  end
 
-function cutoff!(a)
-  backend = KernelAbstractions.get_backend(a)
-  cutoff_kernel!(backend)(a; ndrange=size(a))
   return nothing
 end
 
-@kernel function cutoff_kernel!(a)
-  idx = @index(Global, Linear)
-
-  @inbounds begin
-    _a = cutoff(a[idx])
-    a[idx] = _a
-  end
+function cutoff!(A, ::GPU)
+  @. A = (0.5(abs(A) + A)) * isfinite(A)
 end
 
 get_filename(iteration) = file_prefix * @sprintf("%07i", iteration)
