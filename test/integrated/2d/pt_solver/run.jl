@@ -4,7 +4,6 @@ using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
-using NVTX
 
 @static if Sys.islinux()
   using MKL
@@ -65,12 +64,8 @@ function wavy_grid(ni, nj, nhalo)
 end
 
 function uniform_grid(nx, ny, nhalo)
-  x0, x1 = (0, 1)
-  y0, y1 = (0, 0.25)
-  # x0, x1 = (-5, 5)
-  # y0, y1 = (-5, 5)
-  # x0, x1 = (0, 10)
-  # y0, y1 = (0, 10)
+  x0, x1 = (-6, 6)
+  y0, y1 = (-6, 6)
 
   return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
 end
@@ -86,14 +81,12 @@ end
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
-  # mesh = initialize_mesh()
+  # mesh = adapt(ArrayT, initialize_mesh())
+  mesh = initialize_mesh()
 
   bcs = (
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
-    # ilo=DirichletBC(1.0),  #
-    # ihi=DirichletBC(0.0),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
   )
@@ -103,9 +96,8 @@ function init_state()
   # Temperature and density
   T_hot = 1e3
   T_cold = 1e-2
-  T = ones(size(mesh.iterators.cell.full)) * T_cold
-  ρ = ones(size(mesh.iterators.cell.full))
-  source_term = ones(size(mesh.iterators.cell.full))
+  T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
+  ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
 
   # Define the conductivity model
@@ -113,7 +105,7 @@ function init_state()
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 #* temperature^3
+      return κ0 # * temperature^3
     end
   end
 
@@ -124,11 +116,7 @@ function init_state()
   yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
     T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
-
-    # source_term[idx] = T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
-
-  # copy!(solver.source_term, source_term) # move to gpu (if need be)
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -142,10 +130,8 @@ function run(maxiter=Inf)
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
   global Δt = 1e-4
-  #   global Δt = 0.02
   global t = 0.0
   global maxt = 0.6
-
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
@@ -158,10 +144,10 @@ function run(maxiter=Inf)
     end
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    err, subiter = CurvilinearDiffusion.PseudoTransientScheme.step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1500, tol=1e-8, error_check_interval=2
+    stats, _ = CurvilinearDiffusion.PseudoTransientScheme.step!(
+      scheme, mesh, T, ρ, cₚ, κ, Δt; max_iter=1500, error_check_interval=2
     )
-    @printf "\tL2: %.3e, %i\n" err subiter
+    @printf "\tL2: %.3e, %i\n" stats.rel_err stats.niter
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -192,8 +178,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  # NVTX.@range "my message" begin
-  scheme, mesh, temperature = run(Inf)
+  scheme, mesh, temperature = run(50)
   nothing
-  # end
 end

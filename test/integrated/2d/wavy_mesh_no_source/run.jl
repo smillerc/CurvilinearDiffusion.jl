@@ -46,10 +46,10 @@ function wavy_grid(ni, nj, nhalo)
   Δx0 = Lx / (ni - 1)
   Δy0 = Ly / (nj - 1)
 
-  Ax = 0.4 / Δx0
-  Ay = 0.8 / Δy0
-  # Ax = 0.2 / Δx0
-  # Ay = 0.4 / Δy0
+  # Ax = 0.4 / Δx0
+  # Ay = 0.8 / Δy0
+  Ax = 0.2 / Δx0
+  Ay = 0.4 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -63,34 +63,6 @@ function wavy_grid(ni, nj, nhalo)
   return CurvilinearGrid2D(x, y, nhalo)
 end
 
-# function wavy_grid(ni, nj, nhalo)
-#   function init(ni, nj)
-#     Lx = 12
-#     Ly = 12
-#     n_xy = 6
-#     n_yx = 6
-
-#     xmin = -Lx / 2
-#     ymin = -Ly / 2
-
-#     Δx0 = Lx / (ni - 1)
-#     Δy0 = Ly / (nj - 1)
-
-#     Ax = 0.4 / Δx0
-#     Ay = 0.8 / Δy0
-#     # Ax = 0.2 / Δx0
-#     # Ay = 0.4 / Δy0
-
-#     x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-#     y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
-
-#     return (x, y)
-#   end
-
-#   x, y = init(ni, nj)
-#   return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
-# end
-
 function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
@@ -100,9 +72,9 @@ end
 
 function initialize_mesh()
   ni, nj = (150, 150)
-  nhalo = 6
-  # return wavy_grid(ni, nj, nhalo)
-  return uniform_grid(ni, nj, nhalo)
+  nhalo = 1
+  return wavy_grid(ni, nj, nhalo)
+  # return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -117,14 +89,13 @@ function init_state()
     ihi=NeumannBC(),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
-    # jhi=DirichletBC(100.0),  #
   )
   solver = ImplicitScheme(
     mesh,
     bcs;
     backend=backend,
     face_conductivity=:harmonic, #
-    direct_solve=false, #
+    direct_solve=true, #
   )
   # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:harmonic)
   # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:harmonic)
@@ -137,21 +108,21 @@ function init_state()
   cₚ = 1.0
 
   # Define the conductivity model
-  @inline function κ(ρ, temperature, κ0=10.0)
+  @inline function κ(ρ, temperature, κ0=1.0)
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 # * temperature^3
     end
   end
 
-  fwhm = 0.5
+  fwhm = 1.0
   x0 = 0.0
   y0 = 0.0
+  xc = Array(mesh.centroid_coordinates.x)
+  yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
-
-    T[idx] = T_hot * exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm)) + T_cold
+    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
@@ -165,11 +136,9 @@ function run(maxiter=Inf)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  # global Δt = 1e-4
-  global Δt = 5e-5
+  global Δt = 1e-4
   global t = 0.0
-  global maxt = 0.01
-  # global maxt = 0.005
+  global maxt = 0.6
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
@@ -211,6 +180,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(10)
+  scheme, mesh, temperature = run(Inf)
   nothing
 end
