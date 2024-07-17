@@ -153,7 +153,7 @@ function step!(
   copy!(solver.u, T)
   copy!(solver.u_prev, T)
 
-  update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+  @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
   applybcs!(solver.bcs, mesh, solver.α)
 
   validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
@@ -168,7 +168,9 @@ function step!(
     # Diffusion coefficient
     if subcycle_conductivity
       if iter > 1
-        update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+        @timeit "update_conductivity!" update_conductivity!(
+          solver, mesh, solver.u, ρ, cₚ, κ
+        )
         applybcs!(solver.bcs, mesh, solver.α)
       end
     end
