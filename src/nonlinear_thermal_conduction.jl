@@ -1,4 +1,5 @@
 using TimerOutputs
+using Printf
 
 function nonlinear_thermal_conduction_step!(
   scheme::ImplicitScheme,
@@ -40,6 +41,18 @@ function nonlinear_thermal_conduction_step!(
       show_convergence=show_convergence,
       kwargs...,
     )
+  end
+
+  return stats, next_Δt
+end
+
+function nonlinear_thermal_conduction_step!(
+  solver::PseudoTransientSolver, mesh, T, ρ, cₚ, κ, Δt; show_convergence=true, kwargs...
+)
+  stats, next_Δt = PseudoTransientScheme.step!(solver, mesh, T, ρ, cₚ, κ, Δt; kwargs...)
+
+  if show_convergence
+    @printf "\tL2: %.3e, %i\n" stats.rel_err stats.niter
   end
 
   return stats, next_Δt
