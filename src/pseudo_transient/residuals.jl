@@ -28,31 +28,35 @@ end
   end
 end
 
-# """
-#     update_residual!(solver::PseudoTransientSolver, mesh, Δt)
+"""
+    update_residual!(solver::PseudoTransientSolver, mesh, Δt)
 
-# """
-# function update_residual!(solver::PseudoTransientSolver, mesh, Δt)
-#   domain = solver.iterators.domain.cartesian
-#   idx_offset = first(domain) - oneunit(first(domain))
+"""
+function update_residual!(
+  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
+) where {N,T,BE<:GPU}
 
-#   _update_resid!(solver.backend)(
-#     solver.res,
-#     mesh.cell_center_metrics,
-#     mesh.edge_metrics,
-#     solver.α,
-#     solver.u,
-#     solver.u_prev,
-#     solver.q′,
-#     solver.source_term,
-#     Δt,
-#     idx_offset;
-#     ndrange=size(domain),
-#   )
+  #
+  domain = solver.iterators.domain.cartesian
+  idx_offset = first(domain) - oneunit(first(domain))
 
-#   KernelAbstractions.synchronize(solver.backend)
-#   return nothing
-# end
+  _update_resid!(solver.backend)(
+    solver.res,
+    mesh.cell_center_metrics,
+    mesh.edge_metrics,
+    solver.α,
+    solver.u,
+    solver.u_prev,
+    solver.q′,
+    solver.source_term,
+    Δt,
+    idx_offset;
+    ndrange=size(domain),
+  )
+
+  KernelAbstractions.synchronize(solver.backend)
+  return nothing
+end
 
 function update_residual!(
   solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
@@ -60,22 +64,6 @@ function update_residual!(
 
   #
   domain = solver.iterators.domain.cartesian
-  # idx_offset = first(domain) - oneunit(first(domain))
-
-  # _update_resid!(solver.backend)(
-  #   solver.res,
-  #   mesh.cell_center_metrics,
-  #   mesh.edge_metrics,
-  #   solver.α,
-  #   solver.u,
-  #   solver.u_prev,
-  #   solver.q′,
-  #   solver.source_term,
-  #   Δt,
-  #   idx_offset;
-  #   ndrange=size(domain),
-  # )
-
   u = solver.u
   u_prev = solver.u_prev
   qᵢ, qⱼ = solver.q′
