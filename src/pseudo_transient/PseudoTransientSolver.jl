@@ -9,6 +9,10 @@ using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
 using UnPack: @unpack
+using Printf
+using WriteVTK
+
+using ..TimeStepControl
 
 using ..BoundaryConditions
 
@@ -38,7 +42,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
 end
 
 function PseudoTransientSolver(
-  mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:arithmetic, T=Float64
+  mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
 )
   #
   #         H
@@ -116,9 +120,13 @@ function step!(
   κ,
   dt;
   max_iter=1e5,
-  tol=1e-8,
+  rel_tol=1e-5,
+  abs_tol=1e-9,
   error_check_interval=10,
   cutoff=true,
+  ioall_save=false,
+  subcycle_conductivity=true,
+  kwargs...,
 ) where {N}
 
   #
@@ -126,7 +134,9 @@ function step!(
   nhalo = 1
 
   iter = 0
-  err = 2 * tol
+  rel_err = 2 * rel_tol
+  abs_err = 2 * abs_tol
+  init_L₂ = Inf
 
   CFL = 1 / sqrt(N)
 
@@ -134,7 +144,7 @@ function step!(
   Vpdτ = CFL * min(dx, dy)
 
   copy!(solver.H, T)
-  copy!(solver.H_prev, solver.H)
+  copy!(solver.H_prev, T)
 
   update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
   # display(solver.α)
@@ -145,13 +155,16 @@ function step!(
   validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
 
   # Pseudo-transient iteration
-  while err > tol && iter < max_iter && isfinite(err)
+  # while err > tol && iter < max_iter && isfinite(err)
+  while true
     # @info "Iter: $iter, Err: $err"
     iter += 1
 
     # Diffusion coefficient
-    if iter > 1
-      update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+    if subcycle_conductivity
+      if iter > 1
+        update_conductivity!(solver, mesh, solver.H, ρ, cₚ, κ)
+      end
     end
     applybcs!(solver.bcs, mesh, solver.H)
 
@@ -169,34 +182,65 @@ function step!(
     cutoff!(solver.H)
     # end
 
-    if iter % error_check_interval == 0
-      @timeit "update_residual!" update_residual!(solver, mesh, dt)
+    @timeit "update_residual!" update_residual!(solver, mesh, dt)
+    # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
-      @timeit "norm" begin
-        res = @view solver.res[solver.iterators.domain.cartesian]
+    @timeit "norm" begin
+      inner_dom = solver.iterators.domain.cartesian
+      residual = @view solver.res[inner_dom]
+      L₂norm = L2_norm(residual)
 
-        err = L2_norm(res)
-
-        # err = norm(res) / sqrt(length(res))
+      if iter == 1
+        init_L₂ = L₂norm
       end
-      if !isfinite(err)
-        @show extrema(solver.res)
-        @error("Non-finite error detected! ($err)")
-      end
+
+      rel_err = L₂norm / init_L₂
+      abs_err = L₂norm
+      # end
+    end
+
+    if !isfinite(rel_err) || !isfinite(abs_err)
+      @show extrema(solver.residual)
+      to_vtk(solver, mesh, iter, iter)
+      error("Non-finite error detected! abs_err = $abs_err, rel_err = $rel_err, exiting...")
+    end
+
+    if ioall_save
+      to_vtk(solver, mesh, iter, iter, "allthethings")
+    end
+
+    if iter > max_iter
+      @printf "\t rel_err: %.2e, abs_err: %.2e\n" rel_err abs_err
+
+      to_vtk(solver, mesh, iter, iter)
+      error(
+        "Maximum iteration limit reached ($max_iter), abs_err = $abs_err, rel_err = $rel_err, exiting...",
+      )
+    end
+
+    if rel_err <= rel_tol || abs_err <= abs_tol
+      # if abs_err <= abs_tol
+      break
     end
   end
 
-  if iter == max_iter
-    error(
-      "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
-    )
-  end
+  # if iter == max_iter
+  #   error(
+  #     "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
+  #   )
+  # end
 
   validate_scalar(solver.H, domain, nhalo, :H; enforce_positivity=true)
+
+  @timeit "next_dt" begin
+    next_Δt = next_dt(solver.H, solver.H_prev, dt; kwargs...)
+  end
+
   copy!(solver.H_prev, solver.H)
   copy!(T, solver.H)
 
-  return err, iter
+  stats = (rel_err=min(rel_err, abs_err), niter=iter)
+  return stats, next_Δt
 end
 
 function L2_norm(A)
@@ -322,8 +366,10 @@ end
     ᵢ₊₁ = shift(idx, axis, +1)
 
     # edge diffusivity / iter params
-    αᵢ₊½ = (α[idx] + α[ᵢ₊₁]) / 2
-    θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
+    # αᵢ₊½ = (α[idx] + α[ᵢ₊₁]) / 2
+    # θr_dτ_ᵢ₊½ = (θr_dτ[idx] + θr_dτ[ᵢ₊₁]) / 2
+    αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
+    θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁])
 
     _qᵢ₊½ = -αᵢ₊½ * (H[ᵢ₊₁] - H[idx])
 
@@ -807,6 +853,42 @@ end
   @inbounds begin
     _a = cutoff(a[idx])
     a[idx] = _a
+  end
+end
+
+get_filename(iteration) = file_prefix * @sprintf("%07i", iteration)
+
+function get_filename(iteration, name::String)
+  name = replace(name, " " => "_")
+  if !endswith(name, "_")
+    name = name * "_"
+  end
+  return name * @sprintf("%07i", iteration)
+end
+
+function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
+  fn = get_filename(iteration, name)
+  @info "Writing to $fn"
+
+  domain = mesh.iterators.cell.domain
+
+  _coords = Array{T}.(coords(mesh))
+
+  @views vtk_grid(fn, _coords...) do vtk
+    vtk["TimeValue"] = t
+    vtk["H"] = Array{T}(scheme.H[domain])
+    vtk["H_prev"] = Array{T}(scheme.H_prev[domain])
+    vtk["residual"] = Array{T}(scheme.res[domain])
+    vtk["qi"] = Array{T}(scheme.qH[1][domain])
+    vtk["qj"] = Array{T}(scheme.qH[2][domain])
+    vtk["q2i"] = Array{T}(scheme.qH_2[1][domain])
+    vtk["q2j"] = Array{T}(scheme.qH_2[2][domain])
+    vtk["diffusivity"] = Array{T}(scheme.α[domain])
+
+    vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
+    vtk["θr_dτ"] = Array{T}(scheme.θr_dτ[domain])
+
+    vtk["source_term"] = Array{T}(scheme.source_term[domain])
   end
 end
 
