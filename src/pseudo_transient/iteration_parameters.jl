@@ -21,7 +21,10 @@ function update_iteration_params!(
   return nothing
 end
 
-function _update_iteration_params_gpu!(solver, ρ, Vpdτ, Δt; iter_scale=1)
+function update_iteration_params!(
+  solver::PseudoTransientSolver{N,T,BE}, ρ, Vpdτ, Δt; iter_scale=1
+) where {N,T,BE<:GPU}
+
   # β=1 / 1.2, # iteration scaling parameter
   # β = 1, # iteration scaling parameter
   #
@@ -57,6 +60,3 @@ function _update_iteration_params_gpu!(solver, ρ, Vpdτ, Δt; iter_scale=1)
   KernelAbstractions.synchronize(solver.backend)
   return nothing
 end
-
-# function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
-# end
