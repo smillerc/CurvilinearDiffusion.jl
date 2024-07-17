@@ -51,9 +51,7 @@ function compute_update!(
   return nothing
 end
 
-function compute_update!(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:CPU}
+function compute_update!(solver::PseudoTransientSolver{2,T,BE}, mesh, Δt) where {T,BE<:CPU}
 
   #
   domain = solver.iterators.domain.cartesian
