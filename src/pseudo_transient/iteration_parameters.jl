@@ -33,15 +33,4 @@ function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
 
   KernelAbstractions.synchronize(solver.backend)
   return nothing
-
-  # for idx in solver.iterators.domain.cartesian
-  #   solver.Re[idx] = π + sqrt(π^2 + (solver.L^2 * ρ[idx]) / (solver.α[idx] * dt))
-  # end
-
-  # for idx in solver.iterators.domain.cartesian
-  #   solver.dτ_ρ[idx] = (Vpdτ * solver.L / (solver.α[idx] * solver.Re[idx])) * β
-  #   solver.θr_dτ[idx] = (solver.L / (Vpdτ * solver.Re[idx])) * β
-  # end
-
-  # return nothing
 end

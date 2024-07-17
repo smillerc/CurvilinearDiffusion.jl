@@ -130,7 +130,7 @@ function step!(
   rel_tol=1e-5,
   abs_tol=1e-9,
   error_check_interval=10,
-  cutoff=true,
+  apply_cutoff=true,
   ioall_save=false,
   subcycle_conductivity=true,
   kwargs...,
@@ -141,8 +141,8 @@ function step!(
   nhalo = 1
 
   iter = 0
-  rel_err = 2 * rel_tol
-  abs_err = 2 * abs_tol
+  rel_error = 2 * rel_tol
+  abs_error = 2 * abs_tol
   init_L₂ = Inf
 
   CFL = 1 / sqrt(N)
@@ -154,15 +154,13 @@ function step!(
   copy!(solver.u_prev, T)
 
   update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
-  # display(solver.α)
-  # error("done")
+  applybcs!(solver.bcs, mesh, solver.α)
 
   validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
   validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
   validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
 
   # Pseudo-transient iteration
-  # while err > tol && iter < max_iter && isfinite(err)
   while true
     # @info "Iter: $iter, Err: $err"
     iter += 1
@@ -171,45 +169,43 @@ function step!(
     if subcycle_conductivity
       if iter > 1
         update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+        applybcs!(solver.bcs, mesh, solver.α)
       end
     end
     applybcs!(solver.bcs, mesh, solver.u)
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
-
-    applybcs!(solver.bcs, mesh, solver.α)
-    applybcs!(solver.bcs, mesh, solver.dτ_ρ)
-    applybcs!(solver.bcs, mesh, solver.θr_dτ)
-
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
-    # Apply a cutoff function to remove negative
-    # if cutoff
-    cutoff!(solver.u)
-    # end
-
-    @timeit "update_residual!" update_residual!(solver, mesh, dt)
-    # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
-
-    @timeit "norm" begin
-      inner_dom = solver.iterators.domain.cartesian
-      residual = @view solver.res[inner_dom]
-      L₂norm = L2_norm(residual)
-
-      if iter == 1
-        init_L₂ = L₂norm
-      end
-
-      rel_err = L₂norm / init_L₂
-      abs_err = L₂norm
-      # end
+    # Apply a cutoff function to remove negative / non-finite values
+    if apply_cutoff
+      cutoff!(solver.u)
     end
 
-    if !isfinite(rel_err) || !isfinite(abs_err)
-      @show extrema(solver.residual)
+    if iter % error_check_interval == 0 || iter == 1
+      @timeit "update_residual!" update_residual!(solver, mesh, dt)
+      # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
+
+      @timeit "norm" begin
+        inner_dom = solver.iterators.domain.cartesian
+        residual = @view solver.res[inner_dom]
+        L₂ = L2_norm(residual)
+
+        if iter == 1
+          init_L₂ = L₂
+        end
+
+        rel_error = L₂ / init_L₂
+        abs_error = L₂
+      end
+    end
+
+    if !isfinite(rel_error) || !isfinite(abs_error)
       to_vtk(solver, mesh, iter, iter)
-      error("Non-finite error detected! abs_err = $abs_err, rel_err = $rel_err, exiting...")
+      error(
+        "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
+      )
     end
 
     if ioall_save
@@ -217,25 +213,16 @@ function step!(
     end
 
     if iter > max_iter
-      @printf "\t rel_err: %.2e, abs_err: %.2e\n" rel_err abs_err
-
       to_vtk(solver, mesh, iter, iter)
       error(
-        "Maximum iteration limit reached ($max_iter), abs_err = $abs_err, rel_err = $rel_err, exiting...",
+        "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
     end
 
-    if rel_err <= rel_tol || abs_err <= abs_tol
-      # if abs_err <= abs_tol
+    if (rel_error <= rel_tol || abs_error <= abs_tol)
       break
     end
   end
-
-  # if iter == max_iter
-  #   error(
-  #     "Maximum iteration limit reached ($max_iter), current error is $(err), tolerance is $tol, exiting...",
-  #   )
-  # end
 
   validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
 
@@ -243,10 +230,10 @@ function step!(
     next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
   end
 
-  copy!(solver.u_prev, solver.u)
+  # copy!(solver.u_prev, solver.u)
   copy!(T, solver.u)
 
-  stats = (rel_err=min(rel_err, abs_err), niter=iter)
+  stats = (rel_err=rel_error, abs_err=abs_error, niter=iter)
   return stats, next_Δt
 end
 
