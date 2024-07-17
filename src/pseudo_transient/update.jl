@@ -18,7 +18,7 @@
   qⱼ = q.y
 
   @inbounds begin
-    ∇q = flux_divergence((qᵢ, qⱼ), u, α, cell_center_metrics, edge_metrics, idx)
+    ∇q = flux_divergence((qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx)
 
     u[idx] = (
       (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) /
@@ -27,9 +27,9 @@
   end
 end
 
-"""
-"""
-function compute_update!(solver, mesh, Δt)
+function compute_update!(
+  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
+) where {N,T,BE<:GPU}
   domain = solver.iterators.domain.cartesian
   idx_offset = first(domain) - oneunit(first(domain))
 
@@ -48,5 +48,33 @@ function compute_update!(solver, mesh, Δt)
   )
 
   KernelAbstractions.synchronize(solver.backend)
+  return nothing
+end
+
+function compute_update!(
+  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
+) where {N,T,BE<:CPU}
+
+  #
+  domain = solver.iterators.domain.cartesian
+
+  u = solver.u
+  u_prev = solver.u_prev
+  cell_center_metrics = mesh.cell_center_metrics
+  edge_metrics = mesh.edge_metrics
+
+  qᵢ, qⱼ = solver.q
+  dτ_ρ = solver.dτ_ρ
+  source_term = solver.source_term
+
+  @batch for idx in domain
+    @inline ∇q = flux_divergence((qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx)
+
+    u[idx] = (
+      (u[idx] + dτ_ρ[idx] * (u_prev[idx] / Δt - ∇q + source_term[idx])) /
+      (1 + dτ_ρ[idx] / Δt)
+    )
+  end
+
   return nothing
 end

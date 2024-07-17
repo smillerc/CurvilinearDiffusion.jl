@@ -19,7 +19,34 @@
   end
 end
 
-function compute_flux!(solver::PseudoTransientSolver{2,T}, ::CurvilinearGrid2D) where {T}
+function _cpu_flux_kernel!(
+  qᵢ₊½::AbstractArray{T,2},
+  q′ᵢ₊½::AbstractArray{T,2},
+  u,
+  α,
+  θr_dτ,
+  axis,
+  domain,
+  mean_func::F,
+) where {T,F}
+  @batch for idx in domain
+    ᵢ₊₁ = shift(idx, axis, +1)
+
+    # edge diffusivity / iter params
+    @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
+    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁])
+
+    _qᵢ₊½ = -αᵢ₊½ * (u[ᵢ₊₁] - u[idx])
+
+    qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+    q′ᵢ₊½[idx] = _qᵢ₊½
+  end
+  return nothing
+end
+
+function compute_flux!(
+  solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
+) where {T,BE<:GPU}
   iaxis, jaxis = (1, 2)
 
   ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
@@ -54,6 +81,41 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}, ::CurvilinearGrid2D) 
   )
 
   KernelAbstractions.synchronize(solver.backend)
+
+  return nothing
+end
+
+function compute_flux!(
+  solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
+) where {T,BE<:CPU}
+
+  #
+  iaxis, jaxis = (1, 2)
+
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+
+  _cpu_flux_kernel!(
+    solver.q.x,
+    solver.q′.x,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    iaxis,
+    ᵢ₊½_domain,
+    solver.mean;
+  )
+
+  _cpu_flux_kernel!(
+    solver.q.y,
+    solver.q′.y,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    jaxis,
+    ⱼ₊½_domain,
+    solver.mean;
+  )
 
   return nothing
 end

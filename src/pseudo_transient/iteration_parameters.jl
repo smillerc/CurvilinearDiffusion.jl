@@ -1,4 +1,27 @@
-function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
+
+function update_iteration_params!(
+  solver::PseudoTransientSolver{N,T,BE}, ρ, Vpdτ, Δt; iter_scale=1
+) where {N,T,BE<:CPU}
+
+  #
+  L = solver.L
+  α = solver.α
+  β = iter_scale
+  Re = solver.Re
+  dτ_ρ = solver.dτ_ρ
+  θr_dτ = solver.θr_dτ
+
+  @batch for idx in solver.iterators.domain.cartesian
+    _Re = π + sqrt(π^2 + (L^2 * ρ[idx]) / (α[idx] * Δt))
+    Re[idx] = _Re
+    dτ_ρ[idx] = (Vpdτ * L / (α[idx] * _Re)) * β
+    θr_dτ[idx] = (L / (Vpdτ * _Re)) * β
+  end
+
+  return nothing
+end
+
+function _update_iteration_params_gpu!(solver, ρ, Vpdτ, Δt; iter_scale=1)
   # β=1 / 1.2, # iteration scaling parameter
   # β = 1, # iteration scaling parameter
   #
@@ -34,3 +57,6 @@ function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
   KernelAbstractions.synchronize(solver.backend)
   return nothing
 end
+
+# function update_iteration_params!(solver, ρ, Vpdτ, Δt; iter_scale=1)
+# end
