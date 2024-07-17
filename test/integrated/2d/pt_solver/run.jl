@@ -167,7 +167,7 @@ function run(maxiter=Inf)
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
-    scheme, scheme.H, mesh, iter, t, casename
+    scheme, scheme.u, mesh, iter, t, casename
   )
 
   print_timer()
@@ -178,6 +178,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(50)
+  scheme, mesh, temperature = run(1500)
   nothing
 end
