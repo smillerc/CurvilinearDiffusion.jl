@@ -4,7 +4,7 @@ using LinearAlgebra: norm
 
 using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
-using CurvilinearGrids: CurvilinearGrid2D, cellsize_withhalo, coords
+using CurvilinearGrids: CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
 using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
