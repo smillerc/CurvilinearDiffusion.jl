@@ -44,6 +44,8 @@ function _cpu_flux_kernel!(
   return nothing
 end
 
+# 2D 
+
 function compute_flux!(
   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
 ) where {T,BE<:GPU}
@@ -116,6 +118,107 @@ function compute_flux!(
     ⱼ₊½_domain,
     solver.mean;
   )
+
+  return nothing
+end
+
+# 3D 
+
+function compute_flux!(
+  solver::PseudoTransientSolver{3,T,BE}, ::CurvilinearGrid3D
+) where {T,BE<:CPU}
+  iaxis, jaxis, kaxis = (1, 2, 3)
+
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+  ₖ₊½_domain = expand_lower(solver.iterators.domain.cartesian, kaxis, +1)
+
+  _cpu_flux_kernel!(
+    solver.q.x,
+    solver.q′.x,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    iaxis,
+    ᵢ₊½_domain,
+    solver.mean;
+  )
+
+  _cpu_flux_kernel!(
+    solver.q.y,
+    solver.q′.y,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    jaxis,
+    ⱼ₊½_domain,
+    solver.mean;
+  )
+
+  _cpu_flux_kernel!(
+    solver.q.z,
+    solver.q′.z,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    kaxis,
+    ₖ₊½_domain,
+    solver.mean;
+  )
+
+  return nothing
+end
+
+function compute_flux!(
+  solver::PseudoTransientSolver{3,T,BE}, ::CurvilinearGrid3D
+) where {T,BE<:GPU}
+  iaxis, jaxis, kaxis = (1, 2, 3)
+
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+  ₖ₊½_domain = expand_lower(solver.iterators.domain.cartesian, kaxis, +1)
+
+  ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
+  ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
+  ₖ₊½_idx_offset = first(ₖ₊½_domain) - oneunit(first(ₖ₊½_domain))
+
+  flux_kernel!(solver.backend)(
+    solver.q.x,
+    solver.q′.x,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    iaxis,
+    ᵢ₊½_idx_offset,
+    solver.mean;
+    ndrange=size(ᵢ₊½_domain),
+  )
+
+  flux_kernel!(solver.backend)(
+    solver.q.y,
+    solver.q′.y,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    jaxis,
+    ⱼ₊½_idx_offset,
+    solver.mean;
+    ndrange=size(ⱼ₊½_domain),
+  )
+
+  flux_kernel!(solver.backend)(
+    solver.q.z,
+    solver.q′.z,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    kaxis,
+    ₖ₊½_idx_offset,
+    solver.mean;
+    ndrange=size(ₖ₊½_domain),
+  )
+
+  KernelAbstractions.synchronize(solver.backend)
 
   return nothing
 end
