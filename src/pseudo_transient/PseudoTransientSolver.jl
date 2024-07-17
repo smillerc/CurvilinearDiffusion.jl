@@ -42,7 +42,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
 end
 
 function PseudoTransientSolver(
-  mesh::CurvilinearGrid2D, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
+  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
 )
   #
   #         u
@@ -59,36 +59,24 @@ function PseudoTransientSolver(
   u = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   u_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
-
-  # edge-based
-  q = (
-    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-  )
-  q′ = (
-    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-  )
-
-  res = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-  Re = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-
+  residual = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   α = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-
   θr_dτ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
 
-  x, y = coords(mesh)
-  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
-  min_x, max_x = extrema(x)
-  min_y, max_y = extrema(y)
-  L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
+  # edge-based; same dims as the cell-based arrays, but each entry stores the {i,j,k}+1/2 value
+  q = flux_tuple(mesh, backend, T)
+  q′ = flux_tuple(mesh, backend, T)
 
+  L, spacing = phys_dims(mesh, T)
   if face_diffusivity === :harmonic
     mean_func = harmonic_mean # from ../averaging.jl
   else
     mean_func = arithmetic_mean # from ../averaging.jl
   end
+
+  metric_cache = nothing
 
   return PseudoTransientSolver(
     u,
@@ -96,8 +84,8 @@ function PseudoTransientSolver(
     S,
     q,
     q′,
-    res,
-    Re,
+    residual,
+    Reynolds_number,
     α,
     θr_dτ,
     dτ_ρ,
@@ -107,6 +95,46 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
+  )
+end
+
+function phys_dims(mesh::CurvilinearGrid2D, T)
+  x, y = coords(mesh)
+  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
+  min_x, max_x = extrema(x)
+  min_y, max_y = extrema(y)
+  L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
+  # L = maximum(spacing) 
+
+  return L, spacing
+end
+
+function phys_dims(mesh::CurvilinearGrid3D, T)
+  x, y, z = coords(mesh)
+  spacing =
+    (minimum(diff(x; dims=1)), minimum(diff(y; dims=2)), minimum(diff(z; dims=3))) .|> T
+
+  min_x, max_x = extrema(x)
+  min_y, max_y = extrema(y)
+  min_z, max_z = extrema(z)
+
+  L = max(abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)) |> T
+  # L = maximum(spacing)
+  return L, spacing
+end
+
+function flux_tuple(mesh::CurvilinearGrid2D, backend, T)
+  return (
+    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+  )
+end
+
+function flux_tuple(mesh::CurvilinearGrid3D, backend, T)
+  return (
+    x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    z=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
 end
 

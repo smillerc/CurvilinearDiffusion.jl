@@ -19,16 +19,9 @@
   end
 end
 
-function _cpu_flux_kernel!(
-  qᵢ₊½::AbstractArray{T,2},
-  q′ᵢ₊½::AbstractArray{T,2},
-  u,
-  α,
-  θr_dτ,
-  axis,
-  domain,
-  mean_func::F,
-) where {T,F}
+function _cpu_flux_kernel!(qᵢ₊½, q′ᵢ₊½, u, α, θr_dτ, axis, domain, mean_func::F) where {F}
+  #
+
   @batch for idx in domain
     ᵢ₊₁ = shift(idx, axis, +1)
 
