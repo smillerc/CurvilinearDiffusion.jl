@@ -118,7 +118,7 @@ function init_state()
     T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
-  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  return solver, adapt(ArrayT, mesh), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
 # ------------------------------------------------------------
@@ -178,6 +178,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(1500)
+  scheme, mesh, temperature = run(Inf)
   nothing
 end

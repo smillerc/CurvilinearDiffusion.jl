@@ -34,8 +34,8 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj, nk)
-  Lx = Ly = Lz = 4.0
+function wavy_grid(ni, nj, nk, nhalo)
+  Lx = Ly = Lz = 12
 
   xmin = -Lx / 2
   ymin = -Ly / 2
@@ -49,33 +49,40 @@ function wavy_grid(ni, nj, nk)
   Ay = 0.2 / Δy0
   Az = 0.2 / Δz0
 
-  x(i, j, k) = xmin + Δx0 * ((i - 1) + Ax * sinpi((j - 1) * Δy0) * sinpi((k - 1) * Δz0))
-  y(i, j, k) = ymin + Δy0 * ((j - 1) + Ay * sinpi((k - 1) * Δz0) * sinpi((i - 1) * Δx0))
-  z(i, j, k) = zmin + Δz0 * ((k - 1) + Az * sinpi((i - 1) * Δx0) * sinpi((j - 1) * Δy0))
+  x = zeros(ni, nj, nk)
+  y = zeros(ni, nj, nk)
+  z = zeros(ni, nj, nk)
 
-  return (x, y, z)
+  n = 0.5
+  for k in 1:nk
+    for j in 1:nj
+      for i in 1:ni
+        x[i, j, k] =
+          xmin + Δx0 * ((i - 1) + Ax * sinpi(n * (j - 1) * Δy0) * sinpi(n * (k - 1) * Δz0))
+        y[i, j, k] =
+          ymin + Δy0 * ((j - 1) + Ay * sinpi(n * (k - 1) * Δz0) * sinpi(n * (i - 1) * Δx0))
+        z[i, j, k] =
+          zmin + Δz0 * ((k - 1) + Az * sinpi(n * (i - 1) * Δx0) * sinpi(n * (j - 1) * Δy0))
+      end
+    end
+  end
+
+  return CurvilinearGrid3D(x, y, z, nhalo)
 end
 
-function uniform_grid(nx, ny, nz)
+function uniform_grid(nx, ny, nz, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
   z0, z1 = (-6, 6)
 
-  x(i, j, k) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j, k) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-  z(i, j, k) = @. z0 + (z1 - z0) * ((k - 1) / (nz - 1))
-
-  return (x, y, z)
+  return CurvilinearGrids.RectlinearGrid((x0, y0, z0), (x1, y1, z1), (nx, ny, nz), nhalo)
 end
 
 function initialize_mesh()
-  ni = nj = nk = 81
+  ni, nj, nk = (50, 50, 50)
   nhalo = 4
-  x, y, z = wavy_grid(ni, nj, nk)
-  # x, y, z = uniform_grid(ni, nj, nk)
-  mesh = CurvilinearGrid3D(x, y, z, (ni, nj, nk), nhalo)
-
-  return mesh
+  return uniform_grid(ni, nj, nk, nhalo)
+  # return wavy_grid(ni, nj, nk, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -96,7 +103,8 @@ function init_state()
 
   @info "Initializing..."
   # solver = ImplicitScheme(mesh, bcs; direct_solve=false, backend=backend)
-  solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+  solver = PseudoTransientSolver(mesh, bcs; backend=backend)
 
   # Temperature and density
   T_hot = 1e3
@@ -151,7 +159,7 @@ function run(maxiter=Inf)
     end
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
+    stats, next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -182,6 +190,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(50)
+  scheme, temperature, mesh = run(500)
   nothing
 end
