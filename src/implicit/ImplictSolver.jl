@@ -131,10 +131,10 @@ function ImplicitScheme(
   source_term = KernelAbstractions.zeros(backend, T, size(full_CI))
 
   if direct_solve
-    # algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
+    algorithm = UMFPACKFactorization(; reuse_symbolic=true, check_pattern=true)
     # algorithm = KLUFactorization(; reuse_symbolic=true, check_pattern=true)
     # algorithm = MKLPardisoFactorize()
-    algorithm = MKLPardisoIterate()
+    # algorithm = MKLPardisoIterate()
 
     linear_problem = init(LinearProblem(A, b), algorithm)
   else
@@ -206,8 +206,8 @@ function _direct_solve!(
 
   # For the direct solve, we want to re-use the symbolic factorization (sparsity pattern)
   # but update the A matrix (which we did above via assemble!(...))
-  # Setting isfresh=true will tell the direct solver that the 
-  # A matrix has been changed. For iterative Krylov solvers, we don't need to 
+  # Setting isfresh=true will tell the direct solver that the
+  # A matrix has been changed. For iterative Krylov solvers, we don't need to
   # do this
   scheme.linear_problem.isfresh = true
 
@@ -281,7 +281,7 @@ function _iterative_solve!(
     scheme.linear_problem.solver,
     scheme.linear_problem.A,
     scheme.linear_problem.b,
-    scheme.linear_problem.solver.x;
+    # scheme.linear_problem.solver.x;
     atol=atol,
     rtol=rtol,
     # verbose=1,

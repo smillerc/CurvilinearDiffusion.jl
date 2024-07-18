@@ -42,7 +42,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
 end
 
 function PseudoTransientSolver(
-  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64
+  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
 )
   #
   #         u
@@ -104,7 +104,7 @@ function phys_dims(mesh::CurvilinearGrid2D, T)
   min_x, max_x = extrema(x)
   min_y, max_y = extrema(y)
   L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
-  # L = maximum(spacing) 
+  # L = maximum(spacing)
 
   return L, spacing
 end
@@ -157,7 +157,7 @@ function step!(
   max_iter=1e5,
   rel_tol=1e-5,
   abs_tol=1e-9,
-  error_check_interval=10,
+  error_check_interval=1,
   apply_cutoff=true,
   ioall_save=false,
   subcycle_conductivity=true,
