@@ -71,37 +71,27 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj = (150, 150)
+  ni, nj = (1000, 1000)
   nhalo = 1
   return wavy_grid(ni, nj, nhalo)
   # return uniform_grid(ni, nj, nhalo)
 end
 
-# ------------------------------------------------------------
-# Initialization
-# ------------------------------------------------------------
-function init_state()
-  # mesh = adapt(ArrayT, initialize_mesh())
+function init_state_no_source(scheme, kwargs...)
   mesh = initialize_mesh()
 
-  bcs = (
-    ilo=NeumannBC(),  #
-    ihi=NeumannBC(),  #
-    jlo=NeumannBC(),  #
-    jhi=NeumannBC(),  #
-  )
-  solver = ImplicitScheme(
-    mesh,
-    bcs;
-    backend=backend,
-    face_conductivity=:harmonic, #
-    direct_solve=true, #
-  )
+  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
+
+  if scheme === :implicit
+    solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
+  elseif scheme === :pseudo_transient
+    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
+  else
+    error("Must choose either :implict or :pseudo_transient")
+  end
   # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:harmonic)
-  # solver = ADESolverNSweep(mesh, bcs; backend=backend, face_conductivity=:harmonic)
 
   # Temperature and density
-  T_hot = 1e3
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
@@ -125,16 +115,64 @@ function init_state()
     T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
-  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  return solver, adapt(ArrayT, initialize_mesh()), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+end
+
+function init_state_with_source(scheme, kwargs...)
+  mesh = initialize_mesh()
+
+  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
+
+  if scheme === :implicit
+    solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
+  elseif scheme === :pseudo_transient
+    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
+  else
+    error("Must choose either :implict or :pseudo_transient")
+  end
+
+  # Temperature and density
+  T_hot = 1e2
+  T_cold = 1e-2
+  T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
+  ρ = ones(Float64, cellsize_withhalo(mesh))
+  source_term = zeros(Float64, cellsize_withhalo(mesh))
+  cₚ = 1.0
+
+  # Define the conductivity model
+  @inline function κ(ρ, temperature, κ0=1.0)
+    if !isfinite(temperature)
+      return 0.0
+    else
+      return κ0 * temperature^3
+    end
+  end
+
+  fwhm = 1.0
+  x0 = 0.0
+  y0 = 0.0
+  xc = Array(mesh.centroid_coordinates.x)
+  yc = Array(mesh.centroid_coordinates.y)
+  for idx in mesh.iterators.cell.domain
+    source_term[idx] =
+      T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) + T_cold
+  end
+
+  copy!(solver.source_term, source_term)
+  return solver, adapt(ArrayT, initialize_mesh()), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run(maxiter=Inf)
-  casename = "wavy_mesh_2d_no_source"
+function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
+  casename = "blob"
 
-  scheme, mesh, T, ρ, cₚ, κ = init_state()
+  if case === :no_source
+    scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, kwargs...)
+  else
+    scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, kwargs...)
+  end
 
   global Δt = 1e-4
   global t = 0.0
@@ -151,7 +189,9 @@ function run(maxiter=Inf)
     end
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true)
+    stats, next_dt = nonlinear_thermal_conduction_step!(
+      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=true
+    )
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -180,6 +220,14 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = run(Inf)
+  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 10)
+  # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=false)
+  # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
+
+  #
+  # scheme, mesh, temperature = solve_prob(
+  #   :pseudo_transient, :with_source, 10; error_check_interval=2
+  # )
+  scheme, mesh, temperature = solve_prob(:implicit, :with_source, 10; direct_solve=false)
   nothing
 end
