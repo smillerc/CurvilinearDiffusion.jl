@@ -17,7 +17,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :CPU
+dev = :GPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -79,7 +79,7 @@ function uniform_grid(nx, ny, nz, nhalo)
 end
 
 function initialize_mesh()
-  ni, nj, nk = (50, 50, 50)
+  ni, nj, nk = (150, 150, 150)
   nhalo = 4
   return uniform_grid(ni, nj, nk, nhalo)
   # return wavy_grid(ni, nj, nk, nhalo)
@@ -90,7 +90,7 @@ end
 # ------------------------------------------------------------
 function init_state()
   @info "Initializing mesh"
-  mesh = adapt(ArrayT, initialize_mesh())
+  mesh = initialize_mesh()
 
   bcs = (
     ilo=DirichletBC(150.0),
@@ -133,7 +133,7 @@ function init_state()
       T_cold
   end
 
-  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  return solver, adapt(ArrayT, mesh), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
 # ------------------------------------------------------------
@@ -159,7 +159,10 @@ function run(maxiter=Inf)
     end
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    stats, next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
+
+    @timeit "nonlinear_thermal_conduction_step!" begin
+      stats, next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
+    end
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -190,6 +193,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(500)
+  scheme, temperature, mesh = run(15)
   nothing
 end

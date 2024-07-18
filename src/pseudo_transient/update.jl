@@ -1,24 +1,20 @@
 #
 @kernel function _update_kernel!(
-  u::AbstractArray{T,2},
-  u_prev,
+  u,
+  @Const(u_prev),
   cell_center_metrics, # applying @Const to a struct array causes problems
   edge_metrics, # applying @Const to a struct array causes problems
-  α,
-  q,
-  dτ_ρ,
-  source_term,
-  dt,
-  I0,
-) where {T}
+  @Const(flux),
+  @Const(dτ_ρ),
+  @Const(source_term),
+  @Const(dt),
+  @Const(I0),
+)
   idx = @index(Global, Cartesian)
   idx += I0
 
-  qᵢ = q.x
-  qⱼ = q.y
-
   @inbounds begin
-    ∇q = flux_divergence((qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx)
+    @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx)
 
     u[idx] = (
       (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) /
@@ -38,7 +34,6 @@ function compute_update!(
     solver.u_prev,
     mesh.cell_center_metrics,
     mesh.edge_metrics,
-    solver.α,
     solver.q,
     solver.dτ_ρ,
     solver.source_term,

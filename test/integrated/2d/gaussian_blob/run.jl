@@ -189,9 +189,11 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     end
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
-    stats, next_dt = nonlinear_thermal_conduction_step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=true
-    )
+    @timeit "nonlinear_thermal_conduction_step!" begin
+      stats, next_dt = nonlinear_thermal_conduction_step!(
+        scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=true
+      )
+    end
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -226,8 +228,8 @@ begin
 
   #
   # scheme, mesh, temperature = solve_prob(
-  #   :pseudo_transient, :with_source, 10; error_check_interval=2
+  #   :pseudo_transient, :with_source, 100; error_check_interval=2
   # )
-  scheme, mesh, temperature = solve_prob(:implicit, :with_source, 10; direct_solve=false)
+  scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
   nothing
 end

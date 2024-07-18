@@ -1,7 +1,5 @@
 
-@kernel function flux_kernel!(
-  qᵢ₊½::AbstractArray{T,2}, q′ᵢ₊½::AbstractArray{T,2}, u, α, θr_dτ, axis, I0, mean_func::F
-) where {T,F}
+@kernel function flux_kernel!(qᵢ₊½, q′ᵢ₊½, u, α, θr_dτ, axis, I0, mean_func::F) where {F}
   idx = @index(Global, Cartesian)
   idx += I0
 
