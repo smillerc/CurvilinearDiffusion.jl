@@ -52,7 +52,7 @@ function nonlinear_thermal_conduction_step!(
   stats, next_Δt = PseudoTransientScheme.step!(solver, mesh, T, ρ, cₚ, κ, Δt; kwargs...)
 
   if show_convergence
-    @printf "\tL2: %.3e, %i\n" stats.rel_err stats.niter
+    @printf "\trel error: %.3e, abs err: %.3e, %i\n" stats.rel_err stats.abs_err stats.niter
   end
 
   return stats, next_Δt
