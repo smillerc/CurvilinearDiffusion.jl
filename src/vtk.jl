@@ -1,7 +1,7 @@
 module VTKOutput
 
 using ..ImplicitSchemeType: ImplicitScheme
-using ..PseudoTransientScheme: PseudoTransientSolver
+using ..PseudoTransientScheme: PseudoTransientSolver, to_vtk
 
 using WriteVTK, CurvilinearGrids, Printf
 
@@ -37,36 +37,7 @@ end
 function save_vtk(
   scheme::PseudoTransientSolver, u, mesh, iteration=0, t=0.0, name="diffusion", T=Float32
 )
-  fn = get_filename(iteration, name)
-  @info "Writing to $fn"
-
-  domain = mesh.iterators.cell.domain
-
-  coords = Array{T}.(CurvilinearGrids.coords(mesh))
-
-  @views vtk_grid(fn, coords...) do vtk
-    vtk["TimeValue"] = t
-    vtk["u"] = Array{T}(scheme.u[domain])
-    vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
-    vtk["residual"] = Array{T}(scheme.res[domain])
-    vtk["residual_prev"] = Array{T}(scheme.res_prev[domain])
-    vtk["nabla_q"] = Array{T}(scheme.∇q[domain])
-
-    for (i, qi) in enumerate(scheme.q)
-      vtk["q$i"] = Array{T}(qi[domain])
-    end
-
-    for (i, qi) in enumerate(scheme.q′)
-      vtk["q2$i"] = Array{T}(qi[domain])
-    end
-
-    vtk["diffusivity"] = Array{T}(scheme.α[domain])
-
-    vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
-    vtk["θr_dτ"] = Array{T}(scheme.θr_dτ[domain])
-
-    vtk["source_term"] = Array{T}(scheme.source_term[domain])
-  end
+  to_vtk(scheme, mesh, iteration, t, name, T)
 end
 
 end
