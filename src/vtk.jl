@@ -46,12 +46,20 @@ function save_vtk(
 
   @views vtk_grid(fn, coords...) do vtk
     vtk["TimeValue"] = t
-    vtk["u"] = Array{T}(u[domain])
+    vtk["u"] = Array{T}(scheme.u[domain])
+    vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["residual"] = Array{T}(scheme.res[domain])
-    vtk["qi"] = Array{T}(scheme.q[1][domain])
-    vtk["qj"] = Array{T}(scheme.q[2][domain])
-    vtk["q2i"] = Array{T}(scheme.q′[1][domain])
-    vtk["q2j"] = Array{T}(scheme.q′[2][domain])
+    vtk["residual_prev"] = Array{T}(scheme.res_prev[domain])
+    vtk["nabla_q"] = Array{T}(scheme.∇q[domain])
+
+    for (i, qi) in enumerate(scheme.q)
+      vtk["q$i"] = Array{T}(qi[domain])
+    end
+
+    for (i, qi) in enumerate(scheme.q′)
+      vtk["q2$i"] = Array{T}(qi[domain])
+    end
+
     vtk["diffusivity"] = Array{T}(scheme.α[domain])
 
     vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
