@@ -1,33 +1,47 @@
 
-@kernel function flux_kernel!(qᵢ₊½, q′ᵢ₊½, u, α, θr_dτ, axis, I0, mean_func::F) where {F}
+@kernel function flux_kernel!(
+  qᵢ₊½::AbstractArray{T,N}, q′ᵢ₊½, u, α, θr_dτ, axis, I0, mean_func::F
+) where {T,N,F}
+
+  # get the global index and offset for the inner domain
   idx = @index(Global, Cartesian)
   idx += I0
 
+  ϵ = eps(T)
   @inbounds begin
     ᵢ₊₁ = shift(idx, axis, +1)
 
     # edge diffusivity / iter params
-    αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-    θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁])
+    @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
+    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
 
-    _qᵢ₊½ = -αᵢ₊½ * (u[ᵢ₊₁] - u[idx])
+    du = u[ᵢ₊₁] - u[idx]
+    du = du * (abs(du) >= ϵ) # perform epsilon check
+
+    _qᵢ₊½ = -αᵢ₊½ * du
 
     qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
     q′ᵢ₊½[idx] = _qᵢ₊½
   end
 end
 
-function _cpu_flux_kernel!(qᵢ₊½, q′ᵢ₊½, u, α, θr_dτ, axis, domain, mean_func::F) where {F}
+function _cpu_flux_kernel!(
+  qᵢ₊½::AbstractArray{T,N}, q′ᵢ₊½, u, α, θr_dτ, axis, domain, mean_func::F
+) where {T,N,F}
   #
 
+  ϵ = eps(T)
   @batch for idx in domain
     ᵢ₊₁ = shift(idx, axis, +1)
 
     # edge diffusivity / iter params
     @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁])
+    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
 
-    _qᵢ₊½ = -αᵢ₊½ * (u[ᵢ₊₁] - u[idx])
+    du = u[ᵢ₊₁] - u[idx]
+    du = du * (abs(du) >= ϵ) # perform epsilon check
+
+    _qᵢ₊½ = -αᵢ₊½ * du
 
     qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
     q′ᵢ₊½[idx] = _qᵢ₊½
