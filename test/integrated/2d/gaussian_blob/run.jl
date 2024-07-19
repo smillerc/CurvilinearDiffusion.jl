@@ -115,6 +115,7 @@ function init_state_no_source(scheme, kwargs...)
     T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
+  copy!(solver.u, T)
   return solver, adapt(ArrayT, initialize_mesh()), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
@@ -222,14 +223,14 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 10)
+  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 100)
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=false)
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
 
   #
-  # scheme, mesh, temperature = solve_prob(
-  #   :pseudo_transient, :with_source, 100; error_check_interval=2
-  # )
-  scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
+  scheme, mesh, temperature = solve_prob(
+    :pseudo_transient, :with_source, 100; error_check_interval=2
+  )
+  # scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
   nothing
 end

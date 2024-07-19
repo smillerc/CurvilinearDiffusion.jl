@@ -17,7 +17,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :GPU
+dev = :CPU
 
 if dev === :GPU
   @info "Using CUDA"
