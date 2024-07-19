@@ -1,6 +1,22 @@
-function L2_norm(A)
-  _norm = sqrt(mapreduce(x -> x^2, +, A)) / sqrt(length(A))
+function L2_norm(A::AbstractArray)
+  _norm = sqrt(mapreduce(x -> (x^2), +, A) / length(A))
   return _norm
+end
+
+function L2_norm(A::Array)
+  _L2_norm(A, Val(nthreads()))
+end
+
+function _L2_norm(a, ::Val{nchunks}) where {nchunks}
+  _numer = @MVector zeros(nchunks)
+
+  @batch for idx in eachindex(a)
+    ichunk = threadid()
+
+    _numer[ichunk] += a[idx]^2
+  end
+
+  return sqrt(sum(_numer) / length(a))
 end
 
 @kernel function _update_resid!(
