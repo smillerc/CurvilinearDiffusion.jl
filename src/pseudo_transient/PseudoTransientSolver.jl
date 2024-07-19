@@ -10,7 +10,9 @@ using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
 using UnPack: @unpack
 using Printf
+using StaticArrays
 using WriteVTK
+using .Threads
 
 using ..TimeStepControl
 
@@ -157,9 +159,8 @@ function step!(
   max_iter=1e5,
   rel_tol=1e-5,
   abs_tol=1e-9,
-  error_check_interval=1,
+  error_check_interval=2,
   apply_cutoff=true,
-  ioall_save=false,
   subcycle_conductivity=true,
   kwargs...,
 ) where {N}
@@ -190,7 +191,6 @@ function step!(
 
   # Pseudo-transient iteration
   while true
-    # @info "Iter: $iter, Err: $err"
     iter += 1
 
     # Diffusion coefficient
@@ -236,10 +236,6 @@ function step!(
       error(
         "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
-    end
-
-    if ioall_save
-      to_vtk(solver, mesh, iter, iter, "allthethings")
     end
 
     if iter > max_iter
@@ -307,10 +303,17 @@ function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
     vtk["u"] = Array{T}(scheme.u[domain])
     vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["residual"] = Array{T}(scheme.res[domain])
-    vtk["qi"] = Array{T}(scheme.q[1][domain])
-    vtk["qj"] = Array{T}(scheme.q[2][domain])
-    vtk["q2i"] = Array{T}(scheme.q′[1][domain])
-    vtk["q2j"] = Array{T}(scheme.q′[2][domain])
+    vtk["residual_prev"] = Array{T}(scheme.res_prev[domain])
+    vtk["nabla_q"] = Array{T}(scheme.∇q[domain])
+
+    for (i, qi) in enumerate(scheme.q)
+      vtk["q$i"] = Array{T}(qi[domain])
+    end
+
+    for (i, qi) in enumerate(scheme.q′)
+      vtk["q2$i"] = Array{T}(qi[domain])
+    end
+
     vtk["diffusivity"] = Array{T}(scheme.α[domain])
 
     vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
