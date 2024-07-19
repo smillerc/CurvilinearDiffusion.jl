@@ -179,6 +179,10 @@ function step!(
   dx, dy = solver.spacing
   Vpdτ = CFL * min(dx, dy)
 
+  @assert dx > 0
+  @assert dy > 0
+  @assert Vpdτ > 0
+
   copy!(solver.u, T)
   copy!(solver.u_prev, T)
 
@@ -205,6 +209,10 @@ function step!(
     applybcs!(solver.bcs, mesh, solver.u)
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
+
+    validate_scalar(solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false)
+    validate_scalar(solver.dτ_ρ, domain, nhalo, :dτ_ρ; enforce_positivity=false)
+
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
@@ -256,7 +264,6 @@ function step!(
     next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
   end
 
-  # copy!(solver.u_prev, solver.u)
   copy!(T, solver.u)
 
   stats = (rel_err=rel_error, abs_err=abs_error, niter=iter)
@@ -303,8 +310,6 @@ function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
     vtk["u"] = Array{T}(scheme.u[domain])
     vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["residual"] = Array{T}(scheme.res[domain])
-    vtk["residual_prev"] = Array{T}(scheme.res_prev[domain])
-    vtk["nabla_q"] = Array{T}(scheme.∇q[domain])
 
     for (i, qi) in enumerate(scheme.q)
       vtk["q$i"] = Array{T}(qi[domain])
