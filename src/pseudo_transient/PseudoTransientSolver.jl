@@ -179,6 +179,7 @@ function step!(
   dx, dy = solver.spacing
   Vpdτ = CFL * min(dx, dy)
 
+  @assert dt > 0
   @assert dx > 0
   @assert dy > 0
   @assert Vpdτ > 0
@@ -187,11 +188,20 @@ function step!(
   copy!(solver.u_prev, T)
 
   @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
-  applybcs!(solver.bcs, mesh, solver.α)
 
-  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
-  validate_scalar(solver.source_term, domain, nhalo, :source_term; enforce_positivity=false)
-  validate_scalar(solver.α, domain, nhalo, :diffusivity; enforce_positivity=true)
+  @timeit "validate_scalar (α)" validate_scalar(
+    solver.α, domain, nhalo, :diffusivity; enforce_positivity=true
+  )
+
+  @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
+
+  @timeit "validate_scalar (u)" validate_scalar(
+    solver.u, domain, nhalo, :u; enforce_positivity=true
+  )
+
+  @timeit "validate_scalar (source_term)" validate_scalar(
+    solver.source_term, domain, nhalo, :source_term; enforce_positivity=false
+  )
 
   # Pseudo-transient iteration
   while true
@@ -203,15 +213,21 @@ function step!(
         @timeit "update_conductivity!" update_conductivity!(
           solver, mesh, solver.u, ρ, cₚ, κ
         )
-        applybcs!(solver.bcs, mesh, solver.α)
+        @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
       end
     end
-    applybcs!(solver.bcs, mesh, solver.u)
+
+    @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u)
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
 
-    validate_scalar(solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false)
-    validate_scalar(solver.dτ_ρ, domain, nhalo, :dτ_ρ; enforce_positivity=false)
+    # @timeit "validate_scalar (θr_dτ)" validate_scalar(
+    #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
+    # )
+
+    # @timeit "validate_scalar (dτ_ρ)" validate_scalar(
+    #   solver.dτ_ρ, domain, nhalo, :dτ_ρ; enforce_positivity=false
+    # )
 
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
@@ -258,7 +274,9 @@ function step!(
     end
   end
 
-  validate_scalar(solver.u, domain, nhalo, :u; enforce_positivity=true)
+  @timeit "validate_scalar (u)" validate_scalar(
+    solver.u, domain, nhalo, :u; enforce_positivity=true
+  )
 
   @timeit "next_dt" begin
     next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
