@@ -45,6 +45,20 @@ function CurvilinearDiffusion.assemble!(
   #
   m, _ = size(A)
 
+  # @show typeof(A)
+  # @show typeof(scheme.linear_problem.b)
+  # @show typeof(scheme.source_term)
+  # @show typeof(u)
+  # @show typeof(scheme.α)
+  # @show typeof(Δt)
+  # @show typeof(mesh.cell_center_metrics.J)
+  # @show typeof(mesh.edge_metrics)
+  # @show typeof(scheme.iterators.mesh)
+  # @show typeof(scheme.iterators.full.cartesian)
+  # @show typeof(scheme.limits)
+  # @show typeof(scheme.mean_func)
+  # @show typeof(scheme.bcs)
+
   kernel = @cuda launch = false assemble_csr!(
     A,
     scheme.linear_problem.b,

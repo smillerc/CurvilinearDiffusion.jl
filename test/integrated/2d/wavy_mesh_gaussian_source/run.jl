@@ -6,36 +6,10 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-# @static if Sys.islinux()
-#   using MKL
-# elseif Sys.isapple()
-#   using AppleAccelerate
-# end
-
-NMAX = Sys.CPU_THREADS
-BLAS.set_num_threads(NMAX)
-BLAS.get_num_threads()
-
-@show BLAS.get_config()
-
-dev = :CPU
-
-if dev === :GPU
-  @info "Using CUDA"
-  using CUDA
-  using CUDA.CUDAKernels
-  backend = CUDABackend()
-  ArrayT = CuArray
-  # CUDA.allowscalar(false)
-else
-  backend = CPU()
-  ArrayT = Array
-end
-
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj)
+function wavy_grid(ni, nj, nhalo)
   Lx = 12
   Ly = 12
   n_xy = 6
@@ -52,35 +26,40 @@ function wavy_grid(ni, nj)
   # Ax = 0.2 / Δx0
   # Ay = 0.4 / Δy0
 
-  x(i, j) = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
-  y(i, j) = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+  x = zeros(ni, nj)
+  y = zeros(ni, nj)
+  for j in 1:nj
+    for i in 1:ni
+      x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+      y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
+    end
+  end
 
-  return (x, y)
+  return CurvilinearGrid2D(x, y, nhalo)
 end
 
-function uniform_grid(nx, ny)
+function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
 
-  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-  return (x, y)
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
 end
 
-function initialize_mesh()
-  ni, nj = (101, 101)
+function initialize_mesh(uniform)
+  ni, nj = (150, 150)
   nhalo = 6
-  x, y = wavy_grid(ni, nj)
-  # x, y = uniform_grid(ni, nj)
-  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+  if uniform
+    return uniform_grid(ni, nj, nhalo)
+  else
+    return wavy_grid(ni, nj, nhalo)
+  end
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
-function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
+function init_state(dev, uniform, direct_solve)
+  mesh = initialize_mesh(uniform)
   bcs = (
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
@@ -88,24 +67,22 @@ function init_state()
     jhi=NeumannBC(),  #
   )
 
-  # solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=true)
-  solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:arithmetic)
+  solver = ImplicitScheme(mesh, bcs; backend=backend, direct_solve=direct_solve)
 
   # Temperature and density
   T_hot = 1e2
   T_cold = 1e-2
   T = ones(Float64, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(Float64, cellsize_withhalo(mesh))
-  source_term = similar(solver.source_term)
-  fill!(source_term, 0)
+  source_term = zeros(size(solver.source_term))
   cₚ = 1.0
 
   # Define the conductivity model
-  @inline function κ(ρ, temperature, κ0=10.0)
+  @inline function κ(ρ, temperature, κ0=1.0)
     if !isfinite(temperature)
       return 0.0
     else
-      return κ0 * temperature^3
+      return κ0 #* temperature^3
     end
   end
 
@@ -122,16 +99,16 @@ function init_state()
 
   copy!(solver.source_term, source_term) # move to gpu (if need be)
 
-  return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  return solver, adapt(ArrayT, mesh), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run(maxiter=Inf)
+function solve_prob(device, uniform, direct_solve, maxiter)
   casename = "wavy_mesh_2d_with_source"
 
-  scheme, mesh, T, ρ, cₚ, κ = init_state()
+  scheme, mesh, T, ρ, cₚ, κ = init_state(device, uniform, direct_solve)
 
   global Δt = 1e-4
   global t = 0.0
@@ -146,9 +123,8 @@ function run(maxiter=Inf)
       reset_timer!()
     end
 
-    next_Δt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
-
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
+    stats, next_Δt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
 
     if t + Δt > io_next
       @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
@@ -174,10 +150,26 @@ function run(maxiter=Inf)
   return scheme, mesh, T
 end
 
-begin
+function run(device::Symbol, uniform::Bool, direct_solve::Bool)
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  solver, mesh, temperature = run(Inf)
-  nothing
+  solver, mesh, temperature = solve_prob(device, uniform, direct_solve, 50)
 end
+
+dev = :CPU
+
+if dev === :GPU
+  @info "Using CUDA"
+  using CUDA
+  using CUDA.CUDAKernels
+  backend = CUDABackend()
+  ArrayT = CuArray
+  CUDA.allowscalar(false)
+else
+  @info "Using CPU"
+  backend = CPU()
+  ArrayT = Array
+end
+
+run(dev, false, false);
