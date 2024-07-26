@@ -1,7 +1,5 @@
 
-function updatehalo!(Atuple::NamedTuple, nhalo::Int, mpi_topology, do_corners=true)
-
-  # 
+function updatehalo!(Atuple::NamedTuple, nhalo::Int, mpi_topology, do_corners=false)
   @inbounds for A in Atuple
     updatehalo!(A, nhalo, mpi_topology, do_corners)
   end
@@ -10,7 +8,7 @@ function updatehalo!(Atuple::NamedTuple, nhalo::Int, mpi_topology, do_corners=tr
 end
 
 function updatehalo!(A::AbstractArray{T,1}, nhalo::Int, mpi_topology, ::Bool) where {T}
-  domain = expand(CartesianIndices(A), -nhalo)
+  domain = CartesianIndices(A)
 
   iaxis = 1
   ihalo, iedge = haloedge_regions(domain, iaxis, nhalo)
@@ -18,37 +16,35 @@ function updatehalo!(A::AbstractArray{T,1}, nhalo::Int, mpi_topology, ::Bool) wh
   ilo_neighbor_rank = ilo_neighbor(mpi_topology)
   ihi_neighbor_rank = ihi_neighbor(mpi_topology)
 
-  if ilo_neighbor_rank >= 0 && ihi_neighbor_rank >= 0
-    ilo_edge = MPI.Buffer(view(A, iedge.lo))
-    ihi_halo = MPI.Buffer(view(A, ihalo.hi))
+  ilo_edge = MPI.Buffer(view(A, iedge.lo))
+  ihi_halo = MPI.Buffer(view(A, ihalo.hi))
 
-    MPI.Sendrecv!(
-      ilo_edge, # send ilo edge
-      ihi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=ilo_neighbor_rank,   # to the ilo rank
-      source=ihi_neighbor_rank, # from the ihi rank
-    )
+  MPI.Sendrecv!(
+    ilo_edge, # send ilo edge
+    ihi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=ilo_neighbor_rank,   # to the ilo rank
+    source=ihi_neighbor_rank, # from the ihi rank
+  )
 
-    ihi_edge = MPI.Buffer(view(A, iedge.hi))
-    ilo_halo = MPI.Buffer(view(A, ihalo.lo))
+  ihi_edge = MPI.Buffer(view(A, iedge.hi))
+  ilo_halo = MPI.Buffer(view(A, ihalo.lo))
 
-    MPI.Sendrecv!(
-      ihi_edge, # send ihi edge
-      ilo_halo, # to ilo halo 
-      mpi_topology.comm;
-      dest=ihi_neighbor_rank,    # to the ihi rank
-      source=ilo_neighbor_rank,  # from the ilo rank
-    )
-  end
+  MPI.Sendrecv!(
+    ihi_edge, # send ihi edge
+    ilo_halo, # to ilo halo 
+    mpi_topology.comm;
+    dest=ihi_neighbor_rank,    # to the ihi rank
+    source=ilo_neighbor_rank,  # from the ilo rank
+  )
 
   return nothing
 end
 
-NVTX.NVTX.@annotate function updatehalo!(
-  A::AbstractArray{T,2}, nhalo::Int, mpi_topology, do_corners=true
+function updatehalo!(
+  A::AbstractArray{T,2}, nhalo::Int, mpi_topology, do_corners=false
 ) where {T}
-  domain = expand(CartesianIndices(A), -nhalo)
+  domain = CartesianIndices(A)
   iaxis, jaxis = (1, 2)
   ihalo, iedge = haloedge_regions(domain, iaxis, nhalo)
   jhalo, jedge = haloedge_regions(domain, jaxis, nhalo)
@@ -58,53 +54,49 @@ NVTX.NVTX.@annotate function updatehalo!(
   jlo_neighbor_rank = jlo_neighbor(mpi_topology)
   jhi_neighbor_rank = jhi_neighbor(mpi_topology)
 
-  if ilo_neighbor_rank >= 0 && ihi_neighbor_rank >= 0
-    ilo_edge = MPI.Buffer(view(A, iedge.lo))
-    ihi_halo = MPI.Buffer(view(A, ihalo.hi))
+  ilo_edge = MPI.Buffer(view(A, iedge.lo))
+  ihi_halo = MPI.Buffer(view(A, ihalo.hi))
 
-    MPI.Sendrecv!(
-      ilo_edge, # send ilo edge
-      ihi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=ilo_neighbor_rank,   # to the ilo rank
-      source=ihi_neighbor_rank, # from the ihi rank
-    )
+  MPI.Sendrecv!(
+    ilo_edge, # send ilo edge
+    ihi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=ilo_neighbor_rank,   # to the ilo rank
+    source=ihi_neighbor_rank, # from the ihi rank
+  )
 
-    ihi_edge = MPI.Buffer(view(A, iedge.hi))
-    ilo_halo = MPI.Buffer(view(A, ihalo.lo))
+  ihi_edge = MPI.Buffer(view(A, iedge.hi))
+  ilo_halo = MPI.Buffer(view(A, ihalo.lo))
 
-    MPI.Sendrecv!(
-      ihi_edge, # send ihi edge
-      ilo_halo, # to ilo halo 
-      mpi_topology.comm;
-      dest=ihi_neighbor_rank,    # to the ihi rank
-      source=ilo_neighbor_rank,  # from the ilo rank
-    )
-  end
+  MPI.Sendrecv!(
+    ihi_edge, # send ihi edge
+    ilo_halo, # to ilo halo 
+    mpi_topology.comm;
+    dest=ihi_neighbor_rank,    # to the ihi rank
+    source=ilo_neighbor_rank,  # from the ilo rank
+  )
 
-  if jlo_neighbor_rank >= 0 && jhi_neighbor_rank >= 0
-    jhi_edge = MPI.Buffer(view(A, jedge.hi))
-    jlo_halo = MPI.Buffer(view(A, jhalo.lo))
+  jhi_edge = MPI.Buffer(view(A, jedge.hi))
+  jlo_halo = MPI.Buffer(view(A, jhalo.lo))
 
-    MPI.Sendrecv!(
-      jhi_edge, # send jhi edge
-      jlo_halo, # to jlo halo 
-      mpi_topology.comm;
-      dest=jhi_neighbor_rank,    # to the jhi rank
-      source=jlo_neighbor_rank,  # from the jlo rank
-    )
+  MPI.Sendrecv!(
+    jhi_edge, # send jhi edge
+    jlo_halo, # to jlo halo 
+    mpi_topology.comm;
+    dest=jhi_neighbor_rank,    # to the jhi rank
+    source=jlo_neighbor_rank,  # from the jlo rank
+  )
 
-    jlo_edge = MPI.Buffer(view(A, jedge.lo))
-    jhi_halo = MPI.Buffer(view(A, jhalo.hi))
+  jlo_edge = MPI.Buffer(view(A, jedge.lo))
+  jhi_halo = MPI.Buffer(view(A, jhalo.hi))
 
-    MPI.Sendrecv!(
-      jlo_edge, # send ilo edge
-      jhi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=jlo_neighbor_rank,    # to the jlo rank
-      source=jhi_neighbor_rank,  # from the jhi rank
-    )
-  end
+  MPI.Sendrecv!(
+    jlo_edge, # send ilo edge
+    jhi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=jlo_neighbor_rank,    # to the jlo rank
+    source=jhi_neighbor_rank,  # from the jhi rank
+  )
 
   if do_corners
     ilojlo_neighbor_rank = neighbor(mpi_topology, -1, -1)
@@ -122,62 +114,58 @@ NVTX.NVTX.@annotate function updatehalo!(
     ihijlo_edge_dom = shift(shift(ihijlo_halo_dom, 1, -nhalo), 2, +nhalo)
     ihijhi_edge_dom = shift(shift(ihijhi_halo_dom, 1, -nhalo), 2, -nhalo)
 
-    if ilojlo_neighbor_rank >= 0 && ihijhi_neighbor_rank >= 0
-      ihijhi_edge = MPI.Buffer(view(A, ihijhi_edge_dom))
-      ilojlo_halo = MPI.Buffer(view(A, ilojlo_halo_dom))
+    ihijhi_edge = MPI.Buffer(view(A, ihijhi_edge_dom))
+    ilojlo_halo = MPI.Buffer(view(A, ilojlo_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijhi_edge, # send ihi-jhi corner
-        ilojlo_halo, # to ilo-jlo halo corner
-        mpi_topology.comm;
-        dest=ihijhi_neighbor_rank,    # to the ihi-jhi rank
-        source=ilojlo_neighbor_rank,  # from the ilo-jlo rank
-      )
+    MPI.Sendrecv!(
+      ihijhi_edge, # send ihi-jhi corner
+      ilojlo_halo, # to ilo-jlo halo corner
+      mpi_topology.comm;
+      dest=ihijhi_neighbor_rank,    # to the ihi-jhi rank
+      source=ilojlo_neighbor_rank,  # from the ilo-jlo rank
+    )
 
-      ilojlo_edge = MPI.Buffer(view(A, ilojlo_edge_dom))
-      ihijhi_halo = MPI.Buffer(view(A, ihijhi_halo_dom))
+    ilojlo_edge = MPI.Buffer(view(A, ilojlo_edge_dom))
+    ihijhi_halo = MPI.Buffer(view(A, ihijhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojlo_edge, # send ilo-jlo corner
-        ihijhi_halo, # to ihi-jhi halo corner
-        mpi_topology.comm;
-        dest=ilojlo_neighbor_rank,    # to the ilo-jlo rank
-        source=ihijhi_neighbor_rank,  # from the ihi-jhi rank
-      )
-    end
+    MPI.Sendrecv!(
+      ilojlo_edge, # send ilo-jlo corner
+      ihijhi_halo, # to ihi-jhi halo corner
+      mpi_topology.comm;
+      dest=ilojlo_neighbor_rank,    # to the ilo-jlo rank
+      source=ihijhi_neighbor_rank,  # from the ihi-jhi rank
+    )
 
-    if ilojhi_neighbor_rank >= 0 && ihijlo_neighbor_rank >= 0
-      ihijlo_edge = MPI.Buffer(view(A, ihijlo_edge_dom))
-      ilojhi_halo = MPI.Buffer(view(A, ilojhi_halo_dom))
+    ihijlo_edge = MPI.Buffer(view(A, ihijlo_edge_dom))
+    ilojhi_halo = MPI.Buffer(view(A, ilojhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijlo_edge, # send ihi-jlo corner
-        ilojhi_halo, # to ilo-jhi halo 
-        mpi_topology.comm;
-        dest=ihijlo_neighbor_rank,    # to the ihi-jlo rank
-        source=ilojhi_neighbor_rank,  # from the ilo-jhi rank
-      )
+    MPI.Sendrecv!(
+      ihijlo_edge, # send ihi-jlo corner
+      ilojhi_halo, # to ilo-jhi halo 
+      mpi_topology.comm;
+      dest=ihijlo_neighbor_rank,    # to the ihi-jlo rank
+      source=ilojhi_neighbor_rank,  # from the ilo-jhi rank
+    )
 
-      ilojhi_edge = MPI.Buffer(view(A, ilojhi_edge_dom))
-      ihijlo_halo = MPI.Buffer(view(A, ihijlo_halo_dom))
+    ilojhi_edge = MPI.Buffer(view(A, ilojhi_edge_dom))
+    ihijlo_halo = MPI.Buffer(view(A, ihijlo_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojhi_edge, # send ilo-jhi corner
-        ihijlo_halo, # to ihi-jlo halo 
-        mpi_topology.comm;
-        dest=ilojhi_neighbor_rank,    # to the ilo-jhi rank
-        source=ihijlo_neighbor_rank,  # from the ihi-jlo rank
-      )
-    end
+    MPI.Sendrecv!(
+      ilojhi_edge, # send ilo-jhi corner
+      ihijlo_halo, # to ihi-jlo halo 
+      mpi_topology.comm;
+      dest=ilojhi_neighbor_rank,    # to the ilo-jhi rank
+      source=ihijlo_neighbor_rank,  # from the ihi-jlo rank
+    )
   end
 
   return nothing
 end
 
 function updatehalo!(
-  A::AbstractArray{T,3}, nhalo::Int, mpi_topology, do_corners=true
+  A::AbstractArray{T,3}, nhalo::Int, mpi_topology, do_corners=false
 ) where {T}
-  domain = expand(CartesianIndices(A), -nhalo)
+  domain = CartesianIndices(A)
 
   iaxis, jaxis, kaxis = (1, 2, 3)
   ihalo, iedge = haloedge_regions(domain, iaxis, nhalo)
@@ -191,77 +179,71 @@ function updatehalo!(
   klo_neighbor_rank = klo_neighbor(mpi_topology)
   khi_neighbor_rank = khi_neighbor(mpi_topology)
 
-  if ilo_neighbor_rank >= 0 && ihi_neighbor_rank >= 0
-    ilo_edge = MPI.Buffer(view(A, iedge.lo))
-    ihi_halo = MPI.Buffer(view(A, ihalo.hi))
+  ilo_edge = MPI.Buffer(view(A, iedge.lo))
+  ihi_halo = MPI.Buffer(view(A, ihalo.hi))
 
-    MPI.Sendrecv!(
-      ilo_edge, # send ilo edge
-      ihi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=ilo_neighbor_rank,   # to the ilo rank
-      source=ihi_neighbor_rank, # from the ihi rank
-    )
+  MPI.Sendrecv!(
+    ilo_edge, # send ilo edge
+    ihi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=ilo_neighbor_rank,   # to the ilo rank
+    source=ihi_neighbor_rank, # from the ihi rank
+  )
 
-    ihi_edge = MPI.Buffer(view(A, iedge.hi))
-    ilo_halo = MPI.Buffer(view(A, ihalo.lo))
+  ihi_edge = MPI.Buffer(view(A, iedge.hi))
+  ilo_halo = MPI.Buffer(view(A, ihalo.lo))
 
-    MPI.Sendrecv!(
-      ihi_edge, # send ihi edge
-      ilo_halo, # to ilo halo 
-      mpi_topology.comm;
-      dest=ihi_neighbor_rank,    # to the ihi rank
-      source=ilo_neighbor_rank,  # from the ilo rank
-    )
-  end
+  MPI.Sendrecv!(
+    ihi_edge, # send ihi edge
+    ilo_halo, # to ilo halo 
+    mpi_topology.comm;
+    dest=ihi_neighbor_rank,    # to the ihi rank
+    source=ilo_neighbor_rank,  # from the ilo rank
+  )
 
-  if jlo_neighbor_rank >= 0 && jhi_neighbor_rank >= 0
-    jhi_edge = MPI.Buffer(view(A, jedge.hi))
-    jlo_halo = MPI.Buffer(view(A, jhalo.lo))
+  jhi_edge = MPI.Buffer(view(A, jedge.hi))
+  jlo_halo = MPI.Buffer(view(A, jhalo.lo))
 
-    MPI.Sendrecv!(
-      jhi_edge, # send jhi edge
-      jlo_halo, # to jlo halo 
-      mpi_topology.comm;
-      dest=jhi_neighbor_rank,    # to the jhi rank
-      source=jlo_neighbor_rank,  # from the jlo rank
-    )
+  MPI.Sendrecv!(
+    jhi_edge, # send jhi edge
+    jlo_halo, # to jlo halo 
+    mpi_topology.comm;
+    dest=jhi_neighbor_rank,    # to the jhi rank
+    source=jlo_neighbor_rank,  # from the jlo rank
+  )
 
-    jlo_edge = MPI.Buffer(view(A, jedge.lo))
-    jhi_halo = MPI.Buffer(view(A, jhalo.hi))
+  jlo_edge = MPI.Buffer(view(A, jedge.lo))
+  jhi_halo = MPI.Buffer(view(A, jhalo.hi))
 
-    MPI.Sendrecv!(
-      jlo_edge, # send ilo edge
-      jhi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=jlo_neighbor_rank,    # to the jlo rank
-      source=jhi_neighbor_rank,  # from the jhi rank
-    )
-  end
+  MPI.Sendrecv!(
+    jlo_edge, # send ilo edge
+    jhi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=jlo_neighbor_rank,    # to the jlo rank
+    source=jhi_neighbor_rank,  # from the jhi rank
+  )
 
-  if klo_neighbor_rank >= 0 && khi_neighbor_rank >= 0
-    khi_edge = MPI.Buffer(view(A, kedge.hi))
-    klo_halo = MPI.Buffer(view(A, khalo.lo))
+  khi_edge = MPI.Buffer(view(A, kedge.hi))
+  klo_halo = MPI.Buffer(view(A, khalo.lo))
 
-    MPI.Sendrecv!(
-      khi_edge, # send khi edge
-      klo_halo, # to klo halo 
-      mpi_topology.comm;
-      dest=khi_neighbor_rank,    # to the khi rank
-      source=klo_neighbor_rank,  # from the klo rank
-    )
+  MPI.Sendrecv!(
+    khi_edge, # send khi edge
+    klo_halo, # to klo halo 
+    mpi_topology.comm;
+    dest=khi_neighbor_rank,    # to the khi rank
+    source=klo_neighbor_rank,  # from the klo rank
+  )
 
-    klo_edge = MPI.Buffer(view(A, kedge.lo))
-    khi_halo = MPI.Buffer(view(A, khalo.hi))
+  klo_edge = MPI.Buffer(view(A, kedge.lo))
+  khi_halo = MPI.Buffer(view(A, khalo.hi))
 
-    MPI.Sendrecv!(
-      klo_edge, # send ilo edge
-      khi_halo, # to ihi halo 
-      mpi_topology.comm;
-      dest=klo_neighbor_rank,    # to the klo rank
-      source=khi_neighbor_rank,  # from the khi rank
-    )
-  end
+  MPI.Sendrecv!(
+    klo_edge, # send ilo edge
+    khi_halo, # to ihi halo 
+    mpi_topology.comm;
+    dest=klo_neighbor_rank,    # to the klo rank
+    source=khi_neighbor_rank,  # from the khi rank
+  )
 
   if do_corners
 
@@ -282,53 +264,49 @@ function updatehalo!(
     ihijlo_edge_dom = shift(shift(ihijlo_halo_dom, iaxis, -nhalo), jaxis, +nhalo)
     ihijhi_edge_dom = shift(shift(ihijhi_halo_dom, iaxis, -nhalo), jaxis, -nhalo)
 
-    if ilojlo_neighbor_rank >= 0 && ihijhi_neighbor_rank >= 0
-      ihijhi_edge = MPI.Buffer(view(A, ihijhi_edge_dom))
-      ilojlo_halo = MPI.Buffer(view(A, ilojlo_halo_dom))
+    ihijhi_edge = MPI.Buffer(view(A, ihijhi_edge_dom))
+    ilojlo_halo = MPI.Buffer(view(A, ilojlo_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijhi_edge, # send ihi-jhi corner
-        ilojlo_halo, # to ilo-jlo halo corner
-        mpi_topology.comm;
-        dest=ihijhi_neighbor_rank,    # to the ihi-jhi rank
-        source=ilojlo_neighbor_rank,  # from the ilo-jlo rank
-      )
+    MPI.Sendrecv!(
+      ihijhi_edge, # send ihi-jhi corner
+      ilojlo_halo, # to ilo-jlo halo corner
+      mpi_topology.comm;
+      dest=ihijhi_neighbor_rank,    # to the ihi-jhi rank
+      source=ilojlo_neighbor_rank,  # from the ilo-jlo rank
+    )
 
-      ilojlo_edge = MPI.Buffer(view(A, ilojlo_edge_dom))
-      ihijhi_halo = MPI.Buffer(view(A, ihijhi_halo_dom))
+    ilojlo_edge = MPI.Buffer(view(A, ilojlo_edge_dom))
+    ihijhi_halo = MPI.Buffer(view(A, ihijhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojlo_edge, # send ilo-jlo corner
-        ihijhi_halo, # to ihi-jhi halo corner
-        mpi_topology.comm;
-        dest=ilojlo_neighbor_rank,    # to the ilo-jlo rank
-        source=ihijhi_neighbor_rank,  # from the ihi-jhi rank
-      )
-    end
+    MPI.Sendrecv!(
+      ilojlo_edge, # send ilo-jlo corner
+      ihijhi_halo, # to ihi-jhi halo corner
+      mpi_topology.comm;
+      dest=ilojlo_neighbor_rank,    # to the ilo-jlo rank
+      source=ihijhi_neighbor_rank,  # from the ihi-jhi rank
+    )
 
-    if ilojhi_neighbor_rank >= 0 && ihijlo_neighbor_rank >= 0
-      ihijlo_edge = MPI.Buffer(view(A, ihijlo_edge_dom))
-      ilojhi_halo = MPI.Buffer(view(A, ilojhi_halo_dom))
+    ihijlo_edge = MPI.Buffer(view(A, ihijlo_edge_dom))
+    ilojhi_halo = MPI.Buffer(view(A, ilojhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijlo_edge, # send ihi-jlo corner
-        ilojhi_halo, # to ilo-jhi halo 
-        mpi_topology.comm;
-        dest=ihijlo_neighbor_rank,    # to the ihi-jlo rank
-        source=ilojhi_neighbor_rank,  # from the ilo-jhi rank
-      )
+    MPI.Sendrecv!(
+      ihijlo_edge, # send ihi-jlo corner
+      ilojhi_halo, # to ilo-jhi halo 
+      mpi_topology.comm;
+      dest=ihijlo_neighbor_rank,    # to the ihi-jlo rank
+      source=ilojhi_neighbor_rank,  # from the ilo-jhi rank
+    )
 
-      ilojhi_edge = MPI.Buffer(view(A, ilojhi_edge_dom))
-      ihijlo_halo = MPI.Buffer(view(A, ihijlo_halo_dom))
+    ilojhi_edge = MPI.Buffer(view(A, ilojhi_edge_dom))
+    ihijlo_halo = MPI.Buffer(view(A, ihijlo_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojhi_edge, # send ilo-jhi corner
-        ihijlo_halo, # to ihi-jlo halo 
-        mpi_topology.comm;
-        dest=ilojhi_neighbor_rank,    # to the ilo-jhi rank
-        source=ihijlo_neighbor_rank,  # from the ihi-jlo rank
-      )
-    end
+    MPI.Sendrecv!(
+      ilojhi_edge, # send ilo-jhi corner
+      ihijlo_halo, # to ihi-jlo halo 
+      mpi_topology.comm;
+      dest=ilojhi_neighbor_rank,    # to the ilo-jhi rank
+      source=ihijlo_neighbor_rank,  # from the ihi-jlo rank
+    )
 
     # ------
 
@@ -347,53 +325,49 @@ function updatehalo!(
     ilokhi_edge_dom = shift(shift(ilokhi_halo_dom, iaxis, +nhalo), kaxis, -nhalo)
     ihikhi_edge_dom = shift(shift(ihikhi_halo_dom, iaxis, -nhalo), kaxis, -nhalo)
 
-    if iloklo_neighbor_rank >= 0 && ihikhi_neighbor_rank >= 0
-      ihikhi_edge = MPI.Buffer(view(A, ihikhi_edge_dom))
-      iloklo_halo = MPI.Buffer(view(A, iloklo_halo_dom))
+    ihikhi_edge = MPI.Buffer(view(A, ihikhi_edge_dom))
+    iloklo_halo = MPI.Buffer(view(A, iloklo_halo_dom))
 
-      MPI.Sendrecv!(
-        ihikhi_edge, # send ihi-khi corner
-        iloklo_halo, # to ilo-klo halo corner
-        mpi_topology.comm;
-        dest=ihikhi_neighbor_rank,    # to the ihi-khi rank
-        source=iloklo_neighbor_rank,  # from the ilo-klo rank
-      )
+    MPI.Sendrecv!(
+      ihikhi_edge, # send ihi-khi corner
+      iloklo_halo, # to ilo-klo halo corner
+      mpi_topology.comm;
+      dest=ihikhi_neighbor_rank,    # to the ihi-khi rank
+      source=iloklo_neighbor_rank,  # from the ilo-klo rank
+    )
 
-      iloklo_edge = MPI.Buffer(view(A, iloklo_edge_dom))
-      ihikhi_halo = MPI.Buffer(view(A, ihikhi_halo_dom))
+    iloklo_edge = MPI.Buffer(view(A, iloklo_edge_dom))
+    ihikhi_halo = MPI.Buffer(view(A, ihikhi_halo_dom))
 
-      MPI.Sendrecv!(
-        iloklo_edge, # send ilo-klo corner
-        ihikhi_halo, # to ihi-khi halo corner
-        mpi_topology.comm;
-        dest=iloklo_neighbor_rank,    # to the ilo-klo rank
-        source=ihikhi_neighbor_rank,  # from the ihi-khi rank
-      )
-    end
+    MPI.Sendrecv!(
+      iloklo_edge, # send ilo-klo corner
+      ihikhi_halo, # to ihi-khi halo corner
+      mpi_topology.comm;
+      dest=iloklo_neighbor_rank,    # to the ilo-klo rank
+      source=ihikhi_neighbor_rank,  # from the ihi-khi rank
+    )
 
-    if ilokhi_neighbor_rank >= 0 && ihiklo_neighbor_rank >= 0
-      ihiklo_edge = MPI.Buffer(view(A, ihiklo_edge_dom))
-      ilokhi_halo = MPI.Buffer(view(A, ilokhi_halo_dom))
+    ihiklo_edge = MPI.Buffer(view(A, ihiklo_edge_dom))
+    ilokhi_halo = MPI.Buffer(view(A, ilokhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ihiklo_edge, # send ihi-klo corner
-        ilokhi_halo, # to ilo-khi halo 
-        mpi_topology.comm;
-        dest=ihiklo_neighbor_rank,    # to the ihi-klo rank
-        source=ilokhi_neighbor_rank,  # from the ilo-khi rank
-      )
+    MPI.Sendrecv!(
+      ihiklo_edge, # send ihi-klo corner
+      ilokhi_halo, # to ilo-khi halo 
+      mpi_topology.comm;
+      dest=ihiklo_neighbor_rank,    # to the ihi-klo rank
+      source=ilokhi_neighbor_rank,  # from the ilo-khi rank
+    )
 
-      ilokhi_edge = MPI.Buffer(view(A, ilokhi_edge_dom))
-      ihiklo_halo = MPI.Buffer(view(A, ihiklo_halo_dom))
+    ilokhi_edge = MPI.Buffer(view(A, ilokhi_edge_dom))
+    ihiklo_halo = MPI.Buffer(view(A, ihiklo_halo_dom))
 
-      MPI.Sendrecv!(
-        ilokhi_edge, # send ilo-khi corner
-        ihiklo_halo, # to ihi-klo halo 
-        mpi_topology.comm;
-        dest=ilokhi_neighbor_rank,    # to the ilo-khi rank
-        source=ihiklo_neighbor_rank,  # from the ihi-klo rank
-      )
-    end
+    MPI.Sendrecv!(
+      ilokhi_edge, # send ilo-khi corner
+      ihiklo_halo, # to ihi-klo halo 
+      mpi_topology.comm;
+      dest=ilokhi_neighbor_rank,    # to the ilo-khi rank
+      source=ihiklo_neighbor_rank,  # from the ihi-klo rank
+    )
 
     # ------
 
@@ -412,53 +386,49 @@ function updatehalo!(
     jlokhi_edge_dom = shift(jlokhi_halo_dom, (jaxis, kaxis), (+nhalo, -nhalo))
     jhikhi_edge_dom = shift(jhikhi_halo_dom, (jaxis, kaxis), (-nhalo, -nhalo))
 
-    if jloklo_neighbor_rank >= 0 && jhikhi_neighbor_rank >= 0
-      jhikhi_edge = MPI.Buffer(view(A, jhikhi_edge_dom))
-      jloklo_halo = MPI.Buffer(view(A, jloklo_halo_dom))
+    jhikhi_edge = MPI.Buffer(view(A, jhikhi_edge_dom))
+    jloklo_halo = MPI.Buffer(view(A, jloklo_halo_dom))
 
-      MPI.Sendrecv!(
-        jhikhi_edge, # send jhi-khi corner
-        jloklo_halo, # to jlo-klo halo corner
-        mpi_topology.comm;
-        dest=jhikhi_neighbor_rank,    # to the jhi-khi rank
-        source=jloklo_neighbor_rank,  # from the jlo-klo rank
-      )
+    MPI.Sendrecv!(
+      jhikhi_edge, # send jhi-khi corner
+      jloklo_halo, # to jlo-klo halo corner
+      mpi_topology.comm;
+      dest=jhikhi_neighbor_rank,    # to the jhi-khi rank
+      source=jloklo_neighbor_rank,  # from the jlo-klo rank
+    )
 
-      jloklo_edge = MPI.Buffer(view(A, jloklo_edge_dom))
-      jhikhi_halo = MPI.Buffer(view(A, jhikhi_halo_dom))
+    jloklo_edge = MPI.Buffer(view(A, jloklo_edge_dom))
+    jhikhi_halo = MPI.Buffer(view(A, jhikhi_halo_dom))
 
-      MPI.Sendrecv!(
-        jloklo_edge, # send jlo-klo corner
-        jhikhi_halo, # to jhi-khi halo corner
-        mpi_topology.comm;
-        dest=jloklo_neighbor_rank,    # to the jlo-klo rank
-        source=jhikhi_neighbor_rank,  # from the jhi-khi rank
-      )
-    end
+    MPI.Sendrecv!(
+      jloklo_edge, # send jlo-klo corner
+      jhikhi_halo, # to jhi-khi halo corner
+      mpi_topology.comm;
+      dest=jloklo_neighbor_rank,    # to the jlo-klo rank
+      source=jhikhi_neighbor_rank,  # from the jhi-khi rank
+    )
 
-    if jlokhi_neighbor_rank >= 0 && jhiklo_neighbor_rank >= 0
-      jhiklo_edge = MPI.Buffer(view(A, jhiklo_edge_dom))
-      jlokhi_halo = MPI.Buffer(view(A, jlokhi_halo_dom))
+    jhiklo_edge = MPI.Buffer(view(A, jhiklo_edge_dom))
+    jlokhi_halo = MPI.Buffer(view(A, jlokhi_halo_dom))
 
-      MPI.Sendrecv!(
-        jhiklo_edge, # send jhi-klo corner
-        jlokhi_halo, # to jlo-khi halo 
-        mpi_topology.comm;
-        dest=jhiklo_neighbor_rank,    # to the jhi-klo rank
-        source=jlokhi_neighbor_rank,  # from the jlo-khi rank
-      )
+    MPI.Sendrecv!(
+      jhiklo_edge, # send jhi-klo corner
+      jlokhi_halo, # to jlo-khi halo 
+      mpi_topology.comm;
+      dest=jhiklo_neighbor_rank,    # to the jhi-klo rank
+      source=jlokhi_neighbor_rank,  # from the jlo-khi rank
+    )
 
-      jlokhi_edge = MPI.Buffer(view(A, jlokhi_edge_dom))
-      jhiklo_halo = MPI.Buffer(view(A, jhiklo_halo_dom))
+    jlokhi_edge = MPI.Buffer(view(A, jlokhi_edge_dom))
+    jhiklo_halo = MPI.Buffer(view(A, jhiklo_halo_dom))
 
-      MPI.Sendrecv!(
-        jlokhi_edge, # send jlo-khi corner
-        jhiklo_halo, # to jhi-klo halo 
-        mpi_topology.comm;
-        dest=jlokhi_neighbor_rank,    # to the jlo-khi rank
-        source=jhiklo_neighbor_rank,  # from the jhi-klo rank
-      )
-    end
+    MPI.Sendrecv!(
+      jlokhi_edge, # send jlo-khi corner
+      jhiklo_halo, # to jhi-klo halo 
+      mpi_topology.comm;
+      dest=jlokhi_neighbor_rank,    # to the jlo-khi rank
+      source=jhiklo_neighbor_rank,  # from the jhi-klo rank
+    )
 
     # ------
 
@@ -473,29 +443,27 @@ function updatehalo!(
     ihijhikhi_edge_dom = shift(ihijhikhi_halo_dom, (iaxis, jaxis, kaxis), (-nhalo, -nhalo, -nhalo))
     #! format: on
 
-    if ilojloklo_neighbor_rank >= 0 && ihijhikhi_neighbor_rank
-      ilojloklo_edge = MPI.Buffer(view(A, ilojloklo_edge_dom))
-      ihijhikhi_halo = MPI.Buffer(view(A, ihijhikhi_halo_dom))
+    ilojloklo_edge = MPI.Buffer(view(A, ilojloklo_edge_dom))
+    ihijhikhi_halo = MPI.Buffer(view(A, ihijhikhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojloklo_edge, # send corner
-        ihijhikhi_halo, # to halo 
-        mpi_topology.comm;
-        dest=ilojloklo_neighbor_rank,    # to 
-        source=ihijhikhi_neighbor_rank,  # from 
-      )
+    MPI.Sendrecv!(
+      ilojloklo_edge, # send corner
+      ihijhikhi_halo, # to halo 
+      mpi_topology.comm;
+      dest=ilojloklo_neighbor_rank,    # to 
+      source=ihijhikhi_neighbor_rank,  # from 
+    )
 
-      ihijhikhi_edge = MPI.Buffer(view(A, ihijhikhi_edge_dom))
-      ilojloklo_halo = MPI.Buffer(view(A, ilojloklo_halo_dom))
+    ihijhikhi_edge = MPI.Buffer(view(A, ihijhikhi_edge_dom))
+    ilojloklo_halo = MPI.Buffer(view(A, ilojloklo_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijhikhi_edge, # send corner
-        ilojloklo_halo, # to halo 
-        mpi_topology.comm;
-        dest=ihijhikhi_neighbor_rank,    # to
-        source=ilojloklo_neighbor_rank,  # from
-      )
-    end
+    MPI.Sendrecv!(
+      ihijhikhi_edge, # send corner
+      ilojloklo_halo, # to halo 
+      mpi_topology.comm;
+      dest=ihijhikhi_neighbor_rank,    # to
+      source=ilojloklo_neighbor_rank,  # from
+    )
 
     ilojhiklo_neighbor_rank = neighbor(mpi_topology, -1, +1, -1)
     ihijlokhi_neighbor_rank = neighbor(mpi_topology, +1, -1, +1)
@@ -507,29 +475,27 @@ function updatehalo!(
     ihijlokhi_edge_dom = shift(ihijlokhi_halo_dom, (iaxis,jaxis,kaxis), (-nhalo, +nhalo, -nhalo))
     #! format: on
 
-    if ilojhiklo_neighbor_rank >= 0 && ihijlokhi_neighbor_rank
-      ihijlokhi_edge = MPI.Buffer(view(A, ihijlokhi_edge_dom))
-      ilojhiklo_halo = MPI.Buffer(view(A, ilojhiklo_halo_dom))
+    ihijlokhi_edge = MPI.Buffer(view(A, ihijlokhi_edge_dom))
+    ilojhiklo_halo = MPI.Buffer(view(A, ilojhiklo_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijlokhi_edge, # send corner
-        ilojhiklo_halo, # to halo 
-        mpi_topology.comm;
-        dest=ihijlokhi_neighbor_rank,    # to 
-        source=ilojhiklo_neighbor_rank,  # from 
-      )
+    MPI.Sendrecv!(
+      ihijlokhi_edge, # send corner
+      ilojhiklo_halo, # to halo 
+      mpi_topology.comm;
+      dest=ihijlokhi_neighbor_rank,    # to 
+      source=ilojhiklo_neighbor_rank,  # from 
+    )
 
-      ilojhiklo_edge = MPI.Buffer(view(A, ilojhiklo_edge_dom))
-      ihijlokhi_halo = MPI.Buffer(view(A, ihijlokhi_halo_dom))
+    ilojhiklo_edge = MPI.Buffer(view(A, ilojhiklo_edge_dom))
+    ihijlokhi_halo = MPI.Buffer(view(A, ihijlokhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojhiklo_edge, # send corner
-        ihijlokhi_halo, # to halo 
-        mpi_topology.comm;
-        dest=ilojhiklo_neighbor_rank,    # to
-        source=ihijlokhi_neighbor_rank,  # from
-      )
-    end
+    MPI.Sendrecv!(
+      ilojhiklo_edge, # send corner
+      ihijlokhi_halo, # to halo 
+      mpi_topology.comm;
+      dest=ilojhiklo_neighbor_rank,    # to
+      source=ihijlokhi_neighbor_rank,  # from
+    )
 
     ihijloklo_neighbor_rank = neighbor(mpi_topology, +1, -1, -1)
     ilojhikhi_neighbor_rank = neighbor(mpi_topology, -1, +1, +1)
@@ -541,29 +507,27 @@ function updatehalo!(
     ilojhikhi_edge_dom = shift(ilojhikhi_halo_dom, (iaxis, jaxis, kaxis), (+nhalo, -nhalo, -nhalo))
     #! format: on
 
-    if ihijloklo_neighbor_rank >= 0 && ilojhikhi_neighbor_rank
-      ihijloklo_edge = MPI.Buffer(view(A, ihijloklo_edge_dom))
-      ilojhikhi_halo = MPI.Buffer(view(A, ilojhikhi_halo_dom))
+    ihijloklo_edge = MPI.Buffer(view(A, ihijloklo_edge_dom))
+    ilojhikhi_halo = MPI.Buffer(view(A, ilojhikhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijloklo_edge, # send corner
-        ilojhikhi_halo, # to halo 
-        mpi_topology.comm;
-        dest=ihijloklo_neighbor_rank,    # to 
-        source=ilojhikhi_neighbor_rank,  # from 
-      )
+    MPI.Sendrecv!(
+      ihijloklo_edge, # send corner
+      ilojhikhi_halo, # to halo 
+      mpi_topology.comm;
+      dest=ihijloklo_neighbor_rank,    # to 
+      source=ilojhikhi_neighbor_rank,  # from 
+    )
 
-      ilojhikhi_edge = MPI.Buffer(view(A, ilojhikhi_edge_dom))
-      ihijloklo_halo = MPI.Buffer(view(A, ihijloklo_halo_dom))
+    ilojhikhi_edge = MPI.Buffer(view(A, ilojhikhi_edge_dom))
+    ihijloklo_halo = MPI.Buffer(view(A, ihijloklo_halo_dom))
 
-      MPI.Sendrecv!(
-        ilojhikhi_edge, # send corner
-        ihijloklo_halo, # to halo 
-        mpi_topology.comm;
-        dest=ilojhikhi_neighbor_rank,    # to
-        source=ihijloklo_neighbor_rank,  # from
-      )
-    end
+    MPI.Sendrecv!(
+      ilojhikhi_edge, # send corner
+      ihijloklo_halo, # to halo 
+      mpi_topology.comm;
+      dest=ilojhikhi_neighbor_rank,    # to
+      source=ihijloklo_neighbor_rank,  # from
+    )
 
     ihijhiklo_neighbor_rank = neighbor(mpi_topology, +1, +1, -1)
     ilojlokhi_neighbor_rank = neighbor(mpi_topology, -1, -1, +1)
@@ -575,28 +539,26 @@ function updatehalo!(
     ilojlokhi_edge_dom = shift(ilojlokhi_halo_dom, (iaxis, jaxis, kaxis), (+nhalo, +nhalo, -nhalo))
     #! format: on
 
-    if ihijhiklo_neighbor_rank >= 0 && ilojlokhi_neighbor_rank
-      ihijhiklo_edge = MPI.Buffer(view(A, ihijhiklo_edge_dom))
-      ilojlokhi_halo = MPI.Buffer(view(A, ilojlokhi_halo_dom))
+    ihijhiklo_edge = MPI.Buffer(view(A, ihijhiklo_edge_dom))
+    ilojlokhi_halo = MPI.Buffer(view(A, ilojlokhi_halo_dom))
 
-      MPI.Sendrecv!(
-        ihijhiklo_edge, # send corner
-        ilojlokhi_halo, # to halo 
-        mpi_topology.comm;
-        dest=ihijhiklo_neighbor_rank,    # to 
-        source=ilojlokhi_neighbor_rank,  # from 
-      )
+    MPI.Sendrecv!(
+      ihijhiklo_edge, # send corner
+      ilojlokhi_halo, # to halo 
+      mpi_topology.comm;
+      dest=ihijhiklo_neighbor_rank,    # to 
+      source=ilojlokhi_neighbor_rank,  # from 
+    )
 
-      ilojlokhi_edge = MPI.Buffer(view(A, ilojlokhi_edge_dom))
-      ihijhiklo_halo = MPI.Buffer(view(A, ihijhiklo_halo_dom))
-      MPI.Sendrecv!(
-        ilojlokhi_edge, # send corner
-        ihijhiklo_halo, # to halo 
-        mpi_topology.comm;
-        dest=ilojlokhi_neighbor_rank,    # to
-        source=ihijhiklo_neighbor_rank,  # from
-      )
-    end
+    ilojlokhi_edge = MPI.Buffer(view(A, ilojlokhi_edge_dom))
+    ihijhiklo_halo = MPI.Buffer(view(A, ihijhiklo_halo_dom))
+    MPI.Sendrecv!(
+      ilojlokhi_edge, # send corner
+      ihijhiklo_halo, # to halo 
+      mpi_topology.comm;
+      dest=ilojlokhi_neighbor_rank,    # to
+      source=ihijhiklo_neighbor_rank,  # from
+    )
   end
 
   return nothing
