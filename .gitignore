@@ -8,3 +8,4 @@ Manifest.toml
 *.nsys-rep
 *.sqlite
 *.pvt?
+nsys_profile*
