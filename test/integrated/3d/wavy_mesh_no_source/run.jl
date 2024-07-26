@@ -5,17 +5,9 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-# @static if Sys.islinux()
-#   using MKL
-# elseif Sys.isapple()
-#   using AppleAccelerate
-# end
-
 NMAX = Sys.CPU_THREADS
 BLAS.set_num_threads(NMAX)
 BLAS.get_num_threads()
-
-@show BLAS.get_config()
 
 dev = :CPU
 

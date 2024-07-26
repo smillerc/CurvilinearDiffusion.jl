@@ -46,7 +46,7 @@ function compute_update!(
   return nothing
 end
 
-function compute_update!(
+NVTX.@annotate function compute_update!(
   solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
 ) where {T,N,BE<:CPU}
 

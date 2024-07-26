@@ -12,10 +12,13 @@ using UnPack: @unpack
 using Printf
 using StaticArrays
 using WriteVTK
+using MPI
+using NVTX
+
 using .Threads
 
 using ..TimeStepControl
-
+using ..MPIDomainDecomposition
 using ..BoundaryConditions
 
 include("../averaging.jl")
@@ -24,27 +27,29 @@ include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
-  u::AA
-  u_prev::AA
-  source_term::AA
-  q::NT1
-  q′::NT1
-  res::AA
-  Re::AA
-  α::AA # diffusivity
-  θr_dτ::AA
-  dτ_ρ::AA
-  spacing::NTuple{N,T}
-  L::T
-  iterators::DM
-  bcs::B # boundary conditions
-  mean::F
-  backend::BE
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,MT}
+  u::AA           # solution, e.g. temperature or whatever we're diffusing
+  u_prev::AA      # previous solution
+  source_term::AA # external source term
+  q::NT1          # flux (there are 2 versions due to the PT algorithm)
+  q′::NT1         # flux (there are 2 versions due to the PT algorithm)
+  res::AA         # residual
+  Re::AA          # numerial Reynolds number
+  α::AA           # diffusivity
+  θr_dτ::AA       # iteration parameters
+  dτ_ρ::AA        # iteration parameters
+  spacing::NTuple{N,T} # physical spacing, used for Re calculation
+  L::T            # length scale used for Re calculation
+  iterators::DM   # domain iterators, e.g. CartesianIndices
+  bcs::B          # boundary conditions
+  mean::F         # which mean function are we using? arithmetic or harmonic mean
+  backend::BE     # CPU or GPU backend
+  nhalo::Int      # halo region width (can be different than the mesh)
+  mpi_topology::MT  # parallel topology, e.g. rank, nranks, who are my neighbors?
 end
 
 function PseudoTransientSolver(
-  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
+  mesh, bcs, topology; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
 )
   #
   #         u
@@ -79,6 +84,7 @@ function PseudoTransientSolver(
   end
 
   metric_cache = nothing
+  nhalo = mesh.nhalo
 
   return PseudoTransientSolver(
     u,
@@ -97,6 +103,8 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
+    nhalo,
+    topology,
   )
 end
 
@@ -166,6 +174,7 @@ function step!(
 ) where {N}
 
   #
+
   domain = solver.iterators.domain.cartesian
   nhalo = 1
 
@@ -193,7 +202,9 @@ function step!(
     solver.α, domain, nhalo, :diffusivity; enforce_positivity=true
   )
 
-  @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
+  @timeit "applybcs! (α)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.α)
+
+  @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, solver.mpi_topology)
 
   @timeit "validate_scalar (u)" validate_scalar(
     solver.u, domain, nhalo, :u; enforce_positivity=true
@@ -205,6 +216,7 @@ function step!(
 
   # Pseudo-transient iteration
   while true
+    # println("Iteration: $iter")
     iter += 1
 
     # Diffusion coefficient
@@ -213,13 +225,20 @@ function step!(
         @timeit "update_conductivity!" update_conductivity!(
           solver, mesh, solver.u, ρ, cₚ, κ
         )
-        @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
+        @timeit "applybcs! (α)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.α)
+        @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, solver.mpi_topology)
       end
     end
 
-    @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u)
+    @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt)
 
-    @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
+    @timeit "applybcs! (u)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.u)
+
+    @timeit "updatehalo! (u)" updatehalo!(solver.u, solver.nhalo, solver.mpi_topology)
+
+    @timeit "updatehalo! (θr_dτ)" updatehalo!(
+      solver.θr_dτ, solver.nhalo, solver.mpi_topology
+    ) # θr_dτ is needed for the flux compuation
 
     # @timeit "validate_scalar (θr_dτ)" validate_scalar(
     #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
@@ -230,6 +249,10 @@ function step!(
     # )
 
     @timeit "compute_flux!" compute_flux!(solver, mesh)
+    @timeit "updatehalo! (flux)" begin
+      updatehalo!(solver.q, solver.nhalo, solver.mpi_topology)
+      updatehalo!(solver.q′, solver.nhalo, solver.mpi_topology)
+    end
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
     # Apply a cutoff function to remove negative / non-finite values
@@ -241,29 +264,34 @@ function step!(
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
-      @timeit "norm" begin
-        inner_dom = solver.iterators.domain.cartesian
-        residual = @view solver.res[inner_dom]
-        L₂ = L2_norm(residual)
+      NVTX.@range "norm" begin
+        @timeit "norm" begin
+          inner_dom = solver.iterators.domain.cartesian
+          residual = @view solver.res[inner_dom]
+          L₂ = L2_norm(residual, solver.backend)
 
-        if iter == 1
-          init_L₂ = L₂
+          if iter == 1
+            init_L₂ = L₂
+          end
+
+          rel_error = L₂ ./ init_L₂
+          abs_error = L₂
+
+          MPI.Allreduce!(Ref(rel_error), max, solver.mpi_topology.comm)
+          MPI.Allreduce!(Ref(abs_error), max, solver.mpi_topology.comm)
         end
-
-        rel_error = L₂ / init_L₂
-        abs_error = L₂
       end
     end
 
     if !isfinite(rel_error) || !isfinite(abs_error)
-      to_vtk(solver, mesh, iter, iter)
+      # to_vtk(solver, mesh, iter, iter)
       error(
         "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
     end
 
     if iter > max_iter
-      to_vtk(solver, mesh, iter, iter)
+      # to_vtk(solver, mesh, iter, iter)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
@@ -280,6 +308,7 @@ function step!(
 
   @timeit "next_dt" begin
     next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
+    MPI.Allreduce!(Ref(next_Δt), min, solver.mpi_topology.comm)
   end
 
   copy!(T, solver.u)
@@ -292,7 +321,7 @@ end
 #
 # ------------------------------------------------------------------------------------------------
 
-function cutoff!(A, ::CPU)
+NVTX.@annotate function cutoff!(A, ::CPU)
   @batch for idx in eachindex(A)
     a = A[idx]
     A[idx] = (0.5(abs(a) + a)) * isfinite(a)
@@ -301,7 +330,7 @@ function cutoff!(A, ::CPU)
   return nothing
 end
 
-function cutoff!(A, ::GPU)
+NVTX.@annotate function cutoff!(A, ::GPU)
   @. A = (0.5(abs(A) + A)) * isfinite(A)
 end
 
@@ -315,15 +344,82 @@ function get_filename(iteration, name::String)
   return name * @sprintf("%07i", iteration)
 end
 
-function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
-  fn = get_filename(iteration, name)
-  @info "Writing to $fn"
+# function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
+#   fn = get_filename(iteration, name)
+#   @info "Writing to $fn"
 
-  domain = mesh.iterators.cell.domain
+#   domain = mesh.iterators.cell.domain
+
+#   _coords = Array{T}.(coords(mesh))
+
+#   @views vtk_grid(fn, _coords...) do vtk
+#     vtk["TimeValue"] = t
+#     vtk["u"] = Array{T}(scheme.u[domain])
+#     vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
+#     vtk["residual"] = Array{T}(scheme.res[domain])
+
+#     for (i, qi) in enumerate(scheme.q)
+#       vtk["q$i"] = Array{T}(qi[domain])
+#     end
+
+#     for (i, qi) in enumerate(scheme.q′)
+#       vtk["q2$i"] = Array{T}(qi[domain])
+#     end
+
+#     vtk["diffusivity"] = Array{T}(scheme.α[domain])
+
+#     vtk["dτ_ρ"] = Array{T}(scheme.dτ_ρ[domain])
+#     vtk["θr_dτ"] = Array{T}(scheme.θr_dτ[domain])
+
+#     vtk["source_term"] = Array{T}(scheme.source_term[domain])
+#   end
+# end
+
+function check_result_folder() end
+
+function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
+  result_folder = "contour_data"
+
+  if scheme.mpi_topology.rank == 0
+    if !isdir(result_folder)
+      mkdir(result_folder)
+    end
+    @info "Writing contour data..."
+  end
+
+  filename = get_filename(iteration, name)
+  out_path = "$(result_folder)/$(filename)"
+
+  saved_files = paraview_collection("$(result_folder)/full_sim"; append=true) do pvd
+    pvtk = write_parallel_vtk(scheme, mesh, t, out_path, T)
+    pvd[t] = pvtk
+  end
+
+  return saved_files
+end
+
+function write_parallel_vtk(scheme, mesh, t=0.0, filename="diffusion", T=Float32)
+  rank = scheme.mpi_topology.rank
+  nranks = scheme.mpi_topology.nranks
+  ismain = rank == 0
+
+  tiles = mesh.tiles
+  extents = [tile for tile in tiles]
 
   _coords = Array{T}.(coords(mesh))
+  domain = mesh.iterators.cell.domain
 
-  @views vtk_grid(fn, _coords...) do vtk
+  vtk = pvtk_grid(
+    filename,
+    _coords...;
+    part=rank + 1,
+    nparts=nranks,
+    ismain=ismain, # only rank 0 writes the header
+    ghost_level=0, # don't include ghost/halo data
+    extents=extents,
+  )
+
+  @views begin
     vtk["TimeValue"] = t
     vtk["u"] = Array{T}(scheme.u[domain])
     vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
@@ -344,6 +440,8 @@ function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
 
     vtk["source_term"] = Array{T}(scheme.source_term[domain])
   end
+
+  return vtk
 end
 
 end # module

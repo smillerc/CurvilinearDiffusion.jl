@@ -4,28 +4,63 @@ using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
+using Profile
+using .Threads
 
+# ------------------------------------------------------------
+# MPI and ThreadPinning initialization -- very important!
+# ------------------------------------------------------------
+using ThreadPinning
+using MPI
+
+MPI.Init(; threadlevel=:funneled)
+
+const comm = MPI.COMM_WORLD
+const rank = MPI.Comm_rank(comm)
+const on_master = rank == 0
+const nranks = MPI.Comm_size(comm)
+
+# If you don't pin threads, mpi ranks on the same machine will
+# share / steal threads from each other
+pinthreads_mpi(:numa, rank, nranks)
+threadinfo()
+
+const topology = CurvilinearDiffusion.CartesianTopology(comm, (nranks, 1), (false, false))
+const partition_fraction = max.(topology.global_dims[1:2], 1)
+
+# ------------------------------------------------------------
+# BLAS settings for linear algebra
+# ------------------------------------------------------------
 @static if Sys.islinux()
   using MKL
 elseif Sys.isapple()
   using AppleAccelerate
 end
 
-NMAX = Sys.CPU_THREADS
+NMAX = nthreads()
 BLAS.set_num_threads(NMAX)
 BLAS.get_num_threads()
 
-@show BLAS.get_config()
+# ------------------------------------------------------------
+# Device initialization
+# ------------------------------------------------------------
 
-dev = :CPU
+const dev = :GPU
 
 if dev === :GPU
-  @info "Using CUDA"
   using CUDA
   using CUDA.CUDAKernels
+
+  @assert nranks == 2 # For testing purposes
+  # comm_l = MPI.Comm_split_type(comm, MPI.COMM_TYPE_SHARED, rank)
+  # rank_l = MPI.Comm_rank(comm_l)
+  gpu_id = CUDA.device!(rank)
+
+  CUDA.versioninfo()
+  @info "Using CUDA, rank: $(rank), device: $(device())"
   backend = CUDABackend()
   ArrayT = CuArray
-  # CUDA.allowscalar(false)
+  CUDA.allowscalar(false)
 else
   backend = CPU()
   ArrayT = Array
@@ -60,21 +95,24 @@ function wavy_grid(ni, nj, nhalo)
     end
   end
 
-  return CurvilinearGrid2D(x, y, nhalo)
+  return PartitionedCurvilinearGrid(x, y, nhalo, partition_fraction, rank + 1)
 end
 
-function uniform_grid(nx, ny, nhalo)
+function uniform_grid(ni, nj, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
 
-  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
+  # return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nj, nj), nhalo)
+  return PartitionedRectlinearGrid(
+    (x0, y0), (x1, y1), (ni, nj), nhalo, partition_fraction, rank + 1
+  )
 end
 
 function initialize_mesh()
   ni, nj = (1000, 1000)
   nhalo = 1
-  return wavy_grid(ni, nj, nhalo)
-  # return uniform_grid(ni, nj, nhalo)
+  # return wavy_grid(ni, nj, nhalo)
+  return uniform_grid(ni, nj, nhalo)
 end
 
 function init_state_no_source(scheme, kwargs...)
@@ -85,7 +123,7 @@ function init_state_no_source(scheme, kwargs...)
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
   elseif scheme === :pseudo_transient
-    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
+    solver = PseudoTransientSolver(mesh, bcs, topology; backend=backend, kwargs...)
   else
     error("Must choose either :implict or :pseudo_transient")
   end
@@ -116,7 +154,7 @@ function init_state_no_source(scheme, kwargs...)
   end
 
   copy!(solver.u, T)
-  return solver, adapt(ArrayT, initialize_mesh()), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
+  return solver, adapt(ArrayT, mesh), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
 
 function init_state_with_source(scheme, kwargs...)
@@ -127,7 +165,7 @@ function init_state_with_source(scheme, kwargs...)
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
   elseif scheme === :pseudo_transient
-    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
+    solver = PseudoTransientSolver(mesh, bcs, topology; backend=backend, kwargs...)
   else
     error("Must choose either :implict or :pseudo_transient")
   end
@@ -185,14 +223,16 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
   while true
-    if iter == 0
+    if iter == 1
       reset_timer!()
     end
 
-    @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
+    if on_master
+      @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
+    end
     @timeit "nonlinear_thermal_conduction_step!" begin
       stats, next_dt = nonlinear_thermal_conduction_step!(
-        scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=true
+        scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=on_master
       )
     end
 
@@ -215,22 +255,34 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
 
-  print_timer()
+  if on_master
+    print_timer()
+  end
   return scheme, mesh, T
 end
 
 begin
   cd(@__DIR__)
+  rm("contour_data"; recursive=true, force=true)
   rm.(glob("*.vts"))
 
-  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 100)
+  # Profile.Allocs.@profile begin
+  scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 10)
+  # end
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=false)
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
 
   #
-  scheme, mesh, temperature = solve_prob(
-    :pseudo_transient, :with_source, 100; error_check_interval=2
-  )
+  # scheme, mesh, temperature = solve_prob(
+  #   :pseudo_transient, :with_source, 100; error_check_interval=2
+  # )
   # scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
   nothing
 end
+# PProf.Allocs.pprof()
+
+# MPI.Finalize()
+
+# open("cygnus.rank_$rank.timing", "w") do f
+#   JSON3.pretty(f, JSON3.write(TimerOutputs.todict(TimerOutputs.get_defaulttimer())))
+# end

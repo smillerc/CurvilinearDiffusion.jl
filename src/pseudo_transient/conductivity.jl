@@ -1,4 +1,4 @@
-function update_conductivity!(
+NVTX.@annotate function update_conductivity!(
   scheme::PseudoTransientSolver{N,T,BE}, mesh, temperature, density, cₚ::Real, κ::F
 ) where {N,T,BE<:CPU,F<:Function}
 

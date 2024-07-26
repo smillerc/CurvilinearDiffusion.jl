@@ -4,6 +4,10 @@ using UnPack
 using CartesianDomains
 using KernelAbstractions
 
+include("mpi/mpi_domain_decomposition.jl")
+using .MPIDomainDecomposition
+export CartesianTopology
+
 include("timestep_control.jl")
 using .TimeStepControl
 export next_dt

@@ -1,9 +1,9 @@
-function L2_norm(A::AbstractArray)
+function L2_norm(A, ::GPU)
   _norm = sqrt(mapreduce(x -> (x^2), +, A) / length(A))
   return _norm
 end
 
-function L2_norm(A::Array)
+function L2_norm(A, ::CPU)
   _L2_norm(A, Val(nthreads()))
 end
 
@@ -69,7 +69,7 @@ function update_residual!(
   return nothing
 end
 
-function update_residual!(
+NVTX.@annotate function update_residual!(
   solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
 ) where {N,T,BE<:CPU}
 

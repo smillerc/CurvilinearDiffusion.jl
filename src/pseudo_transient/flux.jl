@@ -92,7 +92,7 @@ function compute_flux!(
   return nothing
 end
 
-function compute_flux!(
+NVTX.@annotate function compute_flux!(
   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
 ) where {T,BE<:CPU}
 

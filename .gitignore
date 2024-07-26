@@ -1,4 +1,4 @@
-/Manifest.toml
+Manifest.toml
 *.vt?
 *.pvd
 *.png
@@ -6,3 +6,4 @@
 *.DS_Store
 *.pvsm
 *.nsys-rep
+*.sqlite
