@@ -1,6 +1,7 @@
 module BoundaryConditions
 
 using CurvilinearGrids, UnPack
+using ..MPIDomainDecomposition: on_boundary
 
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
 
@@ -19,6 +20,15 @@ const JLO_BC_LOC = 3
 const JHI_BC_LOC = 4
 const KLO_BC_LOC = 5
 const KHI_BC_LOC = 6
+
+function applybcs!(bcs, mpi_topology, mesh, u::AbstractArray)
+  for (i, bc) in enumerate(bcs)
+    loc = keys(bcs)[i]
+    if on_boundary(mpi_topology, loc)
+      applybc!(bc, mesh, u, i)
+    end
+  end
+end
 
 function applybcs!(bcs, mesh, u::AbstractArray)
   for (i, bc) in enumerate(bcs)
