@@ -27,14 +27,14 @@ include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,MT}
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   u::AA           # solution, e.g. temperature or whatever we're diffusing
   u_prev::AA      # previous solution
   source_term::AA # external source term
   q::NT1          # flux (there are 2 versions due to the PT algorithm)
   q′::NT1         # flux (there are 2 versions due to the PT algorithm)
   res::AA         # residual
-  Re::AA          # numerial Reynolds number
+  # Re::AA          # numerial Reynolds number
   α::AA           # diffusivity
   θr_dτ::AA       # iteration parameters
   dτ_ρ::AA        # iteration parameters
@@ -45,11 +45,11 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,MT}
   mean::F         # which mean function are we using? arithmetic or harmonic mean
   backend::BE     # CPU or GPU backend
   nhalo::Int      # halo region width (can be different than the mesh)
-  mpi_topology::MT  # parallel topology, e.g. rank, nranks, who are my neighbors?
+  # mpi_topology::MT  # parallel topology, e.g. rank, nranks, who are my neighbors?
 end
 
 function PseudoTransientSolver(
-  mesh, bcs, topology; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
+  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
 )
   #
   #         u
@@ -67,7 +67,7 @@ function PseudoTransientSolver(
   u_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
   residual = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-  Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  # Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   α = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   θr_dτ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
@@ -93,7 +93,7 @@ function PseudoTransientSolver(
     q,
     q′,
     residual,
-    Reynolds_number,
+    # Reynolds_number,
     α,
     θr_dτ,
     dτ_ρ,
@@ -104,7 +104,6 @@ function PseudoTransientSolver(
     mean_func,
     backend,
     nhalo,
-    topology,
   )
 end
 
@@ -163,7 +162,8 @@ function step!(
   ρ,
   cₚ,
   κ,
-  dt;
+  dt,
+  mpi_topology;
   max_iter=1e5,
   rel_tol=1e-5,
   abs_tol=1e-9,
@@ -202,9 +202,9 @@ function step!(
     solver.α, domain, nhalo, :diffusivity; enforce_positivity=true
   )
 
-  @timeit "applybcs! (α)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.α)
+  @timeit "applybcs! (α)" applybcs!(solver.bcs, mpi_topology, mesh, solver.α)
 
-  @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, solver.mpi_topology)
+  @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, mpi_topology)
 
   @timeit "validate_scalar (u)" validate_scalar(
     solver.u, domain, nhalo, :u; enforce_positivity=true
@@ -216,7 +216,7 @@ function step!(
 
   # Pseudo-transient iteration
   while true
-    # println("Iteration: $iter")
+    # println("Iteration: $iter, rank: $(mpi_topology.rank) $rel_error, $abs_error")
     iter += 1
 
     # Diffusion coefficient
@@ -225,20 +225,18 @@ function step!(
         @timeit "update_conductivity!" update_conductivity!(
           solver, mesh, solver.u, ρ, cₚ, κ
         )
-        @timeit "applybcs! (α)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.α)
-        @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, solver.mpi_topology)
+        @timeit "applybcs! (α)" applybcs!(solver.bcs, mpi_topology, mesh, solver.α)
+        @timeit "updatehalo! (α)" updatehalo!(solver.α, solver.nhalo, mpi_topology)
       end
     end
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt)
 
-    @timeit "applybcs! (u)" applybcs!(solver.bcs, solver.mpi_topology, mesh, solver.u)
+    @timeit "applybcs! (u)" applybcs!(solver.bcs, mpi_topology, mesh, solver.u)
 
-    @timeit "updatehalo! (u)" updatehalo!(solver.u, solver.nhalo, solver.mpi_topology)
+    @timeit "updatehalo! (u)" updatehalo!(solver.u, solver.nhalo, mpi_topology)
 
-    @timeit "updatehalo! (θr_dτ)" updatehalo!(
-      solver.θr_dτ, solver.nhalo, solver.mpi_topology
-    ) # θr_dτ is needed for the flux compuation
+    @timeit "updatehalo! (θr_dτ)" updatehalo!(solver.θr_dτ, solver.nhalo, mpi_topology) # θr_dτ is needed for the flux compuation
 
     # @timeit "validate_scalar (θr_dτ)" validate_scalar(
     #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
@@ -250,8 +248,8 @@ function step!(
 
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "updatehalo! (flux)" begin
-      updatehalo!(solver.q, solver.nhalo, solver.mpi_topology)
-      updatehalo!(solver.q′, solver.nhalo, solver.mpi_topology)
+      updatehalo!(solver.q, solver.nhalo, mpi_topology)
+      updatehalo!(solver.q′, solver.nhalo, mpi_topology)
     end
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
@@ -274,11 +272,11 @@ function step!(
             init_L₂ = L₂
           end
 
-          rel_error = L₂ ./ init_L₂
-          abs_error = L₂
+          _rel_error = L₂ ./ init_L₂
+          _abs_error = L₂
 
-          MPI.Allreduce!(Ref(rel_error), max, solver.mpi_topology.comm)
-          MPI.Allreduce!(Ref(abs_error), max, solver.mpi_topology.comm)
+          rel_error = MPI.Allreduce(_rel_error, MPI.MAX, mpi_topology.comm)
+          abs_error = MPI.Allreduce(_abs_error, MPI.MAX, mpi_topology.comm)
         end
       end
     end
@@ -298,8 +296,11 @@ function step!(
     end
 
     if (rel_error <= rel_tol || abs_error <= abs_tol)
+      # println("Rank $(mpi_topology.rank) is breaking out")
       break
     end
+
+    MPI.Barrier(mpi_topology.comm)
   end
 
   @timeit "validate_scalar (u)" validate_scalar(
@@ -307,8 +308,8 @@ function step!(
   )
 
   @timeit "next_dt" begin
-    next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
-    MPI.Allreduce!(Ref(next_Δt), min, solver.mpi_topology.comm)
+    _next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
+    next_Δt = MPI.Allreduce(_next_Δt, min, mpi_topology.comm)
   end
 
   copy!(T, solver.u)
