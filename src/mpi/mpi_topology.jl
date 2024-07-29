@@ -302,22 +302,22 @@ function Base.show(io::IO, p::AbstractParallelTopology)
 end
 
 """Neighbor rank in the i-1 direction"""
-ilo_neighbor(p::CartesianTopology) = p.neighbors[-1, 0, 0]
+ilo_neighbor(p) = p.neighbors[-1, 0, 0]
 
 """Neighbor rank in the i+1 direction"""
-ihi_neighbor(p::CartesianTopology) = p.neighbors[1, 0, 0]
+ihi_neighbor(p) = p.neighbors[1, 0, 0]
 
 """Neighbor rank in the j-1 direction"""
-jlo_neighbor(p::CartesianTopology) = p.neighbors[0, -1, 0]
+jlo_neighbor(p) = p.neighbors[0, -1, 0]
 
 """Neighbor rank in the j+1 direction"""
-jhi_neighbor(p::CartesianTopology) = p.neighbors[0, 1, 0]
+jhi_neighbor(p) = p.neighbors[0, 1, 0]
 
 """Neighbor rank in the k-1 direction"""
-klo_neighbor(p::CartesianTopology) = p.neighbors[0, 0, -1]
+klo_neighbor(p) = p.neighbors[0, 0, -1]
 
 """Neighbor rank in the k+1 direction"""
-khi_neighbor(p::CartesianTopology) = p.neighbors[0, 0, 1]
+khi_neighbor(p) = p.neighbors[0, 0, 1]
 
 """
     neighbor(p::CartesianTopology, i_offset::Int, j_offset::Int, k_offset::Int)
@@ -345,23 +345,23 @@ ihijhi_corner = neighbor(P,+1,+1,0)
 ```
 
 """
-function neighbor(p::CartesianTopology, i_offset::Int, j_offset::Int, k_offset::Int)
+function neighbor(p, i_offset::Int, j_offset::Int, k_offset::Int)
   p.neighbors[i_offset, j_offset, k_offset]
 end
 
-function neighbor(p::CartesianTopology, i_offset::Int, j_offset::Int)
+function neighbor(p, i_offset::Int, j_offset::Int)
   p.neighbors[i_offset, j_offset, 0]
 end
 
-function neighbor(p::CartesianTopology, i_offset::Int)
+function neighbor(p, i_offset::Int)
   p.neighbors[i_offset, 0, 0]
 end
 
-function neighbors(p::CartesianTopology)
+function neighbors(p)
   p.neighbors
 end
 
-function on_boundary(p::CartesianTopology, loc::Symbol)
+function on_boundary(p, loc::Symbol)
   locations = (;
     ilo=ilo_neighbor(p) == Int(MPI.API.MPI_PROC_NULL[]),
     ihi=ihi_neighbor(p) == Int(MPI.API.MPI_PROC_NULL[]),
