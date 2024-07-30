@@ -123,7 +123,7 @@ function init_state_no_source(scheme, kwargs...)
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
   elseif scheme === :pseudo_transient
-    solver = PseudoTransientSolver(mesh, bcs, topology; backend=backend, kwargs...)
+    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
   else
     error("Must choose either :implict or :pseudo_transient")
   end
@@ -220,7 +220,9 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
   global io_interval = 0.01
   global io_next = io_interval
   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+    scheme, topology, mesh, iter, t, casename
+  )
 
   while true
     if iter == 1
@@ -232,12 +234,14 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     end
     @timeit "nonlinear_thermal_conduction_step!" begin
       stats, next_dt = nonlinear_thermal_conduction_step!(
-        scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=true, show_convergence=on_master
+        scheme, mesh, T, ρ, cₚ, κ, Δt, topology; cutoff=true, show_convergence=on_master
       )
     end
 
     if t + Δt > io_next
-      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+        scheme, topology, mesh, iter, t, casename
+      )
       global io_next += io_interval
     end
 
@@ -253,7 +257,9 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     # Δt = next_dt
   end
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+    scheme, topology, mesh, iter, t, casename
+  )
 
   if on_master
     print_timer()

@@ -47,9 +47,20 @@ function nonlinear_thermal_conduction_step!(
 end
 
 function nonlinear_thermal_conduction_step!(
-  solver::PseudoTransientSolver, mesh, T, ρ, cₚ, κ, Δt; show_convergence=true, kwargs...
+  solver::PseudoTransientSolver,
+  mesh,
+  T,
+  ρ,
+  cₚ,
+  κ,
+  Δt,
+  topology;
+  show_convergence=true,
+  kwargs...,
 )
-  stats, next_Δt = PseudoTransientScheme.step!(solver, mesh, T, ρ, cₚ, κ, Δt; kwargs...)
+  stats, next_Δt = PseudoTransientScheme.step!(
+    solver, mesh, T, ρ, cₚ, κ, Δt, topology; kwargs...
+  )
 
   if show_convergence
     @printf "\trel error: %.3e, abs err: %.3e, %i\n" stats.rel_err stats.abs_err stats.niter

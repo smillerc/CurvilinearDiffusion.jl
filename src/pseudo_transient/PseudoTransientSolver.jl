@@ -378,10 +378,10 @@ end
 
 function check_result_folder() end
 
-function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
+function to_vtk(scheme, mpi_topology, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
   result_folder = "contour_data"
 
-  if scheme.mpi_topology.rank == 0
+  if mpi_topology.rank == 0
     if !isdir(result_folder)
       mkdir(result_folder)
     end
@@ -392,16 +392,18 @@ function to_vtk(scheme, mesh, iteration=0, t=0.0, name="diffusion", T=Float32)
   out_path = "$(result_folder)/$(filename)"
 
   saved_files = paraview_collection("$(result_folder)/full_sim"; append=true) do pvd
-    pvtk = write_parallel_vtk(scheme, mesh, t, out_path, T)
+    pvtk = write_parallel_vtk(scheme, mpi_topology, mesh, t, out_path, T)
     pvd[t] = pvtk
   end
 
   return saved_files
 end
 
-function write_parallel_vtk(scheme, mesh, t=0.0, filename="diffusion", T=Float32)
-  rank = scheme.mpi_topology.rank
-  nranks = scheme.mpi_topology.nranks
+function write_parallel_vtk(
+  scheme, mpi_topology, mesh, t=0.0, filename="diffusion", T=Float32
+)
+  rank = mpi_topology.rank
+  nranks = mpi_topology.nranks
   ismain = rank == 0
 
   tiles = mesh.tiles
