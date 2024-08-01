@@ -1,5 +1,9 @@
 
 function updatehalo!(Atuple::NamedTuple, nhalo::Int, mpi_topology, do_corners=false)
+  if mpi_topology.nranks == 1
+    return nothing
+  end
+
   @inbounds for A in Atuple
     updatehalo!(A, nhalo, mpi_topology, do_corners)
   end
@@ -44,6 +48,12 @@ end
 function updatehalo!(
   A::AbstractArray{T,2}, nhalo::Int, mpi_topology, do_corners=false
 ) where {T}
+
+  # don't bother if only 1 rank
+  if mpi_topology.nranks == 0
+    return nothing
+  end
+
   domain = CartesianIndices(A)
   iaxis, jaxis = (1, 2)
   ihalo, iedge = haloedge_regions(domain, iaxis, nhalo)
@@ -56,6 +66,9 @@ function updatehalo!(
 
   ilo_edge = MPI.Buffer(view(A, iedge.lo))
   ihi_halo = MPI.Buffer(view(A, ihalo.hi))
+  # @show mpi_topology.rank, typeof(ilo_edge)
+  # @show mpi_topology.rank, typeof(ihi_halo)
+  # error("doene")
 
   MPI.Sendrecv!(
     ilo_edge, # send ilo edge
