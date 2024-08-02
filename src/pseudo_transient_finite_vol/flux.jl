@@ -49,7 +49,31 @@ function _cpu_flux_kernel!(
   return nothing
 end
 
-# 2D 
+# 1D
+function compute_flux!(
+  solver::PseudoTransientSolver{1,T,BE}, ::CurvilinearGrid1D
+) where {T,BE<:CPU}
+
+  #
+  iaxis = 1
+
+  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+
+  _cpu_flux_kernel!(
+    solver.q.x,
+    solver.q′.x,
+    solver.u,
+    solver.α,
+    solver.θr_dτ,
+    iaxis,
+    ᵢ₊½_domain,
+    solver.mean;
+  )
+
+  return nothing
+end
+
+# 2D
 
 function compute_flux!(
   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
@@ -127,7 +151,7 @@ function compute_flux!(
   return nothing
 end
 
-# 3D 
+# 3D
 
 function compute_flux!(
   solver::PseudoTransientSolver{3,T,BE}, ::CurvilinearGrid3D

@@ -4,7 +4,8 @@ using LinearAlgebra: norm
 
 using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
-using CurvilinearGrids: CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
+using CurvilinearGrids:
+  CurvilinearGrid1D, CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
 using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
@@ -100,6 +101,16 @@ function PseudoTransientSolver(
   )
 end
 
+function phys_dims(mesh::CurvilinearGrid1D, T)
+  x = coords(mesh)
+  spacing = (minimum(diff(x; dims=1)),) .|> T
+  min_x, max_x = extrema(x)
+  L = max(abs(max_x - min_x)) |> T
+  # L = maximum(spacing)
+
+  return L, spacing
+end
+
 function phys_dims(mesh::CurvilinearGrid2D, T)
   x, y = coords(mesh)
   spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
@@ -123,6 +134,10 @@ function phys_dims(mesh::CurvilinearGrid3D, T)
   L = max(abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)) |> T
   # L = maximum(spacing)
   return L, spacing
+end
+
+function flux_tuple(mesh::CurvilinearGrid1D, backend, T)
+  return (x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),)
 end
 
 function flux_tuple(mesh::CurvilinearGrid2D, backend, T)
@@ -176,12 +191,10 @@ function step!(
 
   CFL = 1 / sqrt(N)
 
-  dx, dy = solver.spacing
-  Vpdτ = CFL * min(dx, dy)
+  Vpdτ = CFL * min(solver.spacing...)
 
   @assert dt > 0
-  @assert dx > 0
-  @assert dy > 0
+  @assert all(solver.spacing .> 0)
   @assert Vpdτ > 0
 
   copy!(solver.u, T)
@@ -256,14 +269,14 @@ function step!(
     end
 
     if !isfinite(rel_error) || !isfinite(abs_error)
-      to_vtk(solver, mesh, iter, iter)
+      # to_vtk(solver, mesh, iter, iter)
       error(
         "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
     end
 
     if iter > max_iter
-      to_vtk(solver, mesh, iter, iter)
+      # to_vtk(solver, mesh, iter, iter)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )

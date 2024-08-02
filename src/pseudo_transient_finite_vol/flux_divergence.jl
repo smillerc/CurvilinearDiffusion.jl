@@ -1,3 +1,22 @@
+function flux_divergence((qᵢ,), cell_center_metrics, edge_metrics, idx::CartesianIndex{1})
+  i, = idx.I
+
+  @inbounds begin
+    ξx = cell_center_metrics.ξ.x₁[i]
+    ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i] / edge_metrics.i₊½.J[i]
+    ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1] / edge_metrics.i₊½.J[i - 1]
+
+    aᵢⱼ = (ξx * (ξxᵢ₊½ - ξxᵢ₋½))
+    # aᵢⱼ = aᵢⱼ * (abs(aᵢⱼ) > 1e-10)
+    ∇q = (
+      ξx^2 * (qᵢ[i] - qᵢ[i - 1]) + # ∂qᵢ∂ξ
+      aᵢⱼ * 0.5(qᵢ[i] + qᵢ[i - 1])  # ∂H∂ξ
+    )
+  end
+
+  return ∇q
+end
+
 """
     flux_divergence(q, mesh, idx)
 
