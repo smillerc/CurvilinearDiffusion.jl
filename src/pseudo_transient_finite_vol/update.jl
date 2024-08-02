@@ -63,7 +63,7 @@ function compute_update!(
   source_term = solver.source_term
 
   @batch for idx in domain
-    @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx)
+    @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx, mesh)
 
     u[idx] = (
       (u[idx] + dτ_ρ[idx] * (u_prev[idx] / Δt - ∇q + source_term[idx])) /

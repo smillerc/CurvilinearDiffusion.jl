@@ -51,7 +51,7 @@ end
 
 # 1D
 function compute_flux!(
-  solver::PseudoTransientSolver{1,T,BE}, ::CurvilinearGrid1D
+  solver::PseudoTransientSolver{1,T,BE}, ::AbstractCurvilinearGrid1D
 ) where {T,BE<:CPU}
 
   #
@@ -76,7 +76,7 @@ end
 # 2D
 
 function compute_flux!(
-  solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
+  solver::PseudoTransientSolver{2,T,BE}, ::AbstractCurvilinearGrid2D
 ) where {T,BE<:GPU}
   iaxis, jaxis = (1, 2)
 

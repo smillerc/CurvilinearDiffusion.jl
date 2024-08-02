@@ -28,41 +28,53 @@ function initialize_mesh()
   ni = 100
   nhalo = 1
   x0, x1 = (0.0, 1.0)
-  return RectlinearGrid(x0, x1, ni, nhalo)
+  # return RectlinearGrid(x0, x1, ni, nhalo)
+  # return CurvilinearGrids.GridTypes.RectlinearCylindricalGrid(
+  #   x0, x1, ni, nhalo; snap_to_axis=true
+  # )
+  return CurvilinearGrids.GridTypes.RectlinearSphericalGrid(
+    x0, x1, ni, nhalo; snap_to_axis=true
+  )
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
 function init_state()
-  mesh = adapt(ArrayT, initialize_mesh())
+  mesh = initialize_mesh()
 
   # bcs = (
   #   ilo=DirichletBC(10.0),  #
   #   ihi=DirichletBC(0.0),  #
   # )
   bcs = (
+    # ilo=DirichletBC(1.0),  #
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
   )
-  solver = PseudoTransientSolver(mesh, bcs; backend=backend, face_diffusivity=:arithmetic)
+  solver = PseudoTransientSolver(
+    mesh,
+    bcs; #
+    backend=backend, #
+    face_diffusivity=:arithmetic,
+  )
 
   # Temperature and density
   T = zeros(Float64, cellsize_withhalo(mesh))
-  T[1:2, :] .= 10
+  # T[1:2, :] .= 10
   ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
 
-  fwhm = 0.01
-  x0 = 0.5
+  fwhm = 0.005
+  x0 = 0.0
   xc = Array(mesh.centroid_coordinates.x)
   for idx in mesh.iterators.cell.domain
-    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm))#+ T_cold
+    T[idx] = 5 * exp(-(((x0 - xc[idx])^2) / fwhm))#+ T_cold
   end
-
+  # solver.source_term[1:2] .= 1.0
   # Define the conductivity model
-  # @inline κ(ρ, T, κ0=1) = κ0 * T^3
-  @inline κ(ρ, T, κ0=1) = κ0
+  @inline κ(ρ, T, κ0=1) = κ0 * T^3
+  # @inline κ(ρ, T, κ0=1) = κ0
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -111,13 +123,13 @@ end
 
 begin
   cd(@__DIR__)
-  scheme, mesh, temperature, dens = run(1.0, 100)
+  scheme, mesh, temperature, dens = run(1.0, 200)
   nothing
 
   x = centroids(mesh)
   domain = mesh.iterators.cell.domain
 
-  p = plot(x, temperature[domain]; label="tfinal")
+  p = plot(x, temperature[domain]; label="tfinal", marker=:circle)
   ylims!(0, 1.1)
   display(p)
 

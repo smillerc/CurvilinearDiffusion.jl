@@ -4,8 +4,7 @@ using LinearAlgebra: norm
 
 using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
-using CurvilinearGrids:
-  CurvilinearGrid1D, CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
+using CurvilinearGrids
 using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
@@ -101,7 +100,7 @@ function PseudoTransientSolver(
   )
 end
 
-function phys_dims(mesh::CurvilinearGrid1D, T)
+function phys_dims(mesh::AbstractCurvilinearGrid1D, T)
   x = coords(mesh)
   spacing = (minimum(diff(x; dims=1)),) .|> T
   min_x, max_x = extrema(x)
@@ -111,7 +110,7 @@ function phys_dims(mesh::CurvilinearGrid1D, T)
   return L, spacing
 end
 
-function phys_dims(mesh::CurvilinearGrid2D, T)
+function phys_dims(mesh::AbstractCurvilinearGrid2D, T)
   x, y = coords(mesh)
   spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
   min_x, max_x = extrema(x)
@@ -136,11 +135,11 @@ function phys_dims(mesh::CurvilinearGrid3D, T)
   return L, spacing
 end
 
-function flux_tuple(mesh::CurvilinearGrid1D, backend, T)
+function flux_tuple(mesh::AbstractCurvilinearGrid1D, backend, T)
   return (x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),)
 end
 
-function flux_tuple(mesh::CurvilinearGrid2D, backend, T)
+function flux_tuple(mesh::AbstractCurvilinearGrid2D, backend, T)
   return (
     x=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
     y=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),

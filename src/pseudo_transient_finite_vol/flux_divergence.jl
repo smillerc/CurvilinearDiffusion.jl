@@ -1,4 +1,64 @@
-function flux_divergence((qᵢ,), cell_center_metrics, edge_metrics, idx::CartesianIndex{1})
+@inline function flux_divergence(
+  (qᵢ,), cell_center_metrics, edge_metrics, idx::CartesianIndex{1}, mesh::CylindricalGrid1D
+)
+  i, = idx.I
+
+  @inbounds begin
+    rᵢ = CurvilinearGrids.centroid_radius(mesh, (i,))
+    rᵢ₊½ = CurvilinearGrids.radius(mesh, (i + 1,))
+    rᵢ₋½ = CurvilinearGrids.radius(mesh, (i,))
+    ξx = cell_center_metrics.ξ.x₁[i]
+    # ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i] / edge_metrics.i₊½.J[i]
+    # ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1] / edge_metrics.i₊½.J[i - 1]
+
+    # aᵢⱼ = (ξx * (ξxᵢ₊½ - ξxᵢ₋½))
+    # aᵢⱼ = aᵢⱼ * (abs(aᵢⱼ) > 1e-10)
+    ∇q = (
+      (ξx^2 / rᵢ) * (
+        rᵢ₊½ * qᵢ[i] -    # q @ i+1/2
+        rᵢ₋½ * qᵢ[i - 1]  # q @ i-1/2
+      ) # + # ∂qᵢ∂ξ
+      # aᵢⱼ * 0.5(qᵢ[i] + qᵢ[i - 1])  # ∂H∂ξ
+    )
+  end
+
+  return ∇q
+end
+
+@inline function flux_divergence(
+  (qᵢ,), cell_center_metrics, edge_metrics, idx::CartesianIndex{1}, mesh::SphericalGrid1D
+)
+  i, = idx.I # this is the cell index, not node index (important!!)
+
+  #    h     h     d     d     d     (h=halo cell, d=domain cell)
+  # 1--c--2--c--3--c--4--c--5-----6  nodes; c=centroid
+  #    1     2     3                 cell indexing
+
+  @inbounds begin
+    rᵢ = CurvilinearGrids.centroid_radius(mesh, (i,))
+    rᵢ₊½ = CurvilinearGrids.radius(mesh, (i + 1,))
+    rᵢ₋½ = CurvilinearGrids.radius(mesh, (i,))
+    ξx = cell_center_metrics.ξ.x₁[i]
+    # ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i] / edge_metrics.i₊½.J[i]
+    # ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1] / edge_metrics.i₊½.J[i - 1]
+
+    # aᵢⱼ = (ξx * (ξxᵢ₊½ - ξxᵢ₋½))
+    # aᵢⱼ = aᵢⱼ * (abs(aᵢⱼ) > 1e-10)
+    ∇q = (
+      (ξx^2 / rᵢ^2) * (
+        rᵢ₊½^2 * qᵢ[i] -    # q @ i+1/2
+        rᵢ₋½^2 * qᵢ[i - 1]  # q @ i-1/2
+      ) # + # ∂qᵢ∂ξ
+      # aᵢⱼ * 0.5(qᵢ[i] + qᵢ[i - 1])  # ∂H∂ξ
+    )
+  end
+
+  return ∇q
+end
+
+@inline function flux_divergence(
+  (qᵢ,), cell_center_metrics, edge_metrics, idx::CartesianIndex{1}, ::CurvilinearGrid1D
+)
   i, = idx.I
 
   @inbounds begin
@@ -18,12 +78,10 @@ function flux_divergence((qᵢ,), cell_center_metrics, edge_metrics, idx::Cartes
 end
 
 """
-    flux_divergence(q, mesh, idx)
-
 Compute the divergence of the flux, e.g. ∇⋅(α∇H), where the flux is `q = α∇H`
 """
-function flux_divergence(
-  (qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx::CartesianIndex{2}
+@inline function flux_divergence(
+  (qᵢ, qⱼ), cell_center_metrics, edge_metrics, idx::CartesianIndex{2}, ::CurvilinearGrid2D
 )
   @inbounds begin
     i, j = idx.I
@@ -98,7 +156,92 @@ function flux_divergence(
 end
 
 @inline function flux_divergence(
-  (qᵢ, qⱼ, qₖ), cell_center_metrics, edge_metrics, idx::CartesianIndex{3}
+  (qᵢ, qⱼ),
+  cell_center_metrics,
+  edge_metrics,
+  idx::CartesianIndex{2},
+  mesh::AxisymmetricGrid2D,
+)
+  @inbounds begin
+    i, j = idx.I
+
+    Jᵢ₊½ = edge_metrics.i₊½.J[i, j]
+    Jⱼ₊½ = edge_metrics.j₊½.J[i, j]
+    Jᵢ₋½ = edge_metrics.i₊½.J[i - 1, j]
+    Jⱼ₋½ = edge_metrics.j₊½.J[i, j - 1]
+
+    ξx = cell_center_metrics.ξ.x₁[i, j]
+    ξy = cell_center_metrics.ξ.x₂[i, j]
+    ηx = cell_center_metrics.η.x₁[i, j]
+    ηy = cell_center_metrics.η.x₂[i, j]
+
+    ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i, j] / Jᵢ₊½
+    ξyᵢ₊½ = edge_metrics.i₊½.ξ̂.x₂[i, j] / Jᵢ₊½
+    ηxᵢ₊½ = edge_metrics.i₊½.η̂.x₁[i, j] / Jᵢ₊½
+    ηyᵢ₊½ = edge_metrics.i₊½.η̂.x₂[i, j] / Jᵢ₊½
+
+    ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1, j] / Jᵢ₋½
+    ξyᵢ₋½ = edge_metrics.i₊½.ξ̂.x₂[i - 1, j] / Jᵢ₋½
+    ηxᵢ₋½ = edge_metrics.i₊½.η̂.x₁[i - 1, j] / Jᵢ₋½
+    ηyᵢ₋½ = edge_metrics.i₊½.η̂.x₂[i - 1, j] / Jᵢ₋½
+
+    ξxⱼ₊½ = edge_metrics.j₊½.ξ̂.x₁[i, j] / Jⱼ₊½
+    ξyⱼ₊½ = edge_metrics.j₊½.ξ̂.x₂[i, j] / Jⱼ₊½
+    ηxⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j] / Jⱼ₊½
+    ηyⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j] / Jⱼ₊½
+
+    ξxⱼ₋½ = edge_metrics.j₊½.ξ̂.x₁[i, j - 1] / Jⱼ₋½
+    ξyⱼ₋½ = edge_metrics.j₊½.ξ̂.x₂[i, j - 1] / Jⱼ₋½
+    ηxⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1] / Jⱼ₋½
+    ηyⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1] / Jⱼ₋½
+
+    # flux divergence
+
+    aᵢⱼ = (
+      ξx * (ξxᵢ₊½ - ξxᵢ₋½) +
+      ξy * (ξyᵢ₊½ - ξyᵢ₋½) +
+      ηx * (ξxⱼ₊½ - ξxⱼ₋½) +
+      ηy * (ξyⱼ₊½ - ξyⱼ₋½)
+    )
+
+    bᵢⱼ = (
+      ξx * (ηxᵢ₊½ - ηxᵢ₋½) +
+      ξy * (ηyᵢ₊½ - ηyᵢ₋½) +
+      ηx * (ηxⱼ₊½ - ηxⱼ₋½) +
+      ηy * (ηyⱼ₊½ - ηyⱼ₋½)
+    )
+
+    r = CurvilinearGrids.centroid_radius(mesh, idx)
+
+    ∂qᵢ∂ξ = (ξx^2 + ξy^2) * (qᵢ[i, j] - qᵢ[i - 1, j])
+    ∂qⱼ∂η = (ηx^2 + ηy^2) * (qⱼ[i, j] - qⱼ[i, j - 1])
+
+    ∂qᵢ∂η =
+      0.25(ηx * ξx + ηy * ξy) * (
+        (qᵢ[i, j + 1] + qᵢ[i - 1, j + 1]) - # take average on either side
+        (qᵢ[i, j - 1] + qᵢ[i - 1, j - 1])   # and do diff in j
+      )
+
+    ∂qⱼ∂ξ =
+      0.25(ηx * ξx + ηy * ξy) * (
+        (qⱼ[i + 1, j] + qⱼ[i + 1, j - 1]) - # take average on either side
+        (qⱼ[i - 1, j] + qⱼ[i - 1, j - 1])   # and do diff in i
+      )
+
+    ∂H∂ξ = aᵢⱼ * 0.5(qᵢ[i, j] + qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
+    ∂H∂η = bᵢⱼ * 0.5(qⱼ[i, j] + qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
+  end
+
+  ∇q = ∂qᵢ∂ξ + ∂qⱼ∂η + ∂qᵢ∂η + ∂qⱼ∂ξ + ∂H∂ξ + ∂H∂η
+  return ∇q
+end
+
+@inline function flux_divergence(
+  (qᵢ, qⱼ, qₖ),
+  cell_center_metrics,
+  edge_metrics,
+  idx::CartesianIndex{3},
+  ::CurvilinearGrid3D,
 )
   @inbounds begin
     i, j, k = idx.I
