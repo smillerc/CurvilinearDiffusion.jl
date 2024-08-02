@@ -21,7 +21,7 @@ using .ADESolvers
 export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
 export solve!, validate_diffusivity
 
-include("pseudo_transient/PseudoTransientSolver.jl")
+include("pseudo_transient_finite_vol/PseudoTransientSolver.jl")
 using .PseudoTransientScheme
 export PseudoTransientSolver
 
