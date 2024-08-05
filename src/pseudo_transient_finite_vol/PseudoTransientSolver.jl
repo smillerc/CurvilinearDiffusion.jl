@@ -264,6 +264,7 @@ function step!(
 
         rel_error = L₂ / init_L₂
         abs_error = L₂
+        # @show iter, rel_error, abs_error
       end
     end
 

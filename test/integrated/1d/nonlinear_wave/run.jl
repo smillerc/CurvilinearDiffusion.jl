@@ -28,13 +28,13 @@ function initialize_mesh()
   ni = 100
   nhalo = 1
   x0, x1 = (0.0, 1.0)
-  # return RectlinearGrid(x0, x1, ni, nhalo)
+  return RectlinearGrid(x0, x1, ni, nhalo)
   # return CurvilinearGrids.GridTypes.RectlinearCylindricalGrid(
   #   x0, x1, ni, nhalo; snap_to_axis=true
   # )
-  return CurvilinearGrids.GridTypes.RectlinearSphericalGrid(
-    x0, x1, ni, nhalo; snap_to_axis=true
-  )
+  # return CurvilinearGrids.GridTypes.RectlinearSphericalGrid(
+  #   x0, x1, ni, nhalo; snap_to_axis=true
+  # )
 end
 
 # ------------------------------------------------------------
@@ -48,7 +48,7 @@ function init_state()
   #   ihi=DirichletBC(0.0),  #
   # )
   bcs = (
-    # ilo=DirichletBC(1.0),  #
+    # ihi=DirichletBC(1.0),  #
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
   )
@@ -60,8 +60,8 @@ function init_state()
   )
 
   # Temperature and density
-  T = zeros(Float64, cellsize_withhalo(mesh))
-  # T[1:2, :] .= 10
+  T = zeros(Float64, cellsize_withhalo(mesh)) #* 1e-4
+  # T[begin:(begin + 5)] .= 10
   ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
 
@@ -71,6 +71,7 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     T[idx] = 5 * exp(-(((x0 - xc[idx])^2) / fwhm))#+ T_cold
   end
+  # T[1:2] .= 1.0
   # solver.source_term[1:2] .= 1.0
   # Define the conductivity model
   @inline κ(ρ, T, κ0=1) = κ0 * T^3
@@ -91,8 +92,8 @@ function run(maxt, maxiter=Inf)
   domain = mesh.iterators.cell.domain
 
   p = plot(x, T[domain]; label="tinit")
-  ylims!(0, 1.1)
-  display(p)
+  # ylims!(0, 1.1)
+  # display(p)
 
   global Δt = 1e-4
   global t = 0.0
@@ -123,14 +124,14 @@ end
 
 begin
   cd(@__DIR__)
-  scheme, mesh, temperature, dens = run(1.0, 200)
+  scheme, mesh, temperature, dens = run(1.0, 5000)
   nothing
 
   x = centroids(mesh)
   domain = mesh.iterators.cell.domain
 
   p = plot(x, temperature[domain]; label="tfinal", marker=:circle)
-  ylims!(0, 1.1)
+  # ylims!(0, 1.1)
   display(p)
 
   # x = centroids(mesh)
