@@ -5,6 +5,7 @@ using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
+using SpecialFunctions
 
 dev = :CPU
 
@@ -21,20 +22,66 @@ else
 end
 
 # ------------------------------------------------------------
+# Analytical Solution
+# ------------------------------------------------------------
+"""Dimensionless constant -- used in the analytical solution"""
+function ξ(n)
+  return (
+    ((3n + 2) / (2^(n - 1) * n * π^n))^(1 / (3n + 2)) *
+    (gamma(5 / 2 + 1 / n) / (gamma(1 + 1 / n) * gamma(3 / 2)))^(n / (3n + 2))
+  )
+end
+
+"""Analytical solution for the central temperature"""
+function central_temperature(t, n, Q0, ρ, cᵥ, κ0)
+  ξ₁ = ξ(n)
+
+  Tc = (
+    ((n * ξ₁^2) / (2 * (3n + 2)))^(1 / n) *
+    Q0^(2 / (3n + 2)) *
+    ((ρ * cᵥ) / (κ0 * t))^(3 / (3n + 2))
+  )
+  return Tc
+end
+
+"""Analytical solution for the wave front radius"""
+function wave_front_radius(t, n, Q0, ρ, cᵥ, κ0)
+  ξ₁ = ξ(n)
+
+  return ξ₁ * ((κ0 * t * Q0^n) / (ρ * cᵥ))^(1 / (3n + 2))
+end
+
+"""Analytical solution of T(r,t)"""
+function analytical_sol(t, r, n, Q0, ρ, cᵥ, κ0)
+  T = zeros(size(r))
+  Tc = central_temperature(t, n, Q0, ρ, cᵥ, κ0)
+  rf² = wave_front_radius(t, n, Q0, ρ, cᵥ, κ0)^2
+
+  for i in eachindex(T)
+    rterm = (1 - (r[i]^2 / rf²))
+    if rterm > 0
+      T[i] = Tc * rterm^(1 / n)
+    end
+  end
+
+  return T
+end
+
+# ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
 
 function initialize_mesh()
-  ni = 100
+  ni = 40
   nhalo = 1
   x0, x1 = (0.0, 1.0)
-  return RectlinearGrid(x0, x1, ni, nhalo)
+  # return RectlinearGrid(x0, x1, ni, nhalo)
   # return CurvilinearGrids.GridTypes.RectlinearCylindricalGrid(
   #   x0, x1, ni, nhalo; snap_to_axis=true
   # )
-  # return CurvilinearGrids.GridTypes.RectlinearSphericalGrid(
-  #   x0, x1, ni, nhalo; snap_to_axis=true
-  # )
+  return CurvilinearGrids.GridTypes.RectlinearSphericalGrid(
+    x0, x1, ni, nhalo; snap_to_axis=true
+  )
 end
 
 # ------------------------------------------------------------
@@ -60,22 +107,18 @@ function init_state()
   )
 
   # Temperature and density
-  T = zeros(Float64, cellsize_withhalo(mesh)) #* 1e-4
-  # T[begin:(begin + 5)] .= 10
+  T = ones(Float64, cellsize_withhalo(mesh)) * 1e-6
   ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
+  Q0 = 1.0
 
-  fwhm = 0.005
-  x0 = 0.0
-  xc = Array(mesh.centroid_coordinates.x)
-  for idx in mesh.iterators.cell.domain
-    T[idx] = 5 * exp(-(((x0 - xc[idx])^2) / fwhm))#+ T_cold
-  end
-  # T[1:2] .= 1.0
-  # solver.source_term[1:2] .= 1.0
+  r1 = CurvilinearGrids.radius(mesh, (mesh.nhalo + 3,))
+  dep_vol = (4pi / 3 * r1^3)
+  T0 = Q0 / dep_vol
+  T[begin:(mesh.nhalo + 2)] .= T0
+
   # Define the conductivity model
-  @inline κ(ρ, T, κ0=1) = κ0 * T^3
-  # @inline κ(ρ, T, κ0=1) = κ0
+  @inline κ(ρ, T) = T^2
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -84,18 +127,9 @@ end
 # Solve
 # ------------------------------------------------------------
 function run(maxt, maxiter=Inf)
-  casename = "planar_nonlinear_heat_wave"
-
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  x = centroids(mesh)
-  domain = mesh.iterators.cell.domain
-
-  p = plot(x, T[domain]; label="tinit")
-  # ylims!(0, 1.1)
-  # display(p)
-
-  global Δt = 1e-4
+  global Δt = 1e-12
   global t = 0.0
   global iter = 0
 
@@ -108,14 +142,25 @@ function run(maxt, maxiter=Inf)
       break
     end
 
-    nonlinear_thermal_conduction_step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false, apply_density_bc=false
+    stats, next_Δt = nonlinear_thermal_conduction_step!(
+      scheme,
+      mesh,
+      T,
+      ρ,
+      cₚ,
+      κ,
+      Δt;
+      cutoff=false,
+      apply_density_bc=false,
+      max_iter=10000,
+      # abs_tol=5e-5,
     )
 
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     global iter += 1
     global t += Δt
+    global Δt = next_Δt
   end
 
   print_timer()
@@ -124,45 +169,36 @@ end
 
 begin
   cd(@__DIR__)
-  scheme, mesh, temperature, dens = run(1.0, 5000)
+  tfinal = 0.3
+  scheme, mesh, temperature, dens = run(tfinal, Inf)
   nothing
 
   x = centroids(mesh)
   domain = mesh.iterators.cell.domain
+end
 
-  p = plot(x, temperature[domain]; label="tfinal", marker=:circle)
-  # ylims!(0, 1.1)
+begin
+  p = plot(
+    x,
+    temperature[domain];
+    label="simulated",
+    # ylims=(0, 1.1),
+    # xlims=(0, 1.1),
+    # aspect_ratio=:equal,
+    marker=:circle,
+    xlabel="Radius",
+    ylabel="T",
+  )
+
+  Q0 = 1.0
+  ρ = 1.0
+  cᵥ = 1.0
+  κ0 = 1.0
+
+  T_ref = analytical_sol(tfinal * 1, x, 2, Q0, ρ, cᵥ, κ0)
+
+  plot!(p, x, T_ref; label="analytic")
   display(p)
 
-  # x = centroids(mesh)
-
-  # domain = mesh.iterators.cell.domain
-  # ddomain = scheme.iterators.domain.cartesian
-  # T = @view temperature[domain]
-  # st = @view scheme.source_term[ddomain]
-
-  # front_pos = [0.870571]
-
-  # global xfront = 0.0
-  # for i in reverse(eachindex(T))
-  #   if T[i] > 1e-10
-  #     global xfront = x[i]
-  #     break
-  #   end
-  # end
-
-  # f = plot(
-  #   x,
-  #   T;
-  #   title="Nonlinear heat front @ t = 1",
-  #   label="simulation",
-  #   marker=:circle,
-  #   ms=2,
-  #   xticks=0:0.2:1,
-  #   yticks=0:0.2:1,
-  # )
-  # vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
-  # savefig(f, "planar_nonlinear_heat_front.png")
-
-  # f
+  nothing
 end
