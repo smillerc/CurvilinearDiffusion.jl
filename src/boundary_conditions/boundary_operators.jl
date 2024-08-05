@@ -20,9 +20,19 @@ const JHI_BC_LOC = 4
 const KLO_BC_LOC = 5
 const KHI_BC_LOC = 6
 
+const bc_lookup = Dict(
+  :ilo => ILO_BC_LOC,
+  :ihi => IHI_BC_LOC,
+  :jlo => JLO_BC_LOC,
+  :jhi => JHI_BC_LOC,
+  :klo => KLO_BC_LOC,
+  :khi => KHI_BC_LOC,
+)
+
 function applybcs!(bcs, mesh, u::AbstractArray)
-  for (i, bc) in enumerate(bcs)
-    applybc!(bc, mesh, u, i)
+  for (id, bc) in pairs(bcs)
+    loc = bc_lookup[id]
+    applybc!(bc, mesh, u, loc)
   end
 end
 
