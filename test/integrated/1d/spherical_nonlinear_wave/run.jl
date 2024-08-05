@@ -7,6 +7,8 @@ using Glob
 using LinearAlgebra
 using SpecialFunctions
 
+const n_κ = 2 # exponent used in thermal conductivity
+
 dev = :CPU
 
 if dev === :GPU
@@ -52,10 +54,11 @@ function wave_front_radius(t, n, Q0, ρ, cᵥ, κ0)
 end
 
 """Analytical solution of T(r,t)"""
-function analytical_sol(t, r, n, Q0, ρ, cᵥ, κ0)
+function analytical_sol(t, r, n, Q0=1, ρ=1, cᵥ=1, κ0=1)
   T = zeros(size(r))
   Tc = central_temperature(t, n, Q0, ρ, cᵥ, κ0)
-  rf² = wave_front_radius(t, n, Q0, ρ, cᵥ, κ0)^2
+  rf = wave_front_radius(t, n, Q0, ρ, cᵥ, κ0)
+  rf² = rf^2
 
   for i in eachindex(T)
     rterm = (1 - (r[i]^2 / rf²))
@@ -64,7 +67,7 @@ function analytical_sol(t, r, n, Q0, ρ, cᵥ, κ0)
     end
   end
 
-  return T
+  return T, rf
 end
 
 # ------------------------------------------------------------
@@ -90,15 +93,12 @@ end
 function init_state()
   mesh = initialize_mesh()
 
-  # bcs = (
-  #   ilo=DirichletBC(10.0),  #
-  #   ihi=DirichletBC(0.0),  #
-  # )
   bcs = (
     # ihi=DirichletBC(1.0),  #
     ilo=NeumannBC(),  #
     ihi=NeumannBC(),  #
   )
+
   solver = PseudoTransientSolver(
     mesh,
     bcs; #
@@ -112,13 +112,13 @@ function init_state()
   cₚ = 1.0
   Q0 = 1.0
 
-  r1 = CurvilinearGrids.radius(mesh, (mesh.nhalo + 3,))
+  r1 = 0.98CurvilinearGrids.radius(mesh, (mesh.nhalo + 3,))
   dep_vol = (4pi / 3 * r1^3)
   T0 = Q0 / dep_vol
   T[begin:(mesh.nhalo + 2)] .= T0
 
   # Define the conductivity model
-  @inline κ(ρ, T) = T^2
+  @inline κ(ρ, T) = T^n_κ
 
   return solver, mesh, adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ, κ
 end
@@ -129,7 +129,7 @@ end
 function run(maxt, maxiter=Inf)
   scheme, mesh, T, ρ, cₚ, κ = init_state()
 
-  global Δt = 1e-12
+  global Δt = 1e-15
   global t = 0.0
   global iter = 0
 
@@ -175,29 +175,23 @@ begin
 
   x = centroids(mesh)
   domain = mesh.iterators.cell.domain
-end
 
-begin
+  T_ref, rf = analytical_sol(tfinal, x, n_κ)
+  T_sim = temperature[domain]
+  L2_error = norm((T_sim .- T_ref) / sqrt(length(T_sim)))
+
   p = plot(
     x,
-    temperature[domain];
-    label="simulated",
-    # ylims=(0, 1.1),
-    # xlims=(0, 1.1),
-    # aspect_ratio=:equal,
+    T_sim;
+    label="Simulated",
     marker=:circle,
     xlabel="Radius",
     ylabel="T",
+    title="Spherical Thermal Wave",
   )
+  plot!(p, x, T_ref; label="Analytic")
+  vline!([rf]; color=:black, ls=:dash, label="Wave Front")
 
-  Q0 = 1.0
-  ρ = 1.0
-  cᵥ = 1.0
-  κ0 = 1.0
-
-  T_ref = analytical_sol(tfinal * 1, x, 2, Q0, ρ, cᵥ, κ0)
-
-  plot!(p, x, T_ref; label="analytic")
   display(p)
 
   nothing
