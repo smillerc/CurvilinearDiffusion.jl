@@ -162,39 +162,69 @@ end
   idx::CartesianIndex{2},
   mesh::AxisymmetricGrid2D,
 )
+  ξrot = mesh.rotational_axis === :x
+  ηrot = mesh.rotational_axis === :y
+
   @inbounds begin
     i, j = idx.I
 
-    Jᵢ₊½ = edge_metrics.i₊½.J[i, j]
-    Jⱼ₊½ = edge_metrics.j₊½.J[i, j]
-    Jᵢ₋½ = edge_metrics.i₊½.J[i - 1, j]
-    Jⱼ₋½ = edge_metrics.j₊½.J[i, j - 1]
+    rᵢ = CurvilinearGrids.centroid_radius(mesh, (i, j))
 
-    ξx = cell_center_metrics.ξ.x₁[i, j]
-    ξy = cell_center_metrics.ξ.x₂[i, j]
-    ηx = cell_center_metrics.η.x₁[i, j]
-    ηy = cell_center_metrics.η.x₂[i, j]
+    rᵢ₊½ =
+      0.5(
+        CurvilinearGrids.radius(mesh, (i + 1, j + 1)) + #
+        CurvilinearGrids.radius(mesh, (i + 1, j))       #
+      )
 
-    ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i, j] / Jᵢ₊½
-    ξyᵢ₊½ = edge_metrics.i₊½.ξ̂.x₂[i, j] / Jᵢ₊½
-    ηxᵢ₊½ = edge_metrics.i₊½.η̂.x₁[i, j] / Jᵢ₊½
-    ηyᵢ₊½ = edge_metrics.i₊½.η̂.x₂[i, j] / Jᵢ₊½
+    rᵢ₋½ =
+      0.5(
+        CurvilinearGrids.radius(mesh, (i, j + 1)) + #
+        CurvilinearGrids.radius(mesh, (i, j))       #
+      )
 
-    ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1, j] / Jᵢ₋½
-    ξyᵢ₋½ = edge_metrics.i₊½.ξ̂.x₂[i - 1, j] / Jᵢ₋½
-    ηxᵢ₋½ = edge_metrics.i₊½.η̂.x₁[i - 1, j] / Jᵢ₋½
-    ηyᵢ₋½ = edge_metrics.i₊½.η̂.x₂[i - 1, j] / Jᵢ₋½
+    rⱼ₋½ =
+      0.5(
+        CurvilinearGrids.radius(mesh, (i, j)) + #
+        CurvilinearGrids.radius(mesh, (i + 1, j))       #
+      )
 
-    ξxⱼ₊½ = edge_metrics.j₊½.ξ̂.x₁[i, j] / Jⱼ₊½
-    ξyⱼ₊½ = edge_metrics.j₊½.ξ̂.x₂[i, j] / Jⱼ₊½
-    ηxⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j] / Jⱼ₊½
-    ηyⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j] / Jⱼ₊½
+    rⱼ₊½ =
+      0.5(
+        CurvilinearGrids.radius(mesh, (i, j + 1)) + #
+        CurvilinearGrids.radius(mesh, (i + 1, j + 1))       #
+      )
 
-    ξxⱼ₋½ = edge_metrics.j₊½.ξ̂.x₁[i, j - 1] / Jⱼ₋½
-    ξyⱼ₋½ = edge_metrics.j₊½.ξ̂.x₂[i, j - 1] / Jⱼ₋½
-    ηxⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1] / Jⱼ₋½
-    ηyⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1] / Jⱼ₋½
+    begin
+      Jᵢ₊½ = edge_metrics.i₊½.J[i, j]
+      Jⱼ₊½ = edge_metrics.j₊½.J[i, j]
+      Jᵢ₋½ = edge_metrics.i₊½.J[i - 1, j]
+      Jⱼ₋½ = edge_metrics.j₊½.J[i, j - 1]
 
+      ξx = cell_center_metrics.ξ.x₁[i, j]
+      ξy = cell_center_metrics.ξ.x₂[i, j]
+      ηx = cell_center_metrics.η.x₁[i, j]
+      ηy = cell_center_metrics.η.x₂[i, j]
+
+      ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i, j] / Jᵢ₊½
+      ξyᵢ₊½ = edge_metrics.i₊½.ξ̂.x₂[i, j] / Jᵢ₊½
+      ηxᵢ₊½ = edge_metrics.i₊½.η̂.x₁[i, j] / Jᵢ₊½
+      ηyᵢ₊½ = edge_metrics.i₊½.η̂.x₂[i, j] / Jᵢ₊½
+
+      ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1, j] / Jᵢ₋½
+      ξyᵢ₋½ = edge_metrics.i₊½.ξ̂.x₂[i - 1, j] / Jᵢ₋½
+      ηxᵢ₋½ = edge_metrics.i₊½.η̂.x₁[i - 1, j] / Jᵢ₋½
+      ηyᵢ₋½ = edge_metrics.i₊½.η̂.x₂[i - 1, j] / Jᵢ₋½
+
+      ξxⱼ₊½ = edge_metrics.j₊½.ξ̂.x₁[i, j] / Jⱼ₊½
+      ξyⱼ₊½ = edge_metrics.j₊½.ξ̂.x₂[i, j] / Jⱼ₊½
+      ηxⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j] / Jⱼ₊½
+      ηyⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j] / Jⱼ₊½
+
+      ξxⱼ₋½ = edge_metrics.j₊½.ξ̂.x₁[i, j - 1] / Jⱼ₋½
+      ξyⱼ₋½ = edge_metrics.j₊½.ξ̂.x₂[i, j - 1] / Jⱼ₋½
+      ηxⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1] / Jⱼ₋½
+      ηyⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1] / Jⱼ₋½
+    end
     # flux divergence
 
     aᵢⱼ = (
@@ -211,25 +241,36 @@ end
       ηy * (ηyⱼ₊½ - ηyⱼ₋½)
     )
 
-    r = CurvilinearGrids.centroid_radius(mesh, idx)
+    # only use 1/r on the proper axis
+    rᵢ⁻¹ξ = ifelse(ξrot, inv(rᵢ), 1)
+    rᵢ⁻¹η = ifelse(ηrot, inv(rᵢ), 1)
 
-    ∂qᵢ∂ξ = (ξx^2 + ξy^2) * (qᵢ[i, j] - qᵢ[i - 1, j])
-    ∂qⱼ∂η = (ηx^2 + ηy^2) * (qⱼ[i, j] - qⱼ[i, j - 1])
+    ∂qᵢ∂ξ = ((ξx^2 + ξy^2) * rᵢ⁻¹ξ) * (rᵢ₊½ * qᵢ[i, j] - rᵢ₋½ * qᵢ[i - 1, j])
+    ∂qⱼ∂η = ((ηx^2 + ηy^2) * rᵢ⁻¹η) * (rⱼ₊½ * qⱼ[i, j] - rⱼ₋½ * qⱼ[i, j - 1])
+
+    rⱼ₊₁ = CurvilinearGrids.centroid_radius(mesh, (i, j + 1))
+    rⱼ₋₁ = CurvilinearGrids.centroid_radius(mesh, (i, j - 1))
 
     ∂qᵢ∂η =
-      0.25(ηx * ξx + ηy * ξy) * (
-        (qᵢ[i, j + 1] + qᵢ[i - 1, j + 1]) - # take average on either side
-        (qᵢ[i, j - 1] + qᵢ[i - 1, j - 1])   # and do diff in j
+      0.25(ηx * ξx + ηy * ξy) *
+      rᵢ⁻¹η *
+      (
+        rⱼ₊₁ * (qᵢ[i, j + 1] + qᵢ[i - 1, j + 1]) - # take average on either side
+        rⱼ₋₁ * (qᵢ[i, j - 1] + qᵢ[i - 1, j - 1])   # and do diff in j
       )
 
+    rᵢ₊₁ = CurvilinearGrids.centroid_radius(mesh, (i + 1, j))
+    rᵢ₋₁ = CurvilinearGrids.centroid_radius(mesh, (i - 1, j))
     ∂qⱼ∂ξ =
-      0.25(ηx * ξx + ηy * ξy) * (
-        (qⱼ[i + 1, j] + qⱼ[i + 1, j - 1]) - # take average on either side
-        (qⱼ[i - 1, j] + qⱼ[i - 1, j - 1])   # and do diff in i
+      0.25(ηx * ξx + ηy * ξy) *
+      rᵢ⁻¹ξ *
+      (
+        rᵢ₊₁ * (qⱼ[i + 1, j] + qⱼ[i + 1, j - 1]) - # take average on either side
+        rᵢ₋₁ * (qⱼ[i - 1, j] + qⱼ[i - 1, j - 1])   # and do diff in i
       )
 
-    ∂H∂ξ = aᵢⱼ * 0.5(qᵢ[i, j] + qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
-    ∂H∂η = bᵢⱼ * 0.5(qⱼ[i, j] + qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
+    ∂H∂ξ = aᵢⱼ * 0.5(rᵢ₊½ * qᵢ[i, j] + rᵢ₋½ * qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
+    ∂H∂η = bᵢⱼ * 0.5(rⱼ₊½ * qⱼ[i, j] + rⱼ₋½ * qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
   end
 
   ∇q = ∂qᵢ∂ξ + ∂qⱼ∂η + ∂qᵢ∂η + ∂qⱼ∂ξ + ∂H∂ξ + ∂H∂η

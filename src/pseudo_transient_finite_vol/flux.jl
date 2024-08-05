@@ -117,7 +117,7 @@ function compute_flux!(
 end
 
 function compute_flux!(
-  solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
+  solver::PseudoTransientSolver{2,T,BE}, ::AbstractCurvilinearGrid2D
 ) where {T,BE<:CPU}
 
   #
