@@ -35,8 +35,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   α::AA # diffusivity
   θr_dτ::AA
   dτ_ρ::AA
-  spacing::NTuple{N,T}
-  L::T
+  length_scale::T
   iterators::DM
   bcs::B # boundary conditions
   mean::F
@@ -71,7 +70,9 @@ function PseudoTransientSolver(
   q = flux_tuple(mesh, backend, T)
   q′ = flux_tuple(mesh, backend, T)
 
-  L, spacing = phys_dims(mesh, T)
+  J = @view mesh.cell_center_metrics.J[mesh.iterators.cell.domain]
+  length_scale = 0.5sum(extrema(J))
+
   if face_diffusivity === :harmonic
     mean_func = harmonic_mean # from ../averaging.jl
   else
@@ -91,48 +92,12 @@ function PseudoTransientSolver(
     α,
     θr_dτ,
     dτ_ρ,
-    spacing,
-    L,
+    length_scale,
     iterators,
     bcs,
     mean_func,
     backend,
   )
-end
-
-function phys_dims(mesh::AbstractCurvilinearGrid1D, T)
-  x = coords(mesh)
-  spacing = (minimum(diff(x; dims=1)),) .|> T
-  min_x, max_x = extrema(x)
-  L = max(abs(max_x - min_x)) |> T
-  # L = maximum(spacing)
-
-  return L, spacing
-end
-
-function phys_dims(mesh::AbstractCurvilinearGrid2D, T)
-  x, y = coords(mesh)
-  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
-  min_x, max_x = extrema(x)
-  min_y, max_y = extrema(y)
-  L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
-  # L = maximum(spacing)
-
-  return L, spacing
-end
-
-function phys_dims(mesh::CurvilinearGrid3D, T)
-  x, y, z = coords(mesh)
-  spacing =
-    (minimum(diff(x; dims=1)), minimum(diff(y; dims=2)), minimum(diff(z; dims=3))) .|> T
-
-  min_x, max_x = extrema(x)
-  min_y, max_y = extrema(y)
-  min_z, max_z = extrema(z)
-
-  L = max(abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)) |> T
-  # L = maximum(spacing)
-  return L, spacing
 end
 
 function flux_tuple(mesh::AbstractCurvilinearGrid1D, backend, T)
@@ -191,10 +156,8 @@ function step!(
 
   CFL = 1 / sqrt(N)
 
-  # Vpdτ = CFL * min(solver.spacing...)
   if isnothing(length_scale)
-    J = @view mesh.cell_center_metrics.J[mesh.iterators.cell.domain]
-    L = 0.5sum(extrema(J))
+    L = solver.length_scale
   end
   Vpdτ = CFL * L
 
