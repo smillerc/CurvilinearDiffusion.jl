@@ -176,6 +176,7 @@ function step!(
   error_check_interval=2,
   apply_cutoff=true,
   subcycle_conductivity=true,
+  length_scale=nothing,
   kwargs...,
 ) where {N}
 
@@ -190,10 +191,14 @@ function step!(
 
   CFL = 1 / sqrt(N)
 
-  Vpdτ = CFL * min(solver.spacing...)
+  # Vpdτ = CFL * min(solver.spacing...)
+  if isnothing(length_scale)
+    J = @view mesh.cell_center_metrics.J[mesh.iterators.cell.domain]
+    L = 0.5sum(extrema(J))
+  end
+  Vpdτ = CFL * L
 
   @assert dt > 0
-  @assert all(solver.spacing .> 0)
   @assert Vpdτ > 0
 
   copy!(solver.u, T)
@@ -205,6 +210,7 @@ function step!(
     solver.α, domain, nhalo, :diffusivity; enforce_positivity=true
   )
 
+  @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u)
   @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
 
   @timeit "validate_scalar (u)" validate_scalar(
@@ -269,17 +275,18 @@ function step!(
     end
 
     if !isfinite(rel_error) || !isfinite(abs_error)
-      # to_vtk(solver, mesh, iter, iter)
+      to_vtk(solver, mesh, iter, iter)
       error(
         "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
     end
 
     if iter > max_iter
-      # to_vtk(solver, mesh, iter, iter)
+      to_vtk(solver, mesh, iter, iter)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
+      break
     end
 
     if (rel_error <= rel_tol || abs_error <= abs_tol)

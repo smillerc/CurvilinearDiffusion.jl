@@ -169,62 +169,46 @@ end
     i, j = idx.I
 
     rᵢ = CurvilinearGrids.centroid_radius(mesh, (i, j))
+    rnᵢⱼ = CurvilinearGrids.radius(mesh, (i, j))
+    rnᵢ₊₁ⱼ₊₁ = CurvilinearGrids.radius(mesh, (i + 1, j + 1))
+    rnᵢ₊₁ⱼ = CurvilinearGrids.radius(mesh, (i + 1, j))
+    rnᵢⱼ₊₁ = CurvilinearGrids.radius(mesh, (i, j + 1))
 
-    rᵢ₊½ =
-      0.5(
-        CurvilinearGrids.radius(mesh, (i + 1, j + 1)) + #
-        CurvilinearGrids.radius(mesh, (i + 1, j))       #
-      )
+    rᵢ₊½ = (rnᵢ₊₁ⱼ₊₁ + rnᵢ₊₁ⱼ) / 2
+    rᵢ₋½ = (rnᵢⱼ + rnᵢⱼ₊₁) / 2
+    rⱼ₋½ = (rnᵢⱼ + rnᵢ₊₁ⱼ) / 2
+    rⱼ₊½ = (rnᵢⱼ₊₁ + rnᵢ₊₁ⱼ₊₁) / 2
 
-    rᵢ₋½ =
-      0.5(
-        CurvilinearGrids.radius(mesh, (i, j + 1)) + #
-        CurvilinearGrids.radius(mesh, (i, j))       #
-      )
+    Jᵢ₊½ = edge_metrics.i₊½.J[i, j]
+    Jⱼ₊½ = edge_metrics.j₊½.J[i, j]
+    Jᵢ₋½ = edge_metrics.i₊½.J[i - 1, j]
+    Jⱼ₋½ = edge_metrics.j₊½.J[i, j - 1]
 
-    rⱼ₋½ =
-      0.5(
-        CurvilinearGrids.radius(mesh, (i, j)) + #
-        CurvilinearGrids.radius(mesh, (i + 1, j))       #
-      )
+    ξx = cell_center_metrics.ξ.x₁[i, j]
+    ξy = cell_center_metrics.ξ.x₂[i, j]
+    ηx = cell_center_metrics.η.x₁[i, j]
+    ηy = cell_center_metrics.η.x₂[i, j]
 
-    rⱼ₊½ =
-      0.5(
-        CurvilinearGrids.radius(mesh, (i, j + 1)) + #
-        CurvilinearGrids.radius(mesh, (i + 1, j + 1))       #
-      )
+    ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i, j] / Jᵢ₊½
+    ξyᵢ₊½ = edge_metrics.i₊½.ξ̂.x₂[i, j] / Jᵢ₊½
+    ηxᵢ₊½ = edge_metrics.i₊½.η̂.x₁[i, j] / Jᵢ₊½
+    ηyᵢ₊½ = edge_metrics.i₊½.η̂.x₂[i, j] / Jᵢ₊½
 
-    begin
-      Jᵢ₊½ = edge_metrics.i₊½.J[i, j]
-      Jⱼ₊½ = edge_metrics.j₊½.J[i, j]
-      Jᵢ₋½ = edge_metrics.i₊½.J[i - 1, j]
-      Jⱼ₋½ = edge_metrics.j₊½.J[i, j - 1]
+    ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1, j] / Jᵢ₋½
+    ξyᵢ₋½ = edge_metrics.i₊½.ξ̂.x₂[i - 1, j] / Jᵢ₋½
+    ηxᵢ₋½ = edge_metrics.i₊½.η̂.x₁[i - 1, j] / Jᵢ₋½
+    ηyᵢ₋½ = edge_metrics.i₊½.η̂.x₂[i - 1, j] / Jᵢ₋½
 
-      ξx = cell_center_metrics.ξ.x₁[i, j]
-      ξy = cell_center_metrics.ξ.x₂[i, j]
-      ηx = cell_center_metrics.η.x₁[i, j]
-      ηy = cell_center_metrics.η.x₂[i, j]
+    ξxⱼ₊½ = edge_metrics.j₊½.ξ̂.x₁[i, j] / Jⱼ₊½
+    ξyⱼ₊½ = edge_metrics.j₊½.ξ̂.x₂[i, j] / Jⱼ₊½
+    ηxⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j] / Jⱼ₊½
+    ηyⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j] / Jⱼ₊½
 
-      ξxᵢ₊½ = edge_metrics.i₊½.ξ̂.x₁[i, j] / Jᵢ₊½
-      ξyᵢ₊½ = edge_metrics.i₊½.ξ̂.x₂[i, j] / Jᵢ₊½
-      ηxᵢ₊½ = edge_metrics.i₊½.η̂.x₁[i, j] / Jᵢ₊½
-      ηyᵢ₊½ = edge_metrics.i₊½.η̂.x₂[i, j] / Jᵢ₊½
+    ξxⱼ₋½ = edge_metrics.j₊½.ξ̂.x₁[i, j - 1] / Jⱼ₋½
+    ξyⱼ₋½ = edge_metrics.j₊½.ξ̂.x₂[i, j - 1] / Jⱼ₋½
+    ηxⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1] / Jⱼ₋½
+    ηyⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1] / Jⱼ₋½
 
-      ξxᵢ₋½ = edge_metrics.i₊½.ξ̂.x₁[i - 1, j] / Jᵢ₋½
-      ξyᵢ₋½ = edge_metrics.i₊½.ξ̂.x₂[i - 1, j] / Jᵢ₋½
-      ηxᵢ₋½ = edge_metrics.i₊½.η̂.x₁[i - 1, j] / Jᵢ₋½
-      ηyᵢ₋½ = edge_metrics.i₊½.η̂.x₂[i - 1, j] / Jᵢ₋½
-
-      ξxⱼ₊½ = edge_metrics.j₊½.ξ̂.x₁[i, j] / Jⱼ₊½
-      ξyⱼ₊½ = edge_metrics.j₊½.ξ̂.x₂[i, j] / Jⱼ₊½
-      ηxⱼ₊½ = edge_metrics.j₊½.η̂.x₁[i, j] / Jⱼ₊½
-      ηyⱼ₊½ = edge_metrics.j₊½.η̂.x₂[i, j] / Jⱼ₊½
-
-      ξxⱼ₋½ = edge_metrics.j₊½.ξ̂.x₁[i, j - 1] / Jⱼ₋½
-      ξyⱼ₋½ = edge_metrics.j₊½.ξ̂.x₂[i, j - 1] / Jⱼ₋½
-      ηxⱼ₋½ = edge_metrics.j₊½.η̂.x₁[i, j - 1] / Jⱼ₋½
-      ηyⱼ₋½ = edge_metrics.j₊½.η̂.x₂[i, j - 1] / Jⱼ₋½
-    end
     # flux divergence
 
     aᵢⱼ = (
@@ -242,11 +226,13 @@ end
     )
 
     # only use 1/r on the proper axis
+    # rᵢ⁻¹ξ = inv(rᵢ)
+    # rᵢ⁻¹η = inv(rᵢ)
     rᵢ⁻¹ξ = ifelse(ξrot, inv(rᵢ), 1)
     rᵢ⁻¹η = ifelse(ηrot, inv(rᵢ), 1)
 
-    ∂qᵢ∂ξ = ((ξx^2 + ξy^2) * rᵢ⁻¹ξ) * (rᵢ₊½ * qᵢ[i, j] - rᵢ₋½ * qᵢ[i - 1, j])
-    ∂qⱼ∂η = ((ηx^2 + ηy^2) * rᵢ⁻¹η) * (rⱼ₊½ * qⱼ[i, j] - rⱼ₋½ * qⱼ[i, j - 1])
+    ∂qᵢ∂ξ = ((ξx^2 + ξy^2) * inv(rᵢ)) * (rᵢ₊½ * qᵢ[i, j] - rᵢ₋½ * qᵢ[i - 1, j])
+    ∂qⱼ∂η = ((ηx^2 + ηy^2) * inv(rᵢ)) * (rⱼ₊½ * qⱼ[i, j] - rⱼ₋½ * qⱼ[i, j - 1])
 
     rⱼ₊₁ = CurvilinearGrids.centroid_radius(mesh, (i, j + 1))
     rⱼ₋₁ = CurvilinearGrids.centroid_radius(mesh, (i, j - 1))
@@ -269,11 +255,12 @@ end
         rᵢ₋₁ * (qⱼ[i - 1, j] + qⱼ[i - 1, j - 1])   # and do diff in i
       )
 
-    ∂H∂ξ = aᵢⱼ * 0.5(rᵢ₊½ * qᵢ[i, j] + rᵢ₋½ * qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
-    ∂H∂η = bᵢⱼ * 0.5(rⱼ₊½ * qⱼ[i, j] + rⱼ₋½ * qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
+    ∂H∂ξ = aᵢⱼ * 0.5 * (rᵢ₊½ * qᵢ[i, j] + rᵢ₋½ * qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
+    ∂H∂η = bᵢⱼ * 0.5 * (rⱼ₊½ * qⱼ[i, j] + rⱼ₋½ * qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
   end
 
   ∇q = ∂qᵢ∂ξ + ∂qⱼ∂η + ∂qᵢ∂η + ∂qⱼ∂ξ + ∂H∂ξ + ∂H∂η
+
   return ∇q
 end
 
