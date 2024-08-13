@@ -31,7 +31,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   q::NT1
   q′::NT1
   res::AA
-  Re::AA
+  # Re::AA
   α::AA # diffusivity
   θr_dτ::AA
   dτ_ρ::AA
@@ -62,7 +62,7 @@ function PseudoTransientSolver(
   u_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
   residual = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-  Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
+  # Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   α = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   θr_dτ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
@@ -87,7 +87,7 @@ function PseudoTransientSolver(
     q,
     q′,
     residual,
-    Reynolds_number,
+    # Reynolds_number,
     α,
     θr_dτ,
     dτ_ρ,
