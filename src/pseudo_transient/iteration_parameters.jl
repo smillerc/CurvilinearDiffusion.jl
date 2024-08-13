@@ -14,8 +14,8 @@ function update_iteration_params!(
   @batch for idx in solver.iterators.domain.cartesian
     _Re = π + sqrt(π^2 + (L^2 * ρ[idx]) / (α[idx] * Δt))
     # Re[idx] = _Re
-    dτ_ρ[idx] = Vpdτ * L / α[idx] / _Re * β
-    θr_dτ[idx] = L / Vpdτ / _Re * β
+    dτ_ρ[idx] = (Vpdτ * L / (α[idx] * _Re)) * β
+    θr_dτ[idx] = (L / (Vpdτ * _Re)) * β
   end
 
   return nothing
