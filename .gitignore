@@ -7,3 +7,4 @@
 *.pvsm
 *.nsys-rep
 *.sqlite
+*.timing
