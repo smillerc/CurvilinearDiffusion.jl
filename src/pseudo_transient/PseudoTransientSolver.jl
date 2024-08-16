@@ -1,7 +1,6 @@
 module PseudoTransientScheme
 
 using LinearAlgebra: norm
-
 using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
 using CurvilinearGrids: CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
@@ -13,6 +12,7 @@ using Printf
 using StaticArrays
 using WriteVTK
 using .Threads
+using NVTX
 
 using ..TimeStepControl
 
@@ -105,9 +105,10 @@ function phys_dims(mesh::CurvilinearGrid2D, T)
   spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
   min_x, max_x = extrema(x)
   min_y, max_y = extrema(y)
-  L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
+  # L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
+  L = min(abs(max_x - min_x), abs(max_y - min_y)) |> T
   # L = maximum(spacing)
-
+  # error("checkme!")
   return L, spacing
 end
 
@@ -141,15 +142,18 @@ function flux_tuple(mesh::CurvilinearGrid3D, backend, T)
 end
 
 include("conductivity.jl")
-include("flux.jl")
-include("flux_divergence.jl")
+
+include("flux/fluxes_gpu.jl")
+
+# include("flux_divergence.jl")
 include("iteration_parameters.jl")
-include("residuals.jl")
-include("update.jl")
+include("residuals/residuals.jl")
+
+include("update/update.jl")
 
 # solve a single time-step dt
 function step!(
-  solver::PseudoTransientSolver{N},
+  solver::PseudoTransientSolver{N,DT},
   mesh,
   T,
   ρ,
@@ -158,12 +162,14 @@ function step!(
   dt;
   max_iter=1e5,
   rel_tol=1e-5,
-  abs_tol=1e-9,
-  error_check_interval=2,
+  abs_tol=sqrt(eps(DT)),
+  error_check_interval=20,
   apply_cutoff=true,
   subcycle_conductivity=true,
+  write_diagnostic_vtk=false,
+  CFL=1 / sqrt(N),
   kwargs...,
-) where {N}
+) where {N,DT}
 
   #
   domain = solver.iterators.domain.cartesian
@@ -173,8 +179,6 @@ function step!(
   rel_error = 2 * rel_tol
   abs_error = 2 * abs_tol
   init_L₂ = Inf
-
-  CFL = 1 / sqrt(N)
 
   dx, dy = solver.spacing
   Vpdτ = CFL * min(dx, dy)
@@ -232,16 +236,16 @@ function step!(
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
-    # Apply a cutoff function to remove negative / non-finite values
-    if apply_cutoff
-      @timeit "cutoff!" cutoff!(solver.u, solver.backend)
-    end
+    # # Apply a cutoff function to remove negative / non-finite values
+    # if apply_cutoff
+    #   @timeit "cutoff!" cutoff!(solver.u, solver.backend)
+    # end
 
     if iter % error_check_interval == 0 || iter == 1
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
-      @timeit "norm" begin
+      NVTX.@range "norm" begin
         inner_dom = solver.iterators.domain.cartesian
         residual = @view solver.res[inner_dom]
         L₂ = L2_norm(residual)
@@ -253,6 +257,10 @@ function step!(
         rel_error = L₂ / init_L₂
         abs_error = L₂
       end
+    end
+
+    if write_diagnostic_vtk
+      to_vtk(solver, mesh, iter, iter)
     end
 
     if !isfinite(rel_error) || !isfinite(abs_error)

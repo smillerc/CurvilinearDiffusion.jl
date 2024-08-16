@@ -1,7 +1,8 @@
 
 @inline function harmonic_mean(a, b)
-  m = (2a * b) / (a + b)
-  return m * isfinite(m)
+  # m = 
+  return (2a * b) / (a + b)
+  # return m * isfinite(m)
 end
 
 @inline function weighted_harmonic_mean(a, w)

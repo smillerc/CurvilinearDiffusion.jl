@@ -338,21 +338,21 @@ function update_precon(A, P, refresh, ::CPU)
   opN = LinearOperator(
     Float64, n, n, false, false, (y, v) -> backward_substitution!(y, P, v)
   )
-  if refresh
-    @timeit "preconditioner" begin
-      ilu0!(P, A)
-    end
+  # if refresh
+  @timeit "preconditioner" begin
+    ilu0!(P, A)
+    # end
   end
   return opN, _ldiv
 end
 
 function update_precon(A, P, refresh, ::GPU)
   _ldiv = true
-  if refresh
-    @timeit "preconditioner" begin
-      KrylovPreconditioners.update!(P, A)
-    end
+  # if refresh
+  @timeit "preconditioner" begin
+    KrylovPreconditioners.update!(P, A)
   end
+  # end
   return P, _ldiv
 end
 

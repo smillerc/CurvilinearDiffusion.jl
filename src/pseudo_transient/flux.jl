@@ -1,28 +1,55 @@
 
-@kernel function flux_kernel!(
-  qᵢ₊½::AbstractArray{T,N}, q′ᵢ₊½, u, α, θr_dτ, axis, I0, mean_func::F
+@kernel inbounds = true function flux_kernel!(
+  qᵢ₊½::AbstractArray{T,N},
+  q′ᵢ₊½::AbstractArray{T,N},
+  @Const(u),
+  @Const(α),
+  @Const(θr_dτ),
+  @Const(axis),
+  @Const(I0),
+  mean_func::F,
 ) where {T,N,F}
 
   # get the global index and offset for the inner domain
   idx = @index(Global, Cartesian)
   idx += I0
 
-  ϵ = eps(T)
-  @inbounds begin
-    ᵢ₊₁ = shift(idx, axis, +1)
+  # ϵ = eps(T)
+  @inline ᵢ₊₁ = shift(idx, axis, +1)
 
-    # edge diffusivity / iter params
-    @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
+  # edge diffusivity / iter params
+  @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
+  @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
 
-    du = u[ᵢ₊₁] - u[idx]
-    du = du * (abs(du) >= ϵ) # perform epsilon check
+  du = u[ᵢ₊₁] - u[idx]
+  # du = du * (abs(du) >= ϵ) # perform epsilon check
 
-    _qᵢ₊½ = -αᵢ₊½ * du
+  _qᵢ₊½ = -αᵢ₊½ * du
 
-    qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
-    q′ᵢ₊½[idx] = _qᵢ₊½
-  end
+  qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+  q′ᵢ₊½[idx] = _qᵢ₊½
+end
+
+function new_flux_kernel!(qᵢ₊½, uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, θr_dτᵢ₊₁, θr_dτᵢ)
+  harm_mean(a, b) = (2a * b) / (a + b)
+
+  αᵢ₊½ = harm_mean.(αᵢ, αᵢ₊₁)
+  θr_dτ_ᵢ₊½ = harm_mean.(θr_dτᵢ, θr_dτᵢ₊₁)
+
+  du = uᵢ₊₁ - uᵢ
+  _qᵢ₊½ = -αᵢ₊½ * du
+
+  qᵢ₊½ = (qᵢ₊½ * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
+  return qᵢ₊½
+end
+
+function new_fluxprime_kernel!(uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ)
+  harm_mean(a, b) = (2a * b) / (a + b)
+
+  αᵢ₊½ = harm_mean.(αᵢ, αᵢ₊₁)
+
+  du = uᵢ₊₁ - uᵢ
+  return -αᵢ₊½ * du
 end
 
 function _cpu_flux_kernel!(
@@ -50,47 +77,89 @@ function _cpu_flux_kernel!(
 end
 
 # 2D 
-
-function compute_flux!(
+NVTX.@annotate function compute_flux!(
   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
 ) where {T,BE<:GPU}
   iaxis, jaxis = (1, 2)
 
-  ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
-  ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+  ᵢ_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
 
-  # domain = solver.iterators.domain.cartesian
-  ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
-  ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
+  ᵢ₊₁_domain = expand_upper(solver.iterators.domain.cartesian, iaxis, +1)
+  ⱼ₊₁_domain = expand_upper(solver.iterators.domain.cartesian, jaxis, +1)
 
-  flux_kernel!(solver.backend)(
-    solver.q.x,
-    solver.q′.x,
-    solver.u,
-    solver.α,
-    solver.θr_dτ,
-    iaxis,
-    ᵢ₊½_idx_offset,
-    solver.mean;
-    ndrange=size(ᵢ₊½_domain),
-  )
+  qᵢ′ = @view solver.q′.x[ᵢ_domain]
+  qᵢ = @view solver.q.x[ᵢ_domain]
+  uᵢ = @view solver.u[ᵢ_domain]
+  αᵢ = @view solver.α[ᵢ_domain]
+  θr_dτᵢ = @view solver.θr_dτ[ᵢ_domain]
+  uᵢ₊₁ = @view solver.u[ᵢ₊₁_domain]
+  αᵢ₊₁ = @view solver.α[ᵢ₊₁_domain]
+  θr_dτᵢ₊₁ = @view solver.θr_dτ[ᵢ₊₁_domain]
 
-  flux_kernel!(solver.backend)(
-    solver.q.y,
-    solver.q′.y,
-    solver.u,
-    solver.α,
-    solver.θr_dτ,
-    jaxis,
-    ⱼ₊½_idx_offset,
-    solver.mean;
-    ndrange=size(ⱼ₊½_domain),
-  )
+  qᵢ .= map(new_flux_kernel!, qᵢ, uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, θr_dτᵢ₊₁, θr_dτᵢ)
+  qᵢ′ .= map(new_fluxprime_kernel!, uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ)
 
-  KernelAbstractions.synchronize(solver.backend)
+  qⱼ′ = @view solver.q′.y[ⱼ_domain]
+  qⱼ = @view solver.q.y[ⱼ_domain]
+  uⱼ = @view solver.u[ⱼ_domain]
+  αⱼ = @view solver.α[ⱼ_domain]
+  θr_dτⱼ = @view solver.θr_dτ[ⱼ_domain]
+  uⱼ₊₁ = @view solver.u[ⱼ₊₁_domain]
+  αⱼ₊₁ = @view solver.α[ⱼ₊₁_domain]
+  θr_dτⱼ₊₁ = @view solver.θr_dτ[ⱼ₊₁_domain]
+
+  qⱼ .= map(new_flux_kernel!, qⱼ, uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ, θr_dτⱼ₊₁, θr_dτⱼ)
+  qⱼ′ .= map(new_fluxprime_kernel!, uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ)
 
   return nothing
 end
+
+# function compute_flux!(
+#   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
+# ) where {T,BE<:GPU}
+#   iaxis, jaxis = (1, 2)
+
+#   ᵢ₊½_domain = expand_lower(solver.iterators.domain.cartesian, iaxis, +1)
+#   ⱼ₊½_domain = expand_lower(solver.iterators.domain.cartesian, jaxis, +1)
+
+#   # domain = solver.iterators.domain.cartesian
+#   ᵢ₊½_idx_offset = first(ᵢ₊½_domain) - oneunit(first(ᵢ₊½_domain))
+#   ⱼ₊½_idx_offset = first(ⱼ₊½_domain) - oneunit(first(ⱼ₊½_domain))
+
+#   @timeit "flux_i" begin
+#     flux_kernel!(solver.backend)(
+#       solver.q.x,
+#       solver.q′.x,
+#       solver.u,
+#       solver.α,
+#       solver.θr_dτ,
+#       iaxis,
+#       ᵢ₊½_idx_offset,
+#       solver.mean;
+#       ndrange=size(ᵢ₊½_domain),
+#     )
+
+#     KernelAbstractions.synchronize(solver.backend)
+#   end
+
+#   @timeit "flux_j" begin
+#     flux_kernel!(solver.backend)(
+#       solver.q.y,
+#       solver.q′.y,
+#       solver.u,
+#       solver.α,
+#       solver.θr_dτ,
+#       jaxis,
+#       ⱼ₊½_idx_offset,
+#       solver.mean;
+#       ndrange=size(ⱼ₊½_domain),
+#     )
+
+#     KernelAbstractions.synchronize(solver.backend)
+#   end
+#   return nothing
+# end
 
 function compute_flux!(
   solver::PseudoTransientSolver{2,T,BE}, ::CurvilinearGrid2D
