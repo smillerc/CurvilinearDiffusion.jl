@@ -109,8 +109,8 @@ function compute_flux!(
   αⱼ₊₁ = @view solver.α[ⱼ₊₁_domain]
   θr_dτⱼ₊₁ = @view solver.θr_dτ[ⱼ₊₁_domain]
 
-  qⱼ .= map(flux_kernel!, qⱼ, uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ, θr_dτⱼ₊₁, θr_dτⱼ)
-  qⱼ′ .= map(fluxprime_kernel!, uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ)
+  @. qⱼ = flux_kernel!(qⱼ, uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ, θr_dτⱼ₊₁, θr_dτⱼ, solver.mean)
+  @. qⱼ′ = fluxprime_kernel!(uⱼ₊₁, uⱼ, αⱼ₊₁, αⱼ, solver.mean)
 
   # ----------------------------------------------------
   qₖ′ = @view solver.q′.z[ₖ_domain]
@@ -122,8 +122,8 @@ function compute_flux!(
   αₖ₊₁ = @view solver.α[ₖ₊₁_domain]
   θr_dτₖ₊₁ = @view solver.θr_dτ[ₖ₊₁_domain]
 
-  qₖ = flux_kernel!(qₖ, uₖ₊₁, uₖ, αₖ₊₁, αₖ, θr_dτₖ₊₁, θr_dτₖ, solver.mean)
-  qₖ′ = fluxprime_kernel!(uₖ₊₁, uₖ, αₖ₊₁, αₖ, solver.mean)
+  @. qₖ = flux_kernel!(qₖ, uₖ₊₁, uₖ, αₖ₊₁, αₖ, θr_dτₖ₊₁, θr_dτₖ, solver.mean)
+  @. qₖ′ = fluxprime_kernel!(uₖ₊₁, uₖ, αₖ₊₁, αₖ, solver.mean)
 
   return nothing
 end
