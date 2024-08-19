@@ -17,7 +17,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :CPU
+dev = :GPU
 
 if dev === :GPU
   @info "Using CUDA"
@@ -81,8 +81,8 @@ end
 function initialize_mesh()
   ni, nj, nk = (150, 150, 150)
   nhalo = 4
-  return uniform_grid(ni, nj, nk, nhalo)
-  # return wavy_grid(ni, nj, nk, nhalo)
+  # return uniform_grid(ni, nj, nk, nhalo)
+  return wavy_grid(ni, nj, nk, nhalo)
 end
 
 # ------------------------------------------------------------

@@ -5,20 +5,20 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-@static if Sys.islinux()
-  using MKL
-elseif Sys.isapple()
-  using AppleAccelerate
-end
+# @static if Sys.islinux()
+#   using MKL
+# elseif Sys.isapple()
+#   using AppleAccelerate
+# end
 
-NMAX = Sys.CPU_THREADS
-BLAS.set_num_threads(NMAX)
-BLAS.get_num_threads()
+# NMAX = Sys.CPU_THREADS
+# BLAS.set_num_threads(NMAX)
+# BLAS.get_num_threads()
 
-@show BLAS.get_config()
+# @show BLAS.get_config()
 
 dev = :GPU
-const DT = Float64
+const DT = Float32
 
 if dev === :GPU
   @info "Using CUDA"
@@ -68,7 +68,7 @@ function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
 
-  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo)
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU(), DT)
 end
 
 function initialize_mesh(DT)
@@ -86,7 +86,7 @@ function init_state_no_source(scheme, kwargs...)
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
   elseif scheme === :pseudo_transient
-    solver = PseudoTransientSolver(mesh, bcs; backend=backend, kwargs...)
+    solver = PseudoTransientSolver(mesh, bcs; backend=backend, T=DT, kwargs...)
   else
     error("Must choose either :implict or :pseudo_transient")
   end
