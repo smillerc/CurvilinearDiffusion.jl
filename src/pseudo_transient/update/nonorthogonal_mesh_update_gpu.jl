@@ -1,6 +1,6 @@
 function update_nonorthogonal!(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
   update_orthogonal!(solver, mesh, Δt) # 1D is always orthogonal
 end
 
