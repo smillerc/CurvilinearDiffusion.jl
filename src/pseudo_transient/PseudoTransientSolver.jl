@@ -13,7 +13,6 @@ using Printf
 using StaticArrays
 using WriteVTK
 using .Threads
-using NVTX
 
 using ..TimeStepControl
 
@@ -287,6 +286,8 @@ function step!(
     @timeit "next_dt" begin
       next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
     end
+  else
+    next_Δt = Inf
   end
 
   copy!(T, solver.u)
