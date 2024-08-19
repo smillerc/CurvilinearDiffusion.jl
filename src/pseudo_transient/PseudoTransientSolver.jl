@@ -3,7 +3,8 @@ module PseudoTransientScheme
 using LinearAlgebra: norm
 using TimerOutputs: @timeit
 using CartesianDomains: expand, shift, expand_lower, haloedge_regions
-using CurvilinearGrids: CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
+using CurvilinearGrids:
+  CurvilinearGrid1D, CurvilinearGrid2D, CurvilinearGrid3D, cellsize_withhalo, coords
 using KernelAbstractions
 using KernelAbstractions: CPU, GPU, @kernel, @index
 using Polyester: @batch
@@ -142,13 +143,10 @@ function flux_tuple(mesh::CurvilinearGrid3D, backend, T)
 end
 
 include("conductivity.jl")
-
-include("flux/fluxes_gpu.jl")
-
-# include("flux_divergence.jl")
+include("flux_divergence.jl")
+include("flux/fluxes.jl")
 include("iteration_parameters.jl")
 include("residuals/residuals.jl")
-
 include("update/update.jl")
 
 # solve a single time-step dt
@@ -245,10 +243,11 @@ function step!(
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
-      NVTX.@range "norm" begin
-        inner_dom = solver.iterators.domain.cartesian
-        residual = @view solver.res[inner_dom]
-        L₂ = L2_norm(residual)
+      @timeit "norm" begin
+        # inner_dom = solver.iterators.domain.cartesian
+        # residual = @view solver.res[inner_dom]
+        # L₂ = L2_norm(residual)
+        L₂ = norm(solver.res)
 
         if iter == 1
           init_L₂ = L₂

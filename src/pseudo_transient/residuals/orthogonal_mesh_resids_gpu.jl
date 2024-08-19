@@ -48,17 +48,17 @@ function update_residuals_orthogonal_2d(
   iaxis, jaxis = (1, 2)
   domain = solver.iterators.domain.cartesian
 
-  ᵢ₋₁ⱼ_domain = shift(domain, iaxis, -1)
-  ᵢⱼ₋₁_domain = shift(domain, jaxis, -1)
+  ᵢ₋½_domain = shift(domain, iaxis, -1)
+  ⱼ₋½_domain = shift(domain, jaxis, -1)
 
   u = @view solver.u[domain]
   u_prev = @view solver.u_prev[domain]
 
   # note the q′ not q
-  qξ_ᵢⱼ = @view solver.q′.x[domain]
-  qη_ᵢⱼ = @view solver.q′.y[domain]
-  qξ_ᵢ₋₁ⱼ = @view solver.q′.x[ᵢ₋₁ⱼ_domain]
-  qη_ᵢⱼ₋₁ = @view solver.q′.y[ᵢⱼ₋₁_domain]
+  qξᵢ₊½ = @view solver.q′.x[domain]
+  qηⱼ₊½ = @view solver.q′.y[domain]
+  qξᵢ₋½ = @view solver.q′.x[ᵢ₋½_domain]
+  qηⱼ₋½ = @view solver.q′.y[ⱼ₋½_domain]
 
   ξx = @view mesh.cell_center_metrics.ξ.x₁[domain]
   ξy = @view mesh.cell_center_metrics.ξ.x₂[domain]
@@ -69,17 +69,17 @@ function update_residuals_orthogonal_2d(
   residuals = @view solver.res[domain]
 
   @. residuals = _update_residual_2d_orthogonal_mesh!(
-    u, u_prev, ξx, ξy, ηx, ηy, qξ_ᵢⱼ, qξ_ᵢ₋₁ⱼ, qη_ᵢⱼ, qη_ᵢⱼ₋₁, source_term, Δt
+    u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, Δt
   )
 
   return nothing
 end
 
 function _update_residual_2d_orthogonal_mesh!(
-  u, u_prev, ξx, ξy, ηx, ηy, qξ_ᵢⱼ, qξ_ᵢ₋₁ⱼ, qη_ᵢⱼ, qη_ᵢⱼ₋₁, source_term, dt
+  u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, dt
 )
-  ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξ_ᵢⱼ - qξ_ᵢ₋₁ⱼ)
-  ∂qη∂η = (ηx^2 + ηy^2) * (qη_ᵢⱼ - qη_ᵢⱼ₋₁)
+  ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
+  ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
 
   ∇q = ∂qξ∂ξ + ∂qη∂η
 

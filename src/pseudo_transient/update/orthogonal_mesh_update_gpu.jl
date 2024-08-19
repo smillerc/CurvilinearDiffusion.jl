@@ -2,9 +2,9 @@
 # ------------------------------------------------------------------------------------------
 # 1D
 # ------------------------------------------------------------------------------------------
-function update_orthogonal_1d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_orthogonal!(
+  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis = 1
@@ -40,25 +40,25 @@ end
 # ------------------------------------------------------------------------------------------
 # 2D
 # ------------------------------------------------------------------------------------------
-function update_orthogonal_2d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_orthogonal!(
+  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis, jaxis = (1, 2)
   domain = solver.iterators.domain.cartesian
 
-  ᵢ₋₁ⱼ_domain = shift(domain, iaxis, -1)
-  ᵢⱼ₋₁_domain = shift(domain, jaxis, -1)
+  ᵢ₋½_domain = shift(domain, iaxis, -1)
+  ⱼ₋½_domain = shift(domain, jaxis, -1)
 
   u = @view solver.u[domain]
   u_prev = @view solver.u_prev[domain]
 
   # note the q′ not q
-  qξ_ᵢⱼ = @view solver.q′.x[domain]
-  qη_ᵢⱼ = @view solver.q′.y[domain]
-  qξ_ᵢ₋₁ⱼ = @view solver.q′.x[ᵢ₋₁ⱼ_domain]
-  qη_ᵢⱼ₋₁ = @view solver.q′.y[ᵢⱼ₋₁_domain]
+  qξᵢ₊½ = @view solver.q.x[domain]
+  qηⱼ₊½ = @view solver.q.y[domain]
+  qξᵢ₋½ = @view solver.q.x[ᵢ₋½_domain]
+  qηⱼ₋½ = @view solver.q.y[ⱼ₋½_domain]
 
   ξx = @view mesh.cell_center_metrics.ξ.x₁[domain]
   ξy = @view mesh.cell_center_metrics.ξ.x₂[domain]
@@ -66,22 +66,22 @@ function update_orthogonal_2d(
   ηy = @view mesh.cell_center_metrics.η.x₂[domain]
 
   source_term = @view solver.source_term[domain]
+
+  source_term = @view solver.source_term[domain]
   dτ_ρ = @view solver.dτ_ρ[domain]
 
   @. u = _update_2d_orthogonal_mesh!(
-    u, u_prev, ξx, ξy, ηx, ηy, qξ_ᵢⱼ, qξ_ᵢ₋₁ⱼ, qη_ᵢⱼ, qη_ᵢⱼ₋₁, dτ_ρ, source_term, Δt
+    u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, dτ_ρ, source_term, Δt
   )
 
   return nothing
 end
 
 function _update_2d_orthogonal_mesh!(
-  u, u_prev, ξx, ξy, ηx, ηy, qξ_ᵢⱼ, qξ_ᵢ₋₁ⱼ, qη_ᵢⱼ, qη_ᵢⱼ₋₁, dτ_ρ, source_term, dt
+  u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, dτ_ρ, source_term, dt
 )
-
-  # TODO: rename these to i+1/2 and i-1/2
-  ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξ_ᵢⱼ - qξ_ᵢ₋₁ⱼ)
-  ∂qη∂η = (ηx^2 + ηy^2) * (qη_ᵢⱼ - qη_ᵢⱼ₋₁)
+  ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
+  ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
 
   ∇q = ∂qξ∂ξ + ∂qη∂η
 
@@ -93,9 +93,9 @@ end
 # 3D
 # ------------------------------------------------------------------------------------------
 
-function update_orthogonal_3d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_orthogonal!(
+  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis, jaxis, kaxis = (1, 2, 3)
