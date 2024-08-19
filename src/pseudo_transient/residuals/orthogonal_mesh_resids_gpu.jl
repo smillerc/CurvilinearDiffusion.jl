@@ -2,9 +2,9 @@
 # ------------------------------------------------------------------------------------------
 # 1D
 # ------------------------------------------------------------------------------------------
-function update_residuals_orthogonal_1d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_residuals_orthogonal!(
+  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis = 1
@@ -40,9 +40,9 @@ end
 # ------------------------------------------------------------------------------------------
 # 2D
 # ------------------------------------------------------------------------------------------
-function update_residuals_orthogonal_2d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_residuals_orthogonal!(
+  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis, jaxis = (1, 2)
@@ -91,9 +91,9 @@ end
 # 3D
 # ------------------------------------------------------------------------------------------
 
-function update_residuals_orthogonal_3d(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
-) where {N,T,BE<:GPU}
+function update_residuals_orthogonal!(
+  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt
+) where {T,BE<:GPU}
 
   #
   iaxis, jaxis, kaxis = (1, 2, 3)

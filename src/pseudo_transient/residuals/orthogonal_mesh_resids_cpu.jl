@@ -9,6 +9,7 @@ function update_residuals_orthogonal!(
 
   #
   domain = solver.iterators.domain.cartesian
+  residuals = solver.res
 
   u = solver.u
   u_prev = solver.u_prev
@@ -40,6 +41,7 @@ function update_residuals_orthogonal!(
 
   u = solver.u
   u_prev = solver.u_prev
+  residuals = solver.res
 
   qξ, qη = solver.q′
   source_term = solver.source_term
@@ -80,6 +82,7 @@ function update_residuals_orthogonal!(
 
   u = solver.u
   u_prev = solver.u_prev
+  residuals = solver.res
 
   qξ, qη, qζ = solver.q′
   source_term = solver.source_term
