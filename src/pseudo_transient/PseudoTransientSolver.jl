@@ -162,7 +162,8 @@ function step!(
   rel_tol=1e-5,
   abs_tol=sqrt(eps(DT)),
   error_check_interval=20,
-  apply_cutoff=true,
+  apply_cutoff=false,
+  calculate_next_dt=false,
   subcycle_conductivity=true,
   write_diagnostic_vtk=false,
   CFL=1 / sqrt(N),
@@ -234,20 +235,17 @@ function step!(
     @timeit "compute_flux!" compute_flux!(solver, mesh)
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
-    # # Apply a cutoff function to remove negative / non-finite values
-    # if apply_cutoff
-    #   @timeit "cutoff!" cutoff!(solver.u, solver.backend)
-    # end
+    # Apply a cutoff function to remove negative / non-finite values
+    if apply_cutoff
+      @timeit "cutoff!" cutoff!(solver.u, solver.backend)
+    end
 
     if iter % error_check_interval == 0 || iter == 1
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
       @timeit "norm" begin
-        # inner_dom = solver.iterators.domain.cartesian
-        # residual = @view solver.res[inner_dom]
-        # L₂ = L2_norm(residual)
-        L₂ = norm(solver.res)
+        L₂ = L2_norm(solver.res)
 
         if iter == 1
           init_L₂ = L₂
@@ -285,8 +283,10 @@ function step!(
     solver.u, domain, nhalo, :u; enforce_positivity=true
   )
 
-  @timeit "next_dt" begin
-    next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
+  if calculate_next_dt
+    @timeit "next_dt" begin
+      next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
+    end
   end
 
   copy!(T, solver.u)
