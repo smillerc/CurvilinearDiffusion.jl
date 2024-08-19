@@ -15,9 +15,8 @@ function update_orthogonal!(
   u = @view solver.u[domain]
   u_prev = @view solver.u_prev[domain]
 
-  # note the q′ not q
-  qξ_ᵢ = @view solver.q′.x[domain]
-  qξ_ᵢ₋₁ = @view solver.q′.x[ᵢ₋₁ⱼ_domain]
+  qξ_ᵢ = @view solver.q.x[domain]
+  qξ_ᵢ₋₁ = @view solver.q.x[ᵢ₋₁ⱼ_domain]
 
   ξx = @view mesh.cell_center_metrics.ξ.x₁[domain]
 
@@ -108,13 +107,12 @@ function update_orthogonal!(
   u = @view solver.u[domain]
   u_prev = @view solver.u_prev[domain]
 
-  # note the q′ not q
-  qξ_ᵢⱼₖ = @view solver.q′.x[domain]
-  qξ_ᵢ₋₁ⱼₖ = @view solver.q′.x[ᵢ₋₁ⱼₖ_domain]
-  qη_ᵢⱼₖ = @view solver.q′.y[domain]
-  qη_ᵢⱼ₋₁ₖ = @view solver.q′.y[ᵢⱼ₋₁ₖ_domain]
-  qζ_ᵢⱼₖ = @view solver.q′.z[domain]
-  qζ_ᵢⱼₖ₋₁ = @view solver.q′.z[ᵢⱼₖ₋₁_domain]
+  qξ_ᵢⱼₖ = @view solver.q.x[domain]
+  qη_ᵢⱼₖ = @view solver.q.y[domain]
+  qζ_ᵢⱼₖ = @view solver.q.z[domain]
+  qξ_ᵢ₋₁ⱼₖ = @view solver.q.x[ᵢ₋₁ⱼₖ_domain]
+  qη_ᵢⱼ₋₁ₖ = @view solver.q.y[ᵢⱼ₋₁ₖ_domain]
+  qζ_ᵢⱼₖ₋₁ = @view solver.q.z[ᵢⱼₖ₋₁_domain]
 
   ξx = @view mesh.cell_center_metrics.ξ.x₁[domain]
   ξy = @view mesh.cell_center_metrics.ξ.x₂[domain]
@@ -131,7 +129,7 @@ function update_orthogonal!(
   source_term = @view solver.source_term[domain]
   dτ_ρ = @view solver.dτ_ρ[domain]
 
-  @. residuals = _update_3d_orthogonal_mesh!(
+  @. u = _update_3d_orthogonal_mesh!(
     u,
     u_prev,
     ξx,
