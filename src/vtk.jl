@@ -35,9 +35,9 @@ function save_vtk(scheme, u, mesh, iteration=0, t=0.0, name="diffusion", T=Float
 end
 
 function save_vtk(
-  scheme::PseudoTransientSolver, u, mesh, iteration=0, t=0.0, name="diffusion", T=Float32
+  scheme::PseudoTransientSolver, u, ρ, mesh, iteration=0, t=0.0, name="diffusion", T=Float32
 )
-  to_vtk(scheme, mesh, iteration, t, name, T)
+  to_vtk(scheme, mesh, u, ρ, iteration, t, name, T)
 end
 
 end

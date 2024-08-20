@@ -256,18 +256,18 @@ function step!(
     end
 
     if write_diagnostic_vtk
-      to_vtk(solver, mesh, ρ, iter, iter)
+      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
     end
 
     if !isfinite(rel_error) || !isfinite(abs_error)
-      to_vtk(solver, mesh, ρ, iter, iter)
+      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
       error(
         "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
     end
 
     if iter > max_iter
-      to_vtk(solver, mesh, ρ, iter, iter)
+      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
@@ -323,7 +323,7 @@ function get_filename(iteration, name::String)
   return name * @sprintf("%07i", iteration)
 end
 
-function to_vtk(scheme, mesh, ρ, iteration=0, t=0.0, name="diffusion", T=Float32)
+function to_vtk(scheme, mesh, u, ρ, iteration=0, t=0.0, name="diffusion", T=Float32)
   fn = get_filename(iteration, name)
   @info "Writing to $fn"
 
@@ -333,8 +333,10 @@ function to_vtk(scheme, mesh, ρ, iteration=0, t=0.0, name="diffusion", T=Float3
 
   @views vtk_grid(fn, _coords...) do vtk
     vtk["TimeValue"] = t
+
     vtk["rho"] = Array{T}(ρ[domain])
-    vtk["u"] = Array{T}(scheme.u[domain])
+
+    vtk["u"] = Array{T}(u[domain])
     vtk["u_prev"] = Array{T}(scheme.u_prev[domain])
     vtk["residual"] = Array{T}(scheme.res[domain])
 
