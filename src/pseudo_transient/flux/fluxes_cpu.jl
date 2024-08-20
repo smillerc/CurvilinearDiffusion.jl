@@ -1,19 +1,29 @@
 
 function _cpu_flux_kernel!(
-  qᵢ₊½::AbstractArray{T,N}, q′ᵢ₊½, u, α, θr_dτ, axis, domain, mean_func::F
+  qᵢ₊½::AbstractArray{T,N},
+  q′ᵢ₊½,
+  u,
+  α,
+  θr_dτ,
+  axis,
+  domain,
+  mean_func::F,
+  atol=eps(T),
+  rtol=sqrt(eps(T)),
 ) where {T,N,F}
   #
 
-  ϵ = eps(T)
-  @batch for idx in domain
+  for idx in domain
     ᵢ₊₁ = shift(idx, axis, +1)
 
     # edge diffusivity / iter params
     @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-    @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
+    # @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
+    θr_dτ_ᵢ₊½ = 0.5(θr_dτ[idx] + θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
 
     du = u[ᵢ₊₁] - u[idx]
-    du = du * (abs(du) >= ϵ) # perform epsilon check
+    # du = du * (abs(du) >= atol) # perform epsilon check
+    du = du * (abs(u[idx] * rtol) < abs(du)) # perform epsilon check
 
     _qᵢ₊½ = -αᵢ₊½ * du
 

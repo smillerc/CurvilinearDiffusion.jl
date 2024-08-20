@@ -33,7 +33,7 @@ end
 # 2D
 # ------------------------------------------------------------------------------------------
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt, atol=eps(T), rtol=sqrt(eps(T))
 ) where {T,BE<:CPU}
 
   #
@@ -59,8 +59,17 @@ function update_residuals_orthogonal!(
     ηx = η_x[i, j]
     ηy = η_y[i, j]
 
-    ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξ[i, j] - qξ[i - 1, j])
-    ∂qη∂η = (ηx^2 + ηy^2) * (qη[i, j] - qη[i, j - 1])
+    _dqξ = qξ[i, j] - qξ[i - 1, j]
+    _dqη = qη[i, j] - qη[i, j - 1]
+
+    # _dqξ = _dqξ * (abs(_dqξ) >= atol)
+    # _dqη = _dqη * (abs(_dqη) >= atol)
+
+    _dqξ = _dqξ * (abs(qξ[i, j] * rtol) < abs(_dqξ))
+    _dqη = _dqη * (abs(qη[i, j] * rtol) < abs(_dqη))
+
+    ∂qξ∂ξ = (ξx^2 + ξy^2) * _dqξ
+    ∂qη∂η = (ηx^2 + ηy^2) * _dqη
 
     ∇q = ∂qξ∂ξ + ∂qη∂η
 

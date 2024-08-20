@@ -77,10 +77,32 @@ function update_orthogonal!(
 end
 
 function _update_2d_orthogonal_mesh!(
-  u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, dτ_ρ, source_term, dt
-)
-  ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
-  ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
+  u::T,
+  u_prev,
+  ξx,
+  ξy,
+  ηx,
+  ηy,
+  qξᵢ₊½,
+  qξᵢ₋½,
+  qηⱼ₊½,
+  qηⱼ₋½,
+  dτ_ρ,
+  source_term,
+  dt,
+  rtol=sqrt(eps(eltype(T))),
+) where {T}
+
+  # ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
+  # ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
+
+  _dqξ = (qξᵢ₊½ - qξᵢ₋½)
+  _dqη = (qηⱼ₊½ - qηⱼ₋½)
+  _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
+  _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
+
+  ∂qξ∂ξ = (ξx^2 + ξy^2) * _dqξ
+  ∂qη∂η = (ηx^2 + ηy^2) * _dqη
 
   ∇q = ∂qξ∂ξ + ∂qη∂η
 
@@ -156,7 +178,7 @@ function update_orthogonal!(
 end
 
 function _update_3d_orthogonal_mesh!(
-  u,
+  u::T,
   u_prev,
   ξx,
   ξy,
@@ -167,19 +189,33 @@ function _update_3d_orthogonal_mesh!(
   ζx,
   ζy,
   ζz,
-  qξ_ᵢⱼₖ,
-  qξ_ᵢ₋₁ⱼₖ,
-  qη_ᵢⱼₖ,
-  qη_ᵢⱼ₋₁ₖ,
-  qζ_ᵢⱼₖ,
-  qζ_ᵢⱼₖ₋₁,
+  qξᵢ₊½,
+  qξᵢ₋½,
+  qηⱼ₊½,
+  qηⱼ₋½,
+  qζₖ₊½,
+  qζₖ₋½,
   dτ_ρ,
   source_term,
   dt,
-)
-  ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * (qξ_ᵢⱼₖ - qξ_ᵢ₋₁ⱼₖ)
-  ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * (qη_ᵢⱼₖ - qη_ᵢⱼ₋₁ₖ)
-  ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * (qζ_ᵢⱼₖ - qζ_ᵢⱼₖ₋₁)
+  rtol=sqrt(eps(eltype(T))),
+) where {T}
+
+  # ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * (qξᵢ₊½ - qξᵢ₋½)
+  # ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * (qηⱼ₊½ - qηⱼ₋½)
+  # ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * (qζₖ₊½ - qζₖ₋½)
+
+  _dqξ = qξᵢ₊½ - qξᵢ₋½
+  _dqη = qηⱼ₊½ - qηⱼ₋½
+  _dqζ = qζₖ₊½ - qζₖ₋½
+
+  _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
+  _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
+  _dqζ = _dqζ * (abs(qζₖ₊½ * rtol) < abs(_dqη))
+
+  ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * _dqξ
+  ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * _dqη
+  ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * _dqζ
 
   ∇q = ∂qξ∂ξ + ∂qη∂η + ∂qζ∂ζ
 
