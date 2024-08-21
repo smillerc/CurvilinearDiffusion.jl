@@ -206,9 +206,9 @@ function _update_residual_3d_orthogonal_mesh!(
   _dqη = qηⱼ₊½ - qηⱼ₋½
   _dqζ = qζₖ₊½ - qζₖ₋½
 
-  _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
-  _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
-  _dqζ = _dqζ * (abs(qζₖ₊½ * rtol) < abs(_dqη))
+  # _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
+  # _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
+  # _dqζ = _dqζ * (abs(qζₖ₊½ * rtol) < abs(_dqη))
 
   ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * _dqξ
   ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * _dqη

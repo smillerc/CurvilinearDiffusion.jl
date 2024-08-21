@@ -9,7 +9,7 @@ function flux_kernel!(
   θr_dτ_ᵢ₊½ = mean(θr_dτᵢ, θr_dτᵢ₊₁)
 
   du = uᵢ₊₁ - uᵢ
-  du = du * (abs(uᵢ * rtol) < abs(du)) # perform epsilon check
+  # du = du * (abs(uᵢ * rtol) < abs(du)) # perform epsilon check
   _qᵢ₊½ = -αᵢ₊½ * du
 
   qᵢ₊½ = (qᵢ₊½ * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
@@ -24,6 +24,6 @@ function fluxprime_kernel!(
   αᵢ₊½ = mean(αᵢ, αᵢ₊₁)
 
   du = uᵢ₊₁ - uᵢ
-  du = du * (abs(uᵢ * rtol) < abs(du)) # perform epsilon check
+  # du = du * (abs(uᵢ * rtol) < abs(du)) # perform epsilon check
   return -αᵢ₊½ * du
 end
