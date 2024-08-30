@@ -31,9 +31,16 @@ function update_residuals_orthogonal!(
   return nothing
 end
 
-function _update_residual_1d_orthogonal_mesh!(u, u_prev, ξx, qξ_ᵢ, qξ_ᵢ₋₁, source_term, dt)
-  ∇q = ξx^2 * (qξ_ᵢ - qξ_ᵢ₋₁)
-  residuals = -(u - u_prev) / dt - ∇q + source_term
+@inline function _update_residual_1d_orthogonal_mesh!(
+  u, u_prev, ξx, qξᵢ₊½, qξᵢ₋½, source_term, dt
+)
+  #
+  ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, ξx)
+
+  du = u - u_prev
+  du = du * !isapprox(u, u_prev)
+
+  residuals = -du / dt - ∇q + source_term
   return residuals
 end
 
@@ -75,36 +82,17 @@ function update_residuals_orthogonal!(
   return nothing
 end
 
-function _update_residual_2d_orthogonal_mesh!(
-  u::T,
-  u_prev,
-  ξx,
-  ξy,
-  ηx,
-  ηy,
-  qξᵢ₊½,
-  qξᵢ₋½,
-  qηⱼ₊½,
-  qηⱼ₋½,
-  source_term,
-  dt,
-  rtol=sqrt(eps(eltype(T))),
+@inline function _update_residual_2d_orthogonal_mesh!(
+  u::T, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, dt
 ) where {T}
 
-  # ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
-  # ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
+  #
+  ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, ξx, ξy, ηx, ηy)
 
-  _dqξ = (qξᵢ₊½ - qξᵢ₋½)
-  _dqη = (qηⱼ₊½ - qηⱼ₋½)
-  _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
-  _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
+  du = u - u_prev
+  du = du * !isapprox(u, u_prev)
 
-  ∂qξ∂ξ = (ξx^2 + ξy^2) * _dqξ
-  ∂qη∂η = (ηx^2 + ηy^2) * _dqη
-
-  ∇q = ∂qξ∂ξ + ∂qη∂η
-
-  residuals = -(u - u_prev) / dt - ∇q + source_term
+  residuals = -du / dt - ∇q + source_term
   return residuals
 end
 
@@ -175,7 +163,7 @@ function update_residuals_orthogonal!(
   return nothing
 end
 
-function _update_residual_3d_orthogonal_mesh!(
+@inline function _update_residual_3d_orthogonal_mesh!(
   u::T,
   u_prev,
   ξx,
@@ -195,27 +183,16 @@ function _update_residual_3d_orthogonal_mesh!(
   qζₖ₋½,
   source_term,
   dt,
-  rtol=sqrt(eps(eltype(T))),
 ) where {T}
 
-  # ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * (qξᵢ₊½ - qξᵢ₋½)
-  # ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * (qηⱼ₊½ - qηⱼ₋½)
-  # ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * (qζₖ₊½ - qζₖ₋½)
+  #
+  ∇q = flux_divergence_orth(
+    qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, qζₖ₊½, qζₖ₋½, ξx, ξy, ξz, ηx, ηy, ηz, ζx, ζy, ζz
+  )
 
-  _dqξ = qξᵢ₊½ - qξᵢ₋½
-  _dqη = qηⱼ₊½ - qηⱼ₋½
-  _dqζ = qζₖ₊½ - qζₖ₋½
+  du = u - u_prev
+  du = du * !isapprox(u, u_prev)
 
-  # _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
-  # _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
-  # _dqζ = _dqζ * (abs(qζₖ₊½ * rtol) < abs(_dqη))
-
-  ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * _dqξ
-  ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * _dqη
-  ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * _dqζ
-
-  ∇q = ∂qξ∂ξ + ∂qη∂η + ∂qζ∂ζ
-
-  residuals = -(u - u_prev) / dt - ∇q + source_term
+  residuals = -du / dt - ∇q + source_term
   return residuals
 end
