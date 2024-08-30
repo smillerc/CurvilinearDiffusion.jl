@@ -6,7 +6,7 @@ include("nonorthogonal_mesh_resids_gpu.jl")
 include("nonorthogonal_mesh_resids_cpu.jl")
 
 function L2_norm(A::AbstractArray)
-  _norm = norm(A) / length(A)
+  _norm = norm(A) / sqrt(length(A))
   return _norm
 end
 
