@@ -18,7 +18,7 @@ using LinearAlgebra
 # @show BLAS.get_config()
 
 dev = :GPU
-const DT = Float32
+const DT = Float64
 
 if dev === :GPU
   @info "Using CUDA"
@@ -72,7 +72,7 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh(DT)
-  ni, nj = (2000, 2000)
+  ni, nj = (500, 500)
   nhalo = 1
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -187,7 +187,7 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
   global io_interval = 0.01
   global io_next = io_interval
   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   while true
     if iter == 0
@@ -197,12 +197,14 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     @timeit "nonlinear_thermal_conduction_step!" begin
       stats, next_dt = nonlinear_thermal_conduction_step!(
-        scheme, mesh, T, ρ, cₚ, κ, DT(Δt); cutoff=true, show_convergence=true
+        scheme, mesh, T, ρ, cₚ, κ, DT(Δt); cutoff=true, show_convergence=true, kwargs...
       )
     end
 
     if t + Δt > io_next
-      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+        scheme, T, ρ, mesh, iter, t, casename
+      )
       global io_next += io_interval
     end
 
@@ -218,7 +220,7 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     # Δt = next_dt
   end
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   print_timer()
   return scheme, mesh, T
@@ -228,14 +230,14 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 100)
+  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 500)
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 100; direct_solve=false)
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
 
   # @profview begin
-  # scheme, mesh, temperature = solve_prob(
-  #   :pseudo_transient, :with_source, 100; error_check_interval=2
-  # )
+  scheme, mesh, temperature = solve_prob(
+    :pseudo_transient, :with_source, 500; error_check_interval=2
+  )
   # end
   # scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
   nothing

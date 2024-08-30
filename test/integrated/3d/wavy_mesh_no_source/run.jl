@@ -81,8 +81,8 @@ end
 function initialize_mesh()
   ni, nj, nk = (150, 150, 150)
   nhalo = 4
-  # return uniform_grid(ni, nj, nk, nhalo)
-  return wavy_grid(ni, nj, nk, nhalo)
+  return uniform_grid(ni, nj, nk, nhalo)
+  # return wavy_grid(ni, nj, nk, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -139,7 +139,7 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run(maxiter=Inf)
+function run(maxiter=Inf; kwargs...)
   casename = "wavy_mesh_3d_no_source"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
@@ -150,7 +150,7 @@ function run(maxiter=Inf)
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   @info "Running"
   while true
@@ -161,11 +161,15 @@ function run(maxiter=Inf)
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
     @timeit "nonlinear_thermal_conduction_step!" begin
-      stats, next_dt = nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt)
+      stats, next_dt = nonlinear_thermal_conduction_step!(
+        scheme, mesh, T, ρ, cₚ, κ, Δt; kwargs...
+      )
     end
 
     if t + Δt > io_next
-      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+        scheme, T, ρ, mesh, iter, t, casename
+      )
       global io_next += io_interval
     end
 
@@ -182,7 +186,7 @@ function run(maxiter=Inf)
     # break
   end
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   print_timer()
   return scheme, T, mesh
@@ -193,6 +197,6 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  scheme, temperature, mesh = run(15)
+  scheme, temperature, mesh = run(50; error_check_interval=5)
   nothing
 end
