@@ -121,7 +121,7 @@ function phys_dims(mesh::CurvilinearGrid3D, T)
   min_y, max_y = extrema(y)
   min_z, max_z = extrema(z)
 
-  L = max(abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)) |> T
+  L = min(abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)) |> T
   # L = maximum(spacing)
   return L, spacing
 end
