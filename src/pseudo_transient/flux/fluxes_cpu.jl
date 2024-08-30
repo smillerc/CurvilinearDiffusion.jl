@@ -1,35 +1,25 @@
 
 function _cpu_flux_kernel!(
-  qᵢ₊½::AbstractArray{T,N},
-  q′ᵢ₊½,
-  u,
-  α,
-  θr_dτ,
-  axis,
-  domain,
-  mean_func::F,
-  atol=eps(T),
-  rtol=sqrt(eps(T)),
+  qᵢ₊½::AbstractArray{T,N}, q′ᵢ₊½, u, α, θr_dτ, axis, domain, mean_func::F
 ) where {T,N,F}
   #
 
-  for idx in domain
+  @batch for idx in domain
     ᵢ₊₁ = shift(idx, axis, +1)
 
-    # edge diffusivity / iter params
-    @inline αᵢ₊½ = mean_func(α[idx], α[ᵢ₊₁])
-    # @inline θr_dτ_ᵢ₊½ = mean_func(θr_dτ[idx], θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
-    θr_dτ_ᵢ₊½ = 0.5(θr_dτ[idx] + θr_dτ[ᵢ₊₁]) # do NOT use max here, or it will fail to converge
+    uᵢ₊₁ = u[ᵢ₊₁]
+    uᵢ = u[idx]
+    _qᵢ₊½ = _qᵢ₊½[idx]
 
-    du = u[ᵢ₊₁] - u[idx]
-    # du = du * (abs(du) >= atol) # perform epsilon check
-    du = du * (abs(u[idx] * rtol) < abs(du)) # perform epsilon check
+    αᵢ₊₁ = α[ᵢ₊₁]
+    αᵢ = α[idx]
+    θr_dτᵢ₊₁ = θr_dτ[ᵢ₊₁]
+    θr_dτᵢ = θr_dτ[idx]
 
-    _qᵢ₊½ = -αᵢ₊½ * du
-
-    qᵢ₊½[idx] = (qᵢ₊½[idx] * θr_dτ_ᵢ₊½ + _qᵢ₊½) / (1 + θr_dτ_ᵢ₊½)
-    q′ᵢ₊½[idx] = _qᵢ₊½
+    @inline qᵢ₊½[idx] = flux_kernel!(_qᵢ₊½, uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, θr_dτᵢ₊₁, θr_dτᵢ, mean_func)
+    @inline q′ᵢ₊½[idx] = fluxprime_kernel!(uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, F)
   end
+
   return nothing
 end
 
