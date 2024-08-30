@@ -30,8 +30,10 @@ function update_orthogonal!(
   return nothing
 end
 
-function _update_1d_orthogonal_mesh!(u, u_prev, ξx, qξ_ᵢ, qξ_ᵢ₋₁, dτ_ρ, source_term, dt)
-  ∇q = ξx^2 * (qξ_ᵢ - qξ_ᵢ₋₁)
+function _update_1d_orthogonal_mesh!(u, u_prev, ξx, qξᵢ₊½, qξᵢ₋½, dτ_ρ, source_term, dt)
+
+  #
+  @inline ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, ξx)
   unew = (u + dτ_ρ * (u_prev / dt - ∇q + source_term)) / (1 + dτ_ρ / dt)
   return unew
 end
@@ -77,34 +79,11 @@ function update_orthogonal!(
 end
 
 function _update_2d_orthogonal_mesh!(
-  u::T,
-  u_prev,
-  ξx,
-  ξy,
-  ηx,
-  ηy,
-  qξᵢ₊½,
-  qξᵢ₋½,
-  qηⱼ₊½,
-  qηⱼ₋½,
-  dτ_ρ,
-  source_term,
-  dt,
-  rtol=sqrt(eps(eltype(T))),
+  u::T, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, dτ_ρ, source_term, dt
 ) where {T}
 
-  # ∂qξ∂ξ = (ξx^2 + ξy^2) * (qξᵢ₊½ - qξᵢ₋½)
-  # ∂qη∂η = (ηx^2 + ηy^2) * (qηⱼ₊½ - qηⱼ₋½)
-
-  _dqξ = (qξᵢ₊½ - qξᵢ₋½)
-  _dqη = (qηⱼ₊½ - qηⱼ₋½)
-  _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
-  _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
-
-  ∂qξ∂ξ = (ξx^2 + ξy^2) * _dqξ
-  ∂qη∂η = (ηx^2 + ηy^2) * _dqη
-
-  ∇q = ∂qξ∂ξ + ∂qη∂η
+  #
+  @inline ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, ξx, ξy, ηx, ηy)
 
   unew = (u + dτ_ρ * (u_prev / dt - ∇q + source_term)) / (1 + dτ_ρ / dt)
   return unew
@@ -198,26 +177,12 @@ function _update_3d_orthogonal_mesh!(
   dτ_ρ,
   source_term,
   dt,
-  rtol=sqrt(eps(eltype(T))),
 ) where {T}
 
-  # ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * (qξᵢ₊½ - qξᵢ₋½)
-  # ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * (qηⱼ₊½ - qηⱼ₋½)
-  # ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * (qζₖ₊½ - qζₖ₋½)
-
-  _dqξ = qξᵢ₊½ - qξᵢ₋½
-  _dqη = qηⱼ₊½ - qηⱼ₋½
-  _dqζ = qζₖ₊½ - qζₖ₋½
-
-  # _dqξ = _dqξ * (abs(qξᵢ₊½ * rtol) < abs(_dqξ))
-  # _dqη = _dqη * (abs(qηⱼ₊½ * rtol) < abs(_dqη))
-  # _dqζ = _dqζ * (abs(qζₖ₊½ * rtol) < abs(_dqη))
-
-  ∂qξ∂ξ = (ξx^2 + ξy^2 + ξz^2) * _dqξ
-  ∂qη∂η = (ηx^2 + ηy^2 + ηz^2) * _dqη
-  ∂qζ∂ζ = (ζx^2 + ζy^2 + ζz^2) * _dqζ
-
-  ∇q = ∂qξ∂ξ + ∂qη∂η + ∂qζ∂ζ
+  #
+  @inline ∇q = flux_divergence_orth(
+    qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, qζₖ₊½, qζₖ₋½, ξx, ξy, ξz, ηx, ηy, ηz, ζx, ζy, ζz
+  )
 
   unew = (u + dτ_ρ * (u_prev / dt - ∇q + source_term)) / (1 + dτ_ρ / dt)
   return unew
