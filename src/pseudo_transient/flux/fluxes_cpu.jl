@@ -9,15 +9,18 @@ function _cpu_flux_kernel!(
 
     uᵢ₊₁ = u[ᵢ₊₁]
     uᵢ = u[idx]
-    _qᵢ₊½ = _qᵢ₊½[idx]
+    _qᵢ₊½ = qᵢ₊½[idx] # current flux value
 
     αᵢ₊₁ = α[ᵢ₊₁]
     αᵢ = α[idx]
     θr_dτᵢ₊₁ = θr_dτ[ᵢ₊₁]
     θr_dτᵢ = θr_dτ[idx]
 
+    # update the flux w/ intertial terms
     @inline qᵢ₊½[idx] = flux_kernel!(_qᵢ₊½, uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, θr_dτᵢ₊₁, θr_dτᵢ, mean_func)
-    @inline q′ᵢ₊½[idx] = fluxprime_kernel!(uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, F)
+
+    # and the "plain" flux
+    @inline q′ᵢ₊½[idx] = fluxprime_kernel!(uᵢ₊₁, uᵢ, αᵢ₊₁, αᵢ, mean_func)
   end
 
   return nothing
