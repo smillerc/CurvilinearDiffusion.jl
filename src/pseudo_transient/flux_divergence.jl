@@ -187,7 +187,7 @@ end
 
 @inline function flux_divergence_orth(
   qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, qζₖ₊½, qζₖ₋½, ξx, ξy, ξz, ηx, ηy, ηz, ζx, ζy, ζz
-) where {T}
+)
   _dqξ = qξᵢ₊½ - qξᵢ₋½
   _dqη = qηⱼ₊½ - qηⱼ₋½
   _dqζ = qζₖ₊½ - qζₖ₋½
