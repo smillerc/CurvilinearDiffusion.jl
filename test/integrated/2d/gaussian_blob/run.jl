@@ -74,8 +74,8 @@ end
 function initialize_mesh(DT)
   ni, nj = (500, 500)
   nhalo = 1
-  # return wavy_grid(ni, nj, nhalo)
-  return uniform_grid(ni, nj, nhalo)
+  return wavy_grid(ni, nj, nhalo)
+  # return uniform_grid(ni, nj, nhalo)
 end
 
 function init_state_no_source(scheme, kwargs...)
@@ -236,7 +236,7 @@ begin
 
   # @profview begin
   scheme, mesh, temperature = solve_prob(
-    :pseudo_transient, :with_source, 500; error_check_interval=2
+    :pseudo_transient, :with_source, 150; error_check_interval=2
   )
   # end
   # scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
