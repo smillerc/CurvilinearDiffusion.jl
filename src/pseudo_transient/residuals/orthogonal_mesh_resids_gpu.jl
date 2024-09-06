@@ -3,7 +3,7 @@
 # 1D
 # ------------------------------------------------------------------------------------------
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:GPU}
 
   #
@@ -25,20 +25,20 @@ function update_residuals_orthogonal!(
   residuals = @view solver.res[domain]
 
   @. residuals = _update_residual_1d_orthogonal_mesh!(
-    u, u_prev, ξx, qξ_ᵢ, qξ_ᵢ₋₁, source_term, Δt
+    u, u_prev, ξx, qξ_ᵢ, qξ_ᵢ₋₁, source_term, Δt, ϵ
   )
 
   return nothing
 end
 
 @inline function _update_residual_1d_orthogonal_mesh!(
-  u, u_prev, ξx, qξᵢ₊½, qξᵢ₋½, source_term, dt
-)
+  u::T, u_prev, ξx, qξᵢ₊½, qξᵢ₋½, source_term, dt, ϵ
+) where {T}
   #
   ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, ξx)
 
   du = u - u_prev
-  du = du * !isapprox(u, u_prev)
+  du = du * !isapprox(u, u_prev; rtol=ϵ)
 
   residuals = -du / dt - ∇q + source_term
   return residuals
@@ -48,7 +48,7 @@ end
 # 2D
 # ------------------------------------------------------------------------------------------
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:GPU}
 
   #
@@ -76,21 +76,21 @@ function update_residuals_orthogonal!(
   residuals = @view solver.res[domain]
 
   @. residuals = _update_residual_2d_orthogonal_mesh!(
-    u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, Δt
+    u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, Δt, ϵ
   )
 
   return nothing
 end
 
 @inline function _update_residual_2d_orthogonal_mesh!(
-  u::T, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, dt
-) where {T}
+  u, u_prev, ξx, ξy, ηx, ηy, qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, source_term, dt, ϵ
+)
 
   #
   ∇q = flux_divergence_orth(qξᵢ₊½, qξᵢ₋½, qηⱼ₊½, qηⱼ₋½, ξx, ξy, ηx, ηy)
 
   du = u - u_prev
-  du = du * !isapprox(u, u_prev)
+  du = du * !isapprox(u, u_prev; rtol=ϵ)
 
   residuals = -du / dt - ∇q + source_term
   return residuals
@@ -101,7 +101,7 @@ end
 # ------------------------------------------------------------------------------------------
 
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:GPU}
 
   #
@@ -158,13 +158,14 @@ function update_residuals_orthogonal!(
     qζ_ᵢⱼₖ₋₁,
     source_term,
     Δt,
+    ϵ,
   )
 
   return nothing
 end
 
 @inline function _update_residual_3d_orthogonal_mesh!(
-  u::T,
+  u,
   u_prev,
   ξx,
   ξy,
@@ -183,7 +184,8 @@ end
   qζₖ₋½,
   source_term,
   dt,
-) where {T}
+  ϵ,
+)
 
   #
   ∇q = flux_divergence_orth(
@@ -191,7 +193,7 @@ end
   )
 
   du = u - u_prev
-  du = du * !isapprox(u, u_prev)
+  du = du * !isapprox(u, u_prev; rtol=ϵ)
 
   residuals = -du / dt - ∇q + source_term
   return residuals

@@ -4,7 +4,7 @@
 # ------------------------------------------------------------------------------------------
 
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{1,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:CPU}
 
   #
@@ -30,7 +30,7 @@ function update_residuals_orthogonal!(
     uⁿ = u[idx]
     uⁿ⁻¹ = u_prev[idx]
     du = uⁿ - uⁿ⁻¹
-    du = du * !isapprox(uⁿ, uⁿ⁻¹)
+    du = du * !isapprox(uⁿ, uⁿ⁻¹; rtol=ϵ)
 
     residuals[idx] = -du / Δt - ∇q + source_term[idx]
   end
@@ -42,7 +42,7 @@ end
 # 2D
 # ------------------------------------------------------------------------------------------
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{2,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:CPU}
 
   #
@@ -78,7 +78,7 @@ function update_residuals_orthogonal!(
     uⁿ = u[idx]
     uⁿ⁻¹ = u_prev[idx]
     du = uⁿ - uⁿ⁻¹
-    du = du * !isapprox(uⁿ, uⁿ⁻¹)
+    du = du * !isapprox(uⁿ, uⁿ⁻¹; rtol=ϵ)
 
     residuals[idx] = -du / Δt - ∇q + source_term[idx]
   end
@@ -90,7 +90,7 @@ end
 # 3D
 # ------------------------------------------------------------------------------------------
 function update_residuals_orthogonal!(
-  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{3,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {T,BE<:CPU}
 
   #
@@ -132,7 +132,7 @@ function update_residuals_orthogonal!(
     uⁿ = u[idx]
     uⁿ⁻¹ = u_prev[idx]
     du = uⁿ - uⁿ⁻¹
-    du = du * !isapprox(uⁿ, uⁿ⁻¹) # epsilon check
+    du = du * !isapprox(uⁿ, uⁿ⁻¹; rtol=ϵ) # epsilon check
 
     residuals[idx] = -du / Δt - ∇q + source_term[idx]
   end
