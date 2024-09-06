@@ -1,26 +1,30 @@
-@kernel function _update_resid!(
+@kernel inbounds = true function _update_resid!(
   residuals,
+  cache,
   cell_center_metrics,
-  edge_metrics,
   @Const(u),
   @Const(u_prev),
   @Const(flux),
   @Const(source_term),
   @Const(dt),
+  @Const(ϵ),
   @Const(I0),
 )
   idx = @index(Global, Cartesian)
   idx += I0
 
-  @inbounds begin
-    @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx)
+  @inline ∇q = flux_divergence(flux, cache, cell_center_metrics, idx)
 
-    residuals[idx] = -(u[idx] - u_prev[idx]) / dt - ∇q + source_term[idx]
-  end
+  uⁿ = u[idx]
+  uⁿ⁻¹ = u_prev[idx]
+  du = uⁿ - uⁿ⁻¹
+  du = du * !isapprox(uⁿ, uⁿ⁻¹; rtol=ϵ)
+
+  residuals[idx] = -du / dt - ∇q + source_term[idx]
 end
 
 function update_residuals_nonorthogonal!(
-  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt
+  solver::PseudoTransientSolver{N,T,BE}, mesh, Δt, ϵ=eps(T)
 ) where {N,T,BE<:GPU}
 
   #
@@ -29,13 +33,14 @@ function update_residuals_nonorthogonal!(
 
   _update_resid!(solver.backend)(
     solver.res,
+    solver.cache,
     mesh.cell_center_metrics,
-    mesh.edge_metrics,
     solver.u,
     solver.u_prev,
     solver.q′,
     solver.source_term,
     Δt,
+    ϵ,
     idx_offset;
     ndrange=size(domain),
   )

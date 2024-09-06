@@ -32,8 +32,8 @@ function flux_divergence((qᵢ, qⱼ), (αᵢⱼ, βᵢⱼ), cell_center_metrics
         (qⱼ[i - 1, j] + qⱼ[i - 1, j - 1])   # and do diff in i
       )
 
-    ∂H∂ξ = aᵢⱼ[i, j] * 0.5(qᵢ[i, j] + qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
-    ∂H∂η = bᵢⱼ[i, j] * 0.5(qⱼ[i, j] + qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
+    ∂H∂ξ = αᵢⱼ[i, j] * 0.5(qᵢ[i, j] + qᵢ[i - 1, j]) # ∂u/∂ξ + non-orth terms
+    ∂H∂η = βᵢⱼ[i, j] * 0.5(qⱼ[i, j] + qⱼ[i, j - 1]) # ∂u/∂η + non-orth terms
   end
 
   ∇q = ∂qᵢ∂ξ + ∂qⱼ∂η + ∂qᵢ∂η + ∂qⱼ∂ξ + ∂H∂ξ + ∂H∂η

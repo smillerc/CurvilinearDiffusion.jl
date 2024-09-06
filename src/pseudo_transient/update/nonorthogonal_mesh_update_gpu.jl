@@ -13,8 +13,8 @@ function update_nonorthogonal!(
   _update_nonorth_kernel!(solver.backend)(
     solver.u,
     solver.u_prev,
+    solver.cache,
     mesh.cell_center_metrics,
-    mesh.edge_metrics,
     solver.q,
     solver.dτ_ρ,
     solver.source_term,
@@ -27,11 +27,11 @@ function update_nonorthogonal!(
   return nothing
 end
 
-@kernel function _update_nonorth_kernel!(
+@kernel inbounds = true function _update_nonorth_kernel!(
   u,
   @Const(u_prev),
+  cache,
   cell_center_metrics, # applying @Const to a struct array causes problems
-  edge_metrics, # applying @Const to a struct array causes problems
   @Const(flux),
   @Const(dτ_ρ),
   @Const(source_term),
@@ -41,12 +41,9 @@ end
   idx = @index(Global, Cartesian)
   idx += I0
 
-  @inbounds begin
-    @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx)
+  @inline ∇q = flux_divergence(flux, cache, cell_center_metrics, idx)
 
-    u[idx] = (
-      (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) /
-      (1 + dτ_ρ[idx] / dt)
-    )
-  end
+  u[idx] = (
+    (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) / (1 + dτ_ρ[idx] / dt)
+  )
 end

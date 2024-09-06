@@ -24,7 +24,7 @@ include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,C}
   u::AA
   u_prev::AA
   source_term::AA
@@ -41,6 +41,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   bcs::B # boundary conditions
   mean::F
   backend::BE
+  cache::C
 end
 
 function PseudoTransientSolver(
@@ -78,7 +79,11 @@ function PseudoTransientSolver(
     mean_func = arithmetic_mean # from ../averaging.jl
   end
 
-  metric_cache = nothing
+  if mesh.is_orthogonal
+    metric_cache = nothing
+  else
+    metric_cache = get_metric_cache(mesh, backend, T)
+  end
 
   return PseudoTransientSolver(
     u,
@@ -97,6 +102,24 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
+    metric_cache,
+  )
+end
+
+get_metric_cache(mesh, backend, T) = nothing
+
+function get_metric_cache(mesh::CurvilinearGrid2D, backend, T)
+  return (;
+    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+  )
+end
+
+function get_metric_cache(mesh::CurvilinearGrid3D, backend, T)
+  return (;
+    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    γ=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
 end
 
@@ -147,6 +170,7 @@ include("flux/fluxes.jl")
 include("iteration_parameters.jl")
 include("residuals/residuals.jl")
 include("update/update.jl")
+include("mesh_metric_cache.jl")
 
 # solve a single time-step dt
 function step!(
@@ -188,6 +212,10 @@ function step!(
 
   copy!(solver.u, T)
   copy!(solver.u_prev, T)
+
+  if !mesh.is_orthogonal
+    @timeit "update_metric_cache" update_metric_cache!(solver, mesh)
+  end
 
   @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
 
