@@ -51,6 +51,8 @@ function wavy_grid(ni, nj, nhalo)
   # Ay = 0.8 / Δy0
   Ax = 0.2 / Δx0
   Ay = 0.4 / Δy0
+  # Ax = 0.1 / Δx0
+  # Ay = 0.2 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -72,10 +74,19 @@ function uniform_grid(nx, ny, nhalo)
 end
 
 function initialize_mesh(DT)
-  ni, nj = (500, 500)
-  nhalo = 1
+  ni, nj = (100, 100)
+  nhalo = 3
   return wavy_grid(ni, nj, nhalo)
   # return uniform_grid(ni, nj, nhalo)
+end
+
+# Define the conductivity model
+@inline function κ(ρ, temperature)
+  if !isfinite(temperature)
+    return zero(ρ)
+  else
+    return 2.5 * abs(temperature)^3
+  end
 end
 
 function init_state_no_source(scheme, kwargs...)
@@ -90,22 +101,12 @@ function init_state_no_source(scheme, kwargs...)
   else
     error("Must choose either :implict or :pseudo_transient")
   end
-  # solver = ADESolver(mesh, bcs; backend=backend, face_conductivity=:harmonic)
 
   # Temperature and density
   T_cold = 1e-2
   T = ones(DT, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(DT, cellsize_withhalo(mesh))
   cₚ = 1.0
-
-  # Define the conductivity model
-  @inline function κ(ρ, temperature, κ0=1.0)
-    if !isfinite(temperature)
-      return 0.0
-    else
-      return κ0 # * temperature^3
-    end
-  end
 
   fwhm = 1.0
   x0 = 0.0
@@ -116,7 +117,7 @@ function init_state_no_source(scheme, kwargs...)
     T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
-  copy!(solver.u, T)
+  # copy!(solver.u, T)
   return solver,
   adapt(ArrayT, initialize_mesh(DT)), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ,
   κ
@@ -135,22 +136,12 @@ function init_state_with_source(scheme, kwargs...)
   end
 
   # Temperature and density
-  @show DT
   T_hot = 1e2 |> DT
   T_cold = 1e-2 |> DT
   T = ones(DT, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(DT, cellsize_withhalo(mesh))
   source_term = zeros(DT, cellsize_withhalo(mesh))
   cₚ = 1.0 |> DT
-
-  # Define the conductivity model
-  @inline function κ(ρ, temperature)
-    if !isfinite(temperature)
-      return zero(ρ)
-    else
-      return temperature^3
-    end
-  end
 
   fwhm = 1.0 |> DT
   x0 = 0.0 |> DT
@@ -171,7 +162,7 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
+function solve_prob(scheme, case=:no_source; maxiter=Inf, maxt=0.2, kwargs...)
   casename = "blob"
 
   if case === :no_source
@@ -182,7 +173,6 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
 
   global Δt = 1e-4
   global t = 0.0
-  global maxt = 0.6
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
@@ -197,7 +187,16 @@ function solve_prob(scheme, case=:no_source, maxiter=Inf; kwargs...)
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     @timeit "nonlinear_thermal_conduction_step!" begin
       stats, next_dt = nonlinear_thermal_conduction_step!(
-        scheme, mesh, T, ρ, cₚ, κ, DT(Δt); cutoff=true, show_convergence=true, kwargs...
+        scheme,
+        mesh,
+        T,
+        ρ,
+        cₚ,
+        κ,
+        DT(Δt);
+        apply_cutoff=true,
+        show_convergence=true,
+        kwargs...,
       )
     end
 
@@ -231,14 +230,19 @@ begin
   rm.(glob("*.vts"))
 
   # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 500)
-  # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 100; direct_solve=false)
+  # scheme, mesh, temperature = solve_prob(
+  #   :implicit, :with_source; maxiter=100, direct_solve=false, direct_solver=:pardiso
+  # )
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
 
-  # @profview begin
   scheme, mesh, temperature = solve_prob(
-    :pseudo_transient, :with_source, 150; error_check_interval=2
+    :pseudo_transient,
+    :with_source;
+    maxiter=Inf,
+    maxt=0.4,
+    mean=:arithmetic,
+    error_check_interval=2,
+    # CFL=0.05
   )
-  # end
-  # scheme, mesh, temperature = solve_prob(:implicit, :with_source, 100; direct_solve=false)
   nothing
 end

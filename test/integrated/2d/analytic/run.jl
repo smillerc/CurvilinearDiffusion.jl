@@ -38,33 +38,55 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function uniform_grid(nx, ny)
+function wavy_grid(nx, ny, nhalo)
+  x2d = zeros(nx, ny)
+  y2d = zeros(nx, ny)
+
+  x1d = range(0, 1; length=nx)
+  y1d = range(0, 1; length=ny)
+  a0 = 0.1
+  for I in CartesianIndices(x2d)
+    i, j = I.I
+
+    x = x1d[i]
+    y = y1d[j]
+
+    x2d[i, j] = x + a0 * sinpi(2x) * cospi(2y)
+    y2d[i, j] = y + a0 * sinpi(2x) * cospi(2y)
+    # x2d[i, j] = x + a0 * sinpi(2x) * sinpi(2y)
+    # y2d[i, j] = y + a0 * sinpi(2x) * sinpi(2y)
+  end
+
+  return CurvilinearGrids.CurvilinearGrid2D(x2d, y2d, nhalo)
+end
+
+function uniform_grid(nx, ny, nhalo)
   x0, x1 = (0, 1)
   y0, y1 = (0, 1)
 
-  x(i, j) = @. x0 + (x1 - x0) * ((i - 1) / (nx - 1))
-  y(i, j) = @. y0 + (y1 - y0) * ((j - 1) / (ny - 1))
-
-  return (x, y)
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU())
 end
 
 function initialize_mesh()
   ni, nj = (101, 101)
-  nhalo = 4
-  # x, y = wavy_grid(ni, nj)
-  x, y = uniform_grid(ni, nj)
-  return CurvilinearGrid2D(x, y, (ni, nj), nhalo)
+  nhalo = 1
+  return wavy_grid(ni, nj, nhalo)
+  # return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
 # Initialization
 # ------------------------------------------------------------
+
+# Define the conductivity model
+@inline κ(ρ, temperature) = 1.0
+
 function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=DirichletBC(0.0),  #
-    ihi=DirichletBC(0.0),  #
+    ilo=DirichletBC(1e-15),  #
+    ihi=DirichletBC(1e-15),  #
     jlo=NeumannBC(),  #
     jhi=NeumannBC(),  #
   )
@@ -75,9 +97,6 @@ function init_state()
   source_term = zeros(Float64, cellsize_withhalo(mesh))
   ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
-
-  # Define the conductivity model
-  @inline κ(ρ, temperature) = 1.0
 
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
@@ -107,7 +126,7 @@ function run(maxt, maxiter=Inf)
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   while true
     if iter == 0
@@ -118,12 +137,16 @@ function run(maxt, maxiter=Inf)
       break
     end
 
-    nonlinear_thermal_conduction_step!(scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false)
-
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
+    nonlinear_thermal_conduction_step!(
+      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false, enforce_positivity=false
+    )
+
     if t + Δt > io_next
-      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+      @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
+        scheme, T, ρ, mesh, iter, t, casename
+      )
       global io_next += io_interval
     end
 
@@ -131,7 +154,7 @@ function run(maxt, maxiter=Inf)
     global t += Δt
   end
 
-  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   print_timer()
   return scheme, mesh, T
@@ -158,9 +181,13 @@ begin
   #   q0 = q.(x, 0.0)
   dt = +1e-5
   Tfinal = u_analytic.(x, tfinal - dt)
+  Tsim = T[:, 1]
+end
 
-  plot(xc[:, 1], T[:, 1]; label="simulation")
-  plot!(x, Tfinal; label="analytic")
+begin
+  L₂ = sqrt(mapreduce((x, y) -> abs(x^2 - y^2), +, Tfinal, Tsim) / length(Tsim))
+  plot(xc[:, 1], Tsim; label="simulation", title="L2 error = $(L₂)")
+  plot!(x, Tfinal; label="analytic", ls=:dash)
 end
 
 # begin
