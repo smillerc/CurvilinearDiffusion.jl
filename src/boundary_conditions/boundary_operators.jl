@@ -20,9 +20,9 @@ const JHI_BC_LOC = 4
 const KLO_BC_LOC = 5
 const KHI_BC_LOC = 6
 
-function applybcs!(bcs, mesh, u::AbstractArray)
+function applybcs!(bcs, mesh, u::AbstractArray, nhalo)
   for (i, bc) in enumerate(bcs)
-    applybc!(bc, mesh, u, i)
+    applybc!(bc, mesh, u, i, nhalo)
   end
 end
 
@@ -115,39 +115,45 @@ function applybc!(::NeumannBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::I
   end
 end
 
-function applybc!(bc::DirichletBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+function applybc!(
+  bc::DirichletBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int, nhalo=1
+)
   @unpack ilo, ihi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1] = bc.val
+      u[begin:(ilo - 1)] = bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi + 1] = bc.val
+      u[(ihi + 1):end] = bc.val
     else
       error("Bad 1d boundary location value $(loc), must be 1 or 2")
     end
   end
 end
 
-function applybc!(bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+function applybc!(
+  bc::DirichletBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int, nhalo=1
+)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   @views begin
     if loc == ILO_BC_LOC
-      u[ilo - 1, jlo:jhi] .= bc.val
+      u[begin:(ilo - 1), jlo:jhi] .= bc.val
     elseif loc == IHI_BC_LOC
-      u[ihi + 1, jlo:jhi] .= bc.val
+      u[(ihi + 1):end, jlo:jhi] .= bc.val
     elseif loc == JLO_BC_LOC
-      u[ilo:ihi, jlo - 1] .= bc.val
+      u[ilo:ihi, begin:(jlo - 1)] .= bc.val
     elseif loc == JHI_BC_LOC
-      u[ilo:ihi, jhi + 1] .= bc.val
+      u[ilo:ihi, (jhi + 1):end] .= bc.val
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
   end
 end
 
-function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+function applybc!(
+  bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int, nhalo=1
+)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   @views begin
@@ -169,7 +175,9 @@ function applybc!(bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, lo
   end
 end
 
-function applybc!(::PeriodicBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int)
+function applybc!(
+  ::PeriodicBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc::Int, nhalo=1
+)
   @unpack ilo, ihi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,
@@ -185,7 +193,9 @@ function applybc!(::PeriodicBC, mesh::CurvilinearGrid1D, u::AbstractVector, loc:
   end
 end
 
-function applybc!(::PeriodicBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int)
+function applybc!(
+  ::PeriodicBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int, nhalo=1
+)
   @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,
@@ -204,7 +214,9 @@ function applybc!(::PeriodicBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::
   end
 end
 
-function applybc!(::PeriodicBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int)
+function applybc!(
+  ::PeriodicBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int, nhalo=1
+)
   @unpack ilo, ihi, jlo, jhi, klo, khi = mesh.domain_limits.cell
 
   # Neumann BCs set the ghost region to be the same as the inner region along the edge,

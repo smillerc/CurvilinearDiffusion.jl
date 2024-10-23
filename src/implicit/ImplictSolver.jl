@@ -53,13 +53,13 @@ function ImplicitScheme(
   bcs;
   direct_solve=false,
   direct_solver=:pardiso,
-  face_conductivity::Symbol=:harmonic,
+  mean::Symbol=:harmonic,
   T=Float64,
   backend=CPU(),
 )
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
-  if face_conductivity === :harmonic
+  if mean === :harmonic
     mean_func = harmonic_mean
     @info "Using harmonic mean for face conductivity averaging"
   else
@@ -336,23 +336,23 @@ function update_precon(A, P, refresh, ::CPU)
   n = size(A, 1)
 
   opN = LinearOperator(
-    Float64, n, n, false, false, (y, v) -> backward_substitution!(y, P, v)
+    Float64, n, n, false, false, (y, v) -> ILUZero.backward_substitution!(y, P, v)
   )
-  # if refresh
-  @timeit "preconditioner" begin
-    ilu0!(P, A)
-    # end
+  if refresh
+    @timeit "preconditioner" begin
+      ilu0!(P, A)
+    end
   end
   return opN, _ldiv
 end
 
 function update_precon(A, P, refresh, ::GPU)
   _ldiv = true
-  # if refresh
-  @timeit "preconditioner" begin
-    KrylovPreconditioners.update!(P, A)
+  if refresh
+    @timeit "preconditioner" begin
+      KrylovPreconditioners.update!(P, A)
+    end
   end
-  # end
   return P, _ldiv
 end
 

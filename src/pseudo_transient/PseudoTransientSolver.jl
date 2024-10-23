@@ -24,14 +24,13 @@ include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,C}
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
   u::AA
   u_prev::AA
   source_term::AA
   q::NT1
   q′::NT1
   res::AA
-  # Re::AA
   α::AA # diffusivity
   θr_dτ::AA
   dτ_ρ::AA
@@ -41,11 +40,10 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F,C}
   bcs::B # boundary conditions
   mean::F
   backend::BE
-  cache::C
 end
 
 function PseudoTransientSolver(
-  mesh, bcs; backend=CPU(), face_diffusivity=:harmonic, T=Float64, kwargs...
+  mesh, bcs; backend=CPU(), mean=:harmonic, T=Float64, kwargs...
 )
   #
   #         u
@@ -58,12 +56,10 @@ function PseudoTransientSolver(
     full=(cartesian=mesh.iterators.cell.full,),
   )
 
-  # cell-based
   u = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   u_prev = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   S = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)) # source term
   residual = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
-  # Reynolds_number = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   α = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   θr_dτ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
   dτ_ρ = KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full))
@@ -73,16 +69,11 @@ function PseudoTransientSolver(
   q′ = flux_tuple(mesh, backend, T)
 
   L, spacing = phys_dims(mesh, T)
-  if face_diffusivity === :harmonic
+
+  if mean === :harmonic
     mean_func = harmonic_mean # from ../averaging.jl
   else
     mean_func = arithmetic_mean # from ../averaging.jl
-  end
-
-  if mesh.is_orthogonal
-    metric_cache = nothing
-  else
-    metric_cache = get_metric_cache(mesh, backend, T)
   end
 
   return PseudoTransientSolver(
@@ -92,7 +83,6 @@ function PseudoTransientSolver(
     q,
     q′,
     residual,
-    # Reynolds_number,
     α,
     θr_dτ,
     dτ_ρ,
@@ -102,24 +92,6 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
-    metric_cache,
-  )
-end
-
-get_metric_cache(mesh, backend, T) = nothing
-
-function get_metric_cache(mesh::CurvilinearGrid2D, backend, T)
-  return (;
-    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-  )
-end
-
-function get_metric_cache(mesh::CurvilinearGrid3D, backend, T)
-  return (;
-    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
-    γ=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
 end
 
@@ -166,11 +138,10 @@ end
 
 include("conductivity.jl")
 include("flux_divergence.jl")
-include("flux/fluxes.jl")
+include("flux.jl")
 include("iteration_parameters.jl")
-include("residuals/residuals.jl")
-include("update/update.jl")
-include("mesh_metric_cache.jl")
+include("residuals.jl")
+include("update.jl")
 
 # solve a single time-step dt
 function step!(
@@ -181,21 +152,24 @@ function step!(
   cₚ,
   κ,
   dt;
-  max_iter=1e5,
+  # max_iter=1e5,
+  max_iter=1500,
   rel_tol=1e-5,
   abs_tol=sqrt(eps(DT)),
   error_check_interval=20,
   apply_cutoff=false,
-  calculate_next_dt=false,
+  calculate_next_dt=true,
   subcycle_conductivity=true,
   write_diagnostic_vtk=false,
+  enforce_positivity=false,
   CFL=1 / sqrt(N),
   kwargs...,
 ) where {N,DT}
 
   #
   domain = solver.iterators.domain.cartesian
-  nhalo = 1
+  # nhalo = 1
+  nhalo = mesh.nhalo
 
   iter = 0
   rel_error = 2 * rel_tol
@@ -213,20 +187,16 @@ function step!(
   copy!(solver.u, T)
   copy!(solver.u_prev, T)
 
-  if !mesh.is_orthogonal
-    @timeit "update_metric_cache" update_metric_cache!(solver, mesh)
-  end
-
   @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
 
   @timeit "validate_scalar (α)" validate_scalar(
-    solver.α, domain, nhalo, :diffusivity; enforce_positivity=true
+    solver.α, domain, nhalo, :diffusivity; enforce_positivity=enforce_positivity
   )
 
-  @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
+  @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
 
   @timeit "validate_scalar (u)" validate_scalar(
-    solver.u, domain, nhalo, :u; enforce_positivity=true
+    solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
   )
 
   @timeit "validate_scalar (source_term)" validate_scalar(
@@ -238,16 +208,12 @@ function step!(
     iter += 1
 
     # Diffusion coefficient
-    if subcycle_conductivity
-      if iter > 1
-        @timeit "update_conductivity!" update_conductivity!(
-          solver, mesh, solver.u, ρ, cₚ, κ
-        )
-        @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α)
-      end
+    if subcycle_conductivity && iter > 1
+      @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+      @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
     end
 
-    @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u)
+    @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
 
     @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
 
@@ -263,16 +229,15 @@ function step!(
     @timeit "compute_update!" compute_update!(solver, mesh, dt)
 
     # Apply a cutoff function to remove negative / non-finite values
-    if apply_cutoff
-      @timeit "cutoff!" cutoff!(solver.u, solver.backend)
-    end
 
     if iter % error_check_interval == 0 || iter == 1
       @timeit "update_residual!" update_residual!(solver, mesh, dt)
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
+      # @show extrema(solver.res)
+      # @show extrema(solver.α)
       @timeit "norm" begin
-        L₂ = L2_norm(solver.res)
+        L₂ = L2_norm(solver.res, solver.backend)
 
         if iter == 1
           init_L₂ = L₂
@@ -296,6 +261,8 @@ function step!(
 
     if iter > max_iter
       to_vtk(solver, mesh, solver.u, ρ, iter, iter)
+      @show extrema(solver.dτ_ρ)
+      @show extrema(solver.θr_dτ)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
@@ -306,8 +273,13 @@ function step!(
     end
   end
 
+  # if apply_cutoff
+  # @timeit "cutoff!" cutoff!(solver.u, solver.backend)
+  # end
+  solver.u .= abs.(solver.u)
+
   @timeit "validate_scalar (u)" validate_scalar(
-    solver.u, domain, nhalo, :u; enforce_positivity=true
+    solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
   )
 
   if calculate_next_dt
@@ -315,7 +287,7 @@ function step!(
       next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
     end
   else
-    next_Δt = Inf
+    next_Δt = dt
   end
 
   copy!(T, solver.u)
