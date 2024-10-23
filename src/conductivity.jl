@@ -47,13 +47,6 @@ function update_conductivity!(
   return nothing
 end
 
-function _domain_pairs(scheme::AbstractADESolver, mesh)
-  diff_domain = scheme.iterators.full.cartesian
-  domain = mesh.iterators.cell.full
-
-  return (; diff_domain, domain)
-end
-
 function _domain_pairs(scheme::PseudoTransientSolver, mesh)
   diff_domain = scheme.iterators.full.cartesian
   domain = mesh.iterators.cell.full

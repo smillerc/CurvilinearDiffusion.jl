@@ -16,11 +16,6 @@ include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType
 export ImplicitScheme, solve!, assemble!, initialize_coefficient_matrix
 
-include("explicit/ADESolvers.jl")
-using .ADESolvers
-export AbstractADESolver, ADESolver, ADESolverNSweep, BlockADESolver
-export solve!, validate_diffusivity
-
 include("pseudo_transient/PseudoTransientSolver.jl")
 using .PseudoTransientScheme
 export PseudoTransientSolver
