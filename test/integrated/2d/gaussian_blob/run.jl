@@ -47,12 +47,10 @@ function wavy_grid(ni, nj, nhalo)
   Δx0 = Lx / (ni - 1)
   Δy0 = Ly / (nj - 1)
 
-  # Ax = 0.4 / Δx0
-  # Ay = 0.8 / Δy0
-  Ax = 0.2 / Δx0
-  Ay = 0.4 / Δy0
-  # Ax = 0.1 / Δx0
-  # Ay = 0.2 / Δy0
+  Ax = 0.4 / Δx0
+  Ay = 0.8 / Δy0
+  # Ax = 0.2 / Δx0
+  # Ay = 0.4 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -85,7 +83,7 @@ end
   if !isfinite(temperature)
     return zero(ρ)
   else
-    return 2.5 * abs(temperature)^3
+    return 2.5 #* abs(temperature)^3
   end
 end
 
@@ -237,7 +235,7 @@ begin
 
   scheme, mesh, temperature = solve_prob(
     :pseudo_transient,
-    :with_source;
+    :no_source;
     maxiter=Inf,
     maxt=0.4,
     mean=:arithmetic,

@@ -37,10 +37,8 @@ function wavy_grid_2(ni, nj, nhalo=1)
   Δx0 = Lx / (ni - 1)
   Δy0 = Ly / (nj - 1)
 
-  Ax = 0.4 / Δx0
-  Ay = 0.8 / Δy0
-  #   Ax = 0.2 / Δx0
-  #   Ay = 0.4 / Δy0
+  Ax = 0.2 / Δx0
+  Ay = 0.4 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)

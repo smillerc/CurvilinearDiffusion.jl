@@ -177,7 +177,9 @@ begin
   # solver_scheme = :implicit
   solver_scheme = :pseudo_transient
   scheme, mesh, temperature, dens = run(solver_scheme, 1.0, Inf;)
+end
 
+begin
   xc, yc = centroids(mesh)
 
   domain = mesh.iterators.cell.domain
@@ -199,23 +201,32 @@ begin
     end
   end
 
-  f = plot(
-    x,
-    T1d;
-    title="Nonlinear heat front @ t = 1",
-    label="simulation",
-    marker=:circle,
-    ms=2,
-    xticks=0:0.2:1,
-    yticks=0:0.2:1,
+  f = Figure(; size=(500, 500))
+  ax = Axis(
+    f[1, 1]; aspect=1, xlabel="x", ylabel="y", xgridvisible=false, ygridvisible=false
   )
-  vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
-  savefig(f, "planar_nonlinear_heat_front.png")
 
-  f
+  scatter!(ax, vec(xc), vec(T); color=:red, label=nothing, markersize=4)
+  vlines!(front_pos; label="Heat front", color=:black, linewidth=2, linestyle=:dash)
+  axislegend(; position=:lb)
+
+  # f = plot(
+  #   x,
+  #   T1d;
+  #   title="Nonlinear heat front @ t = 1",
+  #   label="simulation",
+  #   marker=:circle,
+  #   ms=2,
+  #   xticks=0:0.2:1,
+  #   yticks=0:0.2:1,
+  # )
+  # vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
+  # savefig(f, "planar_nonlinear_heat_front.png")
+
+  display(f)
+  save("nonlinear_heat_front.eps", f)
 end
 
-begin
-  scatter(xc, T; color=:red, label=nothing, ms=1)
-  vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
-end
+# begin
+# heatmap(T, xlabel="ξ")
+# end
