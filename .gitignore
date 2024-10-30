@@ -9,3 +9,4 @@
 *.sqlite
 *.timing
 *.eps
+*.json
