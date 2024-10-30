@@ -1,4 +1,4 @@
-using Plots
+using CairoMakie
 using CurvilinearGrids, CurvilinearDiffusion
 using Printf, Adapt
 using TimerOutputs
@@ -8,13 +8,20 @@ using LinearAlgebra
 
 const π² = π * π
 const q0 = 2
-u_initial(x, t) = sinpi(3x)
-# u_initial(x, t) = 0.25sinpi(2x) + sinpi(3x)
-q(x, t) = q0 * sinpi(x)
+
+function u_initial(x, t)
+  return sinpi(3x)
+end
+
+function q(x, t)
+  return q0 * sinpi(x)
+end
 
 function u_analytic(x, t)
-  sinpi(3x) * exp(-9π² * t) + (q0 / π²) * sinpi(x) * (1 - exp(-π² * t))
+  return sinpi(3x) * exp(-9π² * t) + (q0 / π²) * sinpi(x) * (1 - exp(-π² * t))
 end
+
+# u_initial(x, t) = 0.25sinpi(2x) + sinpi(3x)
 # function u_analytic(x, t)
 #   0.25sinpi(2x) * exp(-4π² * t) +
 #   sinpi(3x) * exp(-9π² * t) +
@@ -39,11 +46,18 @@ end
 # Grid Construction
 # ------------------------------------------------------------
 function wavy_grid(nx, ny, nhalo)
-  x2d = zeros(nx, ny)
-  y2d = zeros(nx, ny)
-
   x1d = range(0, 1; length=nx)
   y1d = range(0, 1; length=ny)
+
+  dx = first(diff(x1d))
+  dy = first(diff(y1d))
+  # dx = 1 / (nx - 1)
+  # dy = 1 / (ny - 1)
+  # x1d = (0.5dx):dx:(1 - 0.5dx)
+  # y1d = (0.5dy):dy:(1 - 0.5dy)
+  x2d = zeros(length(x1d), length(y1d))
+  y2d = zeros(length(x1d), length(y1d))
+
   a0 = 0.1
   for I in CartesianIndices(x2d)
     i, j = I.I
@@ -51,27 +65,37 @@ function wavy_grid(nx, ny, nhalo)
     x = x1d[i]
     y = y1d[j]
 
-    x2d[i, j] = x + a0 * sinpi(2x) * cospi(2y)
-    y2d[i, j] = y + a0 * sinpi(2x) * cospi(2y)
-    # x2d[i, j] = x + a0 * sinpi(2x) * sinpi(2y)
-    # y2d[i, j] = y + a0 * sinpi(2x) * sinpi(2y)
+    # x2d[i, j] = x + a0 * sinpi(2x) * cospi(2y)
+    # y2d[i, j] = y + a0 * sinpi(2x) * cospi(2y)
+    x2d[i, j] = x + a0 * sinpi(2x) * sinpi(2y)
+    y2d[i, j] = y + a0 * sinpi(2x) * sinpi(2y)
   end
 
+  # scale such that the ghost layer is at 0, so the boundary
+  # conditions are correct...
+  @. x2d = (x2d * (1 - dx)) + 0.5dx
+  @. y2d = (y2d * (1 - dy)) + 0.5dy
   return CurvilinearGrids.CurvilinearGrid2D(x2d, y2d, nhalo)
 end
 
 function uniform_grid(nx, ny, nhalo)
-  x0, x1 = (0, 1)
-  y0, y1 = (0, 1)
+  # x0, x1 = (0, 1)
+  # y0, y1 = (0, 1)
 
-  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU())
+  dx = 1 / (nx - 1)
+  dy = 1 / (ny - 1)
+  x = (0.5dx):dx:(1 - 0.5dx) |> collect
+  y = (0.5dy):dy:(1 - 0.5dy) |> collect
+
+  return CurvilinearGrids.RectlinearGrid(x, y, nhalo, CPU())
+  # return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU())
 end
 
 function initialize_mesh()
-  ni, nj = (101, 101)
+  ni = nj = 51
   nhalo = 1
-  return wavy_grid(ni, nj, nhalo)
-  # return uniform_grid(ni, nj, nhalo)
+  # return wavy_grid(ni, nj, nhalo)
+  return uniform_grid(ni, nj, nhalo)
 end
 
 # ------------------------------------------------------------
@@ -85,12 +109,16 @@ function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=DirichletBC(1e-15),  #
-    ihi=DirichletBC(1e-15),  #
-    jlo=NeumannBC(),  #
-    jhi=NeumannBC(),  #
+    ilo=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
+    ihi=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
+    # jlo=NeumannBC(),  #
+    # jhi=NeumannBC(),  #
+    jlo=PeriodicBC(),  #
+    jhi=PeriodicBC(),  #
   )
-  solver = ImplicitScheme(mesh, bcs; backend=backend)
+
+  # solver = ImplicitScheme(mesh, bcs; backend=backend)
+  solver = PseudoTransientSolver(mesh, bcs; backend=backend, mean=:harmonic)
 
   # Temperature and density
   T = zeros(Float64, cellsize_withhalo(mesh))
@@ -101,7 +129,7 @@ function init_state()
   for idx in mesh.iterators.cell.domain
     x⃗c = centroid(mesh, idx)
     T[idx] = u_initial(x⃗c.x, 0.0)
-    source_term[idx] = q(x⃗c.x, 0.0)
+    source_term[idx] = q(x⃗c.x, 0.0) # / mesh.cell_center_metrics.J[idx]
   end
 
   scheme_q = @view solver.source_term[solver.iterators.domain.cartesian]
@@ -121,7 +149,7 @@ function run(maxt, maxiter=Inf)
   casename = "multimode_sine"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
-  global Δt = 5e-5
+  global Δt = 1e-6
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -133,14 +161,21 @@ function run(maxt, maxiter=Inf)
       reset_timer!()
     end
 
-    if iter >= maxiter || t >= maxt
-      break
-    end
-
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
 
-    nonlinear_thermal_conduction_step!(
-      scheme, mesh, T, ρ, cₚ, κ, Δt; cutoff=false, enforce_positivity=false
+    stats, next_dt = nonlinear_thermal_conduction_step!(
+      scheme,
+      mesh,
+      T,
+      ρ,
+      cₚ,
+      κ,
+      Δt;
+      cutoff=false,
+      rel_tol=1e-9,
+      abs_tol=1e-8,
+      enforce_positivity=false,
+      subcycle_conductivity=false,
     )
 
     if t + Δt > io_next
@@ -150,8 +185,16 @@ function run(maxt, maxiter=Inf)
       global io_next += io_interval
     end
 
+    if iter >= maxiter || t >= maxt
+      break
+    end
+
     global iter += 1
     global t += Δt
+
+    # if isfinite(next_dt)
+    # Δt = next_dt
+    # end
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
@@ -163,34 +206,105 @@ end
 begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
+  # tfinal = 0.03
   tfinal = 0.05
   scheme, mesh, temperature = run(tfinal, Inf)
   nothing
+end
 
+begin
   xc, yc = centroids(mesh)
 
   domain = mesh.iterators.cell.domain
   ddomain = scheme.iterators.domain.cartesian
-  T = @view temperature[domain]
-  st = @view scheme.source_term[ddomain]
+  sim = @view temperature[domain]
 
-  #   x = 0:0.01:1
+  # tfinal = 4.9683e-02
+  # tfinal = 0.0505
+  sol = u_analytic.(xc, tfinal)
   x = xc[:, 1]
   Tinit = u_initial.(x, 0)
 
-  #   q0 = q.(x, 0.0)
-  dt = +1e-5
-  Tfinal = u_analytic.(x, tfinal - dt)
-  Tsim = T[:, 1]
+  L₂ = sqrt(mapreduce((x, y) -> abs(x^2 - y^2), +, sol, sim) / length(sim))
+
+  @show L₂
+  f = Figure(; size=(800, 400))
+  ax1 = Axis(
+    f[1, 1];
+    aspect=1,
+    xlabel="x",
+    ylabel="u",
+    xgridvisible=false,
+    ygridvisible=false,
+    xticks=-1:0.5:1,
+    yticks=-1:0.5:1,
+  )
+  ax2 = Axis(
+    f[1, 2]; aspect=1, xlabel="x", ylabel="u", xgridvisible=false, ygridvisible=false
+  )
+
+  lines!(ax1, xc[:, 1], Tinit; label="initial")
+  axislegend(ax1; position=:lb)
+
+  # lines!(ax2, xc[:, 1], Tsim; label="t_final")
+  lines!(ax2, xc[:, 1], sim[:, 1]; color=:red, label="simulated")
+  scatter!(ax2, vec(xc), vec(sol); markersize=4, color=:black, label="analytic")
+
+  # lines!(ax2, x, sol; label="analytic", linestyle=:dash, linewidth=1)
+  axislegend(; position=:cb)
+  save("$(@__DIR__)/multimode_sine.png", f)
+  f
 end
 
-begin
-  L₂ = sqrt(mapreduce((x, y) -> abs(x^2 - y^2), +, Tfinal, Tsim) / length(Tsim))
-  plot(xc[:, 1], Tsim; label="simulation", title="L2 error = $(L₂)")
-  plot!(x, Tfinal; label="analytic", ls=:dash)
-end
+# f, ax, p = heatmap(sim - sol)
+# Colorbar(f, p)
+# f
 
-# begin
-#   plot(xc[:, 1], st[:, 1]; label="simulation", xlabel="x", ylabel="q")
-#   plot!(x, q.(x, 0); label="analytic")
-# end
+# # begin
+# resolution = 1 ./ [50, 100, 200]
+
+# # wavy mesh error
+# err = [
+#   0.010542925663995471,  # 50
+#   0.007400455795832716,  # 100
+#   0.0051917456471774134, # 200
+# ]
+
+# # uniform mesh error
+# err = [
+#   0.00440401873833551,  # 50
+#   0.00331829403959398,  # 100 with fixed Δt; 0.00903241726146163 with variable Δt
+#   0.0, # 200
+# ]
+
+# #   # res_order = 1 ./ [50, 100]
+# #   err_order = @. resolution .^ 2
+
+# #   f = Figure(; size=(400, 400))
+# #   ax = Axis(
+# #     f[1, 1];
+# #     aspect=1,
+# #     xlabel="dx",
+# #     yscale=log10,
+# #     xscale=log10,
+# #     ylabel="L₂ error",
+# #     xgridstyle=:dash,
+# #     ygridstyle=:dash,
+# #     yminorticksvisible=true,
+# #     # yticks=[1e-3, 1e-1],
+# #     yminorticks=IntervalsBetween(9),
+
+# #     # xgridvisible=false,
+# #     # ygridvisible=false,
+# #   )
+
+# #   scatterlines!(ax, resolution, err)
+# #   lines!(ax, resolution, err_order)
+# #   # ylims!(1e-3, 1e-1)
+# #   # xlims!(1e1, 1e3)
+
+# #   # axislegend(ax; position=:lb)
+
+# #   #   # save("$(@__DIR__)/multimode_sine.png", f)
+# #   f
+# # end

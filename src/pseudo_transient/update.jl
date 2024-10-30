@@ -2,8 +2,8 @@
 @kernel inbounds = true function _update_kernel!(
   u,
   @Const(u_prev),
+  cache,
   cell_center_metrics, # applying @Const to a struct array causes problems
-  edge_metrics, # applying @Const to a struct array causes problems
   @Const(flux),
   @Const(dτ_ρ),
   @Const(source_term),
@@ -13,7 +13,7 @@
   idx = @index(Global, Cartesian)
   idx += I0
 
-  @inline ∇q = flux_divergence(flux, cell_center_metrics, edge_metrics, idx)
+  @inline ∇q = flux_divergence(flux, cache, cell_center_metrics, idx)
 
   u[idx] = (
     (u[idx] + dτ_ρ[idx] * (u_prev[idx] / dt - ∇q + source_term[idx])) / (1 + dτ_ρ[idx] / dt)
@@ -27,8 +27,8 @@ function compute_update!(solver::PseudoTransientSolver{N,T}, mesh, Δt) where {N
   _update_kernel!(solver.backend)(
     solver.u,
     solver.u_prev,
+    solver.cache,
     mesh.cell_center_metrics,
-    mesh.edge_metrics,
     solver.q,
     solver.dτ_ρ,
     solver.source_term,

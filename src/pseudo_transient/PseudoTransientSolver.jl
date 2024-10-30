@@ -24,13 +24,14 @@ include("../edge_terms.jl")
 
 export PseudoTransientSolver
 
-struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},NT1,DM,B,F}
+struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},CA,NT1,DM,B,F}
   u::AA
   u_prev::AA
   source_term::AA
   q::NT1
   q′::NT1
   res::AA
+  cache::CA
   α::AA # diffusivity
   θr_dτ::AA
   dτ_ρ::AA
@@ -76,6 +77,8 @@ function PseudoTransientSolver(
     mean_func = arithmetic_mean # from ../averaging.jl
   end
 
+  metric_cache = get_metric_cache(mesh, backend, T)
+
   return PseudoTransientSolver(
     u,
     u_prev,
@@ -83,6 +86,7 @@ function PseudoTransientSolver(
     q,
     q′,
     residual,
+    metric_cache,
     α,
     θr_dτ,
     dτ_ρ,
@@ -92,6 +96,23 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
+  )
+end
+
+get_metric_cache(mesh, backend, T) = nothing
+
+function get_metric_cache(mesh::CurvilinearGrid2D, backend, T)
+  return (;
+    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+  )
+end
+
+function get_metric_cache(mesh::CurvilinearGrid3D, backend, T)
+  return (;
+    α=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    β=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
+    γ=KernelAbstractions.zeros(backend, T, size(mesh.iterators.cell.full)),
   )
 end
 
@@ -138,10 +159,12 @@ end
 
 include("conductivity.jl")
 include("flux_divergence.jl")
-include("flux.jl")
+include("flux/fluxes.jl")
+# include("flux.jl")
 include("iteration_parameters.jl")
 include("residuals.jl")
 include("update.jl")
+include("mesh_metric_cache.jl")
 
 # solve a single time-step dt
 function step!(
@@ -153,51 +176,57 @@ function step!(
   κ,
   dt;
   # max_iter=1e5,
-  max_iter=1500,
+  max_iter=15000,
   rel_tol=1e-5,
   abs_tol=sqrt(eps(DT)),
-  error_check_interval=20,
+  error_check_interval=2,
   apply_cutoff=false,
   calculate_next_dt=true,
   subcycle_conductivity=true,
   write_diagnostic_vtk=false,
   enforce_positivity=false,
-  CFL=1 / sqrt(N),
+  CFL=1 / sqrt(3),
   kwargs...,
 ) where {N,DT}
 
   #
   domain = solver.iterators.domain.cartesian
-  # nhalo = 1
-  nhalo = mesh.nhalo
+  nhalo = 1
+  # nhalo = mesh.nhalo
 
   iter = 0
   rel_error = 2 * rel_tol
   abs_error = 2 * abs_tol
   init_L₂ = Inf
 
-  dx, dy = solver.spacing
-  Vpdτ = CFL * min(dx, dy)
+  # dx, dy = solver.spacing
+  Vpdτ = CFL * min(solver.spacing...)
+  # Vpdτ = 0.008
+  # @show CFL, Vpdτ, solver.spacing
+  # error("done")
 
   @assert dt > 0
-  @assert dx > 0
-  @assert dy > 0
+  @assert all(solver.spacing .> 0)
   @assert Vpdτ > 0
 
   copy!(solver.u, T)
   copy!(solver.u_prev, T)
 
-  @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+  @timeit "update_metric_cache" update_metric_cache!(solver, mesh)
+
+  # @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
+
+  # @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
 
   @timeit "validate_scalar (α)" validate_scalar(
     solver.α, domain, nhalo, :diffusivity; enforce_positivity=enforce_positivity
   )
 
-  @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
+  # @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
 
-  @timeit "validate_scalar (u)" validate_scalar(
-    solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
-  )
+  # @timeit "validate_scalar (u)" validate_scalar(
+  #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
+  # )
 
   @timeit "validate_scalar (source_term)" validate_scalar(
     solver.source_term, domain, nhalo, :source_term; enforce_positivity=false
@@ -205,17 +234,17 @@ function step!(
 
   # Pseudo-transient iteration
   while true
-    iter += 1
-
-    # Diffusion coefficient
-    if subcycle_conductivity && iter > 1
-      @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
-      @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
-    end
-
     @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
 
-    @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
+    # Diffusion coefficient
+    if subcycle_conductivity || iter == 0
+      @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+      @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
+    end
+
+    iter += 1
+
+    # @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
 
     # @timeit "validate_scalar (θr_dτ)" validate_scalar(
     #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
@@ -235,7 +264,9 @@ function step!(
       # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
 
       # @show extrema(solver.res)
-      # @show extrema(solver.α)
+      # @show extrema(solver.res[domain])
+      # @show extrema(solver.α[begin:(end - 1), 2:50])
+      # @show extrema(solver.u)
       @timeit "norm" begin
         L₂ = L2_norm(solver.res, solver.backend)
 
@@ -261,8 +292,6 @@ function step!(
 
     if iter > max_iter
       to_vtk(solver, mesh, solver.u, ρ, iter, iter)
-      @show extrema(solver.dτ_ρ)
-      @show extrema(solver.θr_dτ)
       error(
         "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
       )
@@ -273,14 +302,17 @@ function step!(
     end
   end
 
-  # if apply_cutoff
-  # @timeit "cutoff!" cutoff!(solver.u, solver.backend)
-  # end
-  solver.u .= abs.(solver.u)
+  if enforce_positivity
+    solver.u .= abs.(solver.u)
+  end
 
-  @timeit "validate_scalar (u)" validate_scalar(
-    solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
-  )
+  if apply_cutoff
+    @timeit "cutoff!" cutoff!(solver.u, solver.backend)
+  end
+
+  # @timeit "validate_scalar (u)" validate_scalar(
+  #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
+  # )
 
   if calculate_next_dt
     @timeit "next_dt" begin

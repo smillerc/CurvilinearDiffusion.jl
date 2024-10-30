@@ -138,13 +138,13 @@ function applybc!(
 
   @views begin
     if loc == ILO_BC_LOC
-      u[begin:(ilo - 1), jlo:jhi] .= bc.val
+      u[begin:(ilo - 1), jlo:jhi] .= bc.val.u
     elseif loc == IHI_BC_LOC
-      u[(ihi + 1):end, jlo:jhi] .= bc.val
+      u[(ihi + 1):end, jlo:jhi] .= bc.val.u
     elseif loc == JLO_BC_LOC
-      u[ilo:ihi, begin:(jlo - 1)] .= bc.val
+      u[ilo:ihi, begin:(jlo - 1)] .= bc.val.u
     elseif loc == JHI_BC_LOC
-      u[ilo:ihi, (jhi + 1):end] .= bc.val
+      u[ilo:ihi, (jhi + 1):end] .= bc.val.u
     else
       error("Bad 2d boundary location value $(loc), must be 1-4")
     end
@@ -246,6 +246,6 @@ end
 
 bc_rhs_coefficient(::NeumannBC, ::CartesianIndex, T) = zero(T)
 bc_rhs_coefficient(::PeriodicBC, ::CartesianIndex, T) = zero(T)
-bc_rhs_coefficient(bc::DirichletBC, ::CartesianIndex, T) = bc.val
+bc_rhs_coefficient(bc::DirichletBC, ::CartesianIndex, T) = bc.val.u
 
 end

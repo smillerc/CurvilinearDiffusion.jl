@@ -71,19 +71,11 @@ function init_state(scheme, kwargs...)
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=DirichletBC(1.0),  #
-    ihi=DirichletBC(0.0),  #
+    ilo=DirichletBC((; ρ=1.0, u=1.0)),  #
+    ihi=DirichletBC((; ρ=0.0, u=0.0)),  #
     jlo=PeriodicBC(),  #
     jhi=PeriodicBC(),  #
   )
-
-  # solver = ImplicitScheme(
-  #   mesh,
-  #   bcs;
-  #   backend=backend,
-  #   direct_solve=false, # either UMFPACKFactorization (direct) or Kyrlov (iterative) 
-  #   face_conductivity=:arithmetic, # :harmonic won't work for T=0
-  # )
 
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, mean=:arithmetic, kwargs...)
@@ -108,7 +100,7 @@ end
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function run(solver_scheme, maxt, maxiter=Inf; kwargs...)
+function run(solver_scheme, maxt; maxiter=Inf, kwargs...)
   casename = "planar_nonlinear_heat_wave"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state(solver_scheme, kwargs...)
@@ -138,7 +130,8 @@ function run(solver_scheme, maxt, maxiter=Inf; kwargs...)
         apply_cutoff=false,
         show_convergence=true,
         calculate_next_dt=true,
-        # subcycle_conductivity=false,
+        subcycle_conductivity=false,
+        enforce_positivity=true,
         kwargs...,
       )
     end
@@ -176,13 +169,128 @@ begin
 
   # solver_scheme = :implicit
   solver_scheme = :pseudo_transient
-  scheme, mesh, temperature, dens = run(solver_scheme, 1.0, Inf;)
+  scheme, grid, temperature, dens = run(solver_scheme, 1.0; maxiter=Inf)
+  nothing
 end
 
 begin
-  xc, yc = centroids(mesh)
+  # T_analytic = [
+  #   0.999,
+  #   0.968,
+  #   0.933,
+  #   0.898,
+  #   0.865,
+  #   0.838,
+  #   0.799,
+  #   0.76,
+  #   0.702,
+  #   0.653,
+  #   0.614,
+  #   0.567,
+  #   0.513,
+  #   0.451,
+  #   0.407,
+  #   0.364,
+  #   0.319,
+  #   0.273,
+  #   0.218,
+  #   0.154,
+  #   0.102,
+  #   0.0527,
+  #   0.0,
+  # ]
 
-  domain = mesh.iterators.cell.domain
+  # x_analytic = [
+  #   0.006,
+  #   0.089,
+  #   0.186,
+  #   0.263,
+  #   0.337,
+  #   0.386,
+  #   0.458,
+  #   0.517,
+  #   0.594,
+  #   0.653,
+  #   0.689,
+  #   0.728,
+  #   0.764,
+  #   0.799,
+  #   0.818,
+  #   0.835,
+  #   0.846,
+  #   0.856,
+  #   0.863,
+  #   0.867,
+  #   0.871,
+  #   0.87,
+  #   0.87,
+  # ]
+
+  x_analytic = [
+    0.000772,
+    0.0703,
+    0.134,
+    0.197,
+    0.27,
+    0.344,
+    0.403,
+    0.48,
+    0.536,
+    0.598,
+    0.656,
+    0.693,
+    0.723,
+    0.742,
+    0.762,
+    0.785,
+    0.798,
+    0.813,
+    0.827,
+    0.831,
+    0.838,
+    0.846,
+    0.851,
+    0.856,
+    0.863,
+    0.867,
+    0.871,
+    0.871,
+  ]
+
+  y_analytic = [
+    0.999,
+    0.975,
+    0.952,
+    0.928,
+    0.896,
+    0.86,
+    0.83,
+    0.786,
+    0.746,
+    0.699,
+    0.648,
+    0.61,
+    0.575,
+    0.549,
+    0.52,
+    0.48,
+    0.455,
+    0.42,
+    0.385,
+    0.374,
+    0.352,
+    0.324,
+    0.297,
+    0.266,
+    0.211,
+    0.153,
+    0.0772,
+    0.00368,
+  ]
+
+  xc, yc = centroids(grid)
+
+  domain = grid.iterators.cell.domain
   ddomain = scheme.iterators.domain.cartesian
   T = @view temperature[domain]
   st = @view scheme.source_term[ddomain]
@@ -203,30 +311,21 @@ begin
 
   f = Figure(; size=(500, 500))
   ax = Axis(
-    f[1, 1]; aspect=1, xlabel="x", ylabel="y", xgridvisible=false, ygridvisible=false
+    f[1, 1];
+    aspect=1,
+    xlabel="x",
+    ylabel="Temperature",
+    xticks=0:0.2:1,
+    yticks=0:0.2:1,
+    xgridvisible=false,
+    ygridvisible=false,
   )
 
-  scatter!(ax, vec(xc), vec(T); color=:red, label=nothing, markersize=4)
-  vlines!(front_pos; label="Heat front", color=:black, linewidth=2, linestyle=:dash)
+  scatter!(ax, vec(xc), vec(T); color=:red, label="Simulation", markersize=3)
+  lines!(ax, x_analytic, y_analytic; color=:black, label="Analytic")
+  vlines!(front_pos; label="Front Position", color=:black, linewidth=2, linestyle=:dash)
   axislegend(; position=:lb)
 
-  # f = plot(
-  #   x,
-  #   T1d;
-  #   title="Nonlinear heat front @ t = 1",
-  #   label="simulation",
-  #   marker=:circle,
-  #   ms=2,
-  #   xticks=0:0.2:1,
-  #   yticks=0:0.2:1,
-  # )
-  # vline!(front_pos; label="analytic front position", color=:black, lw=2, ls=:dash)
-  # savefig(f, "planar_nonlinear_heat_front.png")
-
-  display(f)
   save("nonlinear_heat_front.eps", f)
+  display(f)
 end
-
-# begin
-# heatmap(T, xlabel="ξ")
-# end

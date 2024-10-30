@@ -4,6 +4,7 @@ using TimerOutputs
 using KernelAbstractions
 using Glob
 using LinearAlgebra
+using JSON3
 
 # @static if Sys.islinux()
 #   using MKL
@@ -50,7 +51,7 @@ function wavy_grid(ni, nj, nhalo)
   # Ax = 0.4 / Δx0
   # Ay = 0.8 / Δy0
   Ax = 0.2 / Δx0
-  Ay = 0.4 / Δy0
+  Ay = 0.2 / Δy0
 
   x = zeros(ni, nj)
   y = zeros(ni, nj)
@@ -71,58 +72,14 @@ function uniform_grid(nx, ny, nhalo)
   return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU(), DT)
 end
 
-function initialize_mesh(DT)
-  ni = nj = 4001
+function initialize_mesh(n)
   nhalo = 1
-  return wavy_grid(ni, nj, nhalo)
-  # return uniform_grid(ni, nj, nhalo)
+  @show n
+  return wavy_grid(n, n, nhalo)
+  # return uniform_grid(n, n, nhalo)
 end
 
-function init_state_no_source(scheme, kwargs...)
-
-  # Define the conductivity model
-  @inline function κ(ρ, temperature)
-    if !isfinite(temperature)
-      return zero(ρ)
-    else
-      return 2.5
-    end
-  end
-
-  mesh = initialize_mesh(DT)
-
-  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
-
-  if scheme === :implicit
-    solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
-  elseif scheme === :pseudo_transient
-    solver = PseudoTransientSolver(mesh, bcs; backend=backend, T=DT, kwargs...)
-  else
-    error("Must choose either :implict or :pseudo_transient")
-  end
-
-  # Temperature and density
-  T_cold = 1e-2
-  T = ones(DT, cellsize_withhalo(mesh)) * T_cold
-  ρ = ones(DT, cellsize_withhalo(mesh))
-  cₚ = 1.0
-
-  fwhm = 1.0
-  x0 = 0.0
-  y0 = 0.0
-  xc = Array(mesh.centroid_coordinates.x)
-  yc = Array(mesh.centroid_coordinates.y)
-  for idx in mesh.iterators.cell.domain
-    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
-  end
-
-  # copy!(solver.u, T)
-  return solver,
-  adapt(ArrayT, initialize_mesh(DT)), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ,
-  κ
-end
-
-function init_state_with_source(scheme, kwargs...)
+function init_state_with_source(scheme, resolution, kwargs...)
 
   # Define the conductivity model
   @inline function κ(ρ, temperature)
@@ -133,9 +90,13 @@ function init_state_with_source(scheme, kwargs...)
     end
   end
 
-  mesh = initialize_mesh(DT)
-  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
-
+  mesh = initialize_mesh(resolution)
+  bcs = (
+    ilo=NeumannBC(), #
+    ihi=NeumannBC(), #
+    jlo=NeumannBC(), #
+    jhi=NeumannBC(), #
+  )
   if scheme === :implicit
     solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
   elseif scheme === :pseudo_transient
@@ -153,8 +114,7 @@ function init_state_with_source(scheme, kwargs...)
   cₚ = 1.0 |> DT
 
   fwhm = 1.0 |> DT
-  x0 = 0.0 |> DT
-  y0 = 0.0 |> DT
+  x0 = y0 = 0.0 |> DT
   xc = Array(mesh.centroid_coordinates.x)
   yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
@@ -162,31 +122,44 @@ function init_state_with_source(scheme, kwargs...)
       T_hot * exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) + T_cold
   end
 
-  copy!(solver.source_term, source_term)
-  return solver,
-  adapt(ArrayT, initialize_mesh(DT)), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ,
-  κ
+  if scheme === :implicit
+    s1 = @view solver.source_term[solver.iterators.domain.cartesian]
+    s2 = source_term[mesh.iterators.cell.domain] # make a copy since copy! doesn't work with cpu views to gpu views (by design)
+    copy!(s1, s2)
+
+  elseif scheme === :pseudo_transient
+    copy!(solver.source_term, source_term)
+  end
+
+  return (
+    solver,
+    adapt(ArrayT, initialize_mesh(resolution)),
+    adapt(ArrayT, T),
+    adapt(ArrayT, ρ),
+    cₚ,
+    κ,
+  )
 end
 
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
-function solve_prob(scheme, case=:no_source; maxiter=Inf, maxt=0.2, kwargs...)
+function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
   casename = "blob"
 
   if case === :no_source
-    scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, kwargs...)
+    scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, resolution, kwargs...)
   else
-    scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, kwargs...)
+    scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, resolution, kwargs...)
   end
 
-  global Δt = 1e-6
+  global Δt = 1e-8
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
   global io_next = io_interval
   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
-  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   while true
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
@@ -229,49 +202,62 @@ function solve_prob(scheme, case=:no_source; maxiter=Inf, maxt=0.2, kwargs...)
     Δt = min(next_dt, 1e-4)
   end
 
-  # @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
+  @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   print_timer()
   return scheme, mesh, T
 end
 
 # @profview 
-begin
+function benchmark()
   cd(@__DIR__)
   rm.(glob("*.vts"))
 
-  # scheme, mesh, temperature = solve_prob(:pseudo_transient, :no_source, 500)
-  # scheme, mesh, temperature = solve_prob(
-  #   :implicit, :with_source; maxiter=100, direct_solve=false, direct_solver=:pardiso
-  # )
-  # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
+  if !isdir("benchmark_results")
+    mkdir("benchmark_results")
+  end
 
-  # No source
-  scheme, mesh, temperature = solve_prob(
-    # :pseudo_transient,
-    :implicit,
-    :no_source;
-    maxiter=Inf,
-    maxt=1e-5,
-    direct_solve=false,
-    mean=:harmonic,
-    error_check_interval=2,
-    # CFL=0.4,
-    refresh_matrix=false,
+  for scheme_name in (
+    # :implicit, 
+    :pseudo_transient,
   )
+    for resolution in (
+      # 501,
+      # 1001,
+      2001,
+      # 201,
+      # 2001,
+      #1001, 2001, 4001
+    )
+      reset_timer!()
+      scheme, mesh, temperature = solve_prob(
+        scheme_name,
+        :with_source,
+        resolution;
+        maxiter=Inf,
+        maxt=1.5e-3,
+        # maxt=2e-3,
+        direct_solve=false,
+        mean=:arithmetic,
+        apply_cutoff=true,
+        enforce_positivity=true,
+        error_check_interval=10,
+        CFL=0.4, # working
+        # CFL=0.5,
+        subcycle_conductivity=false,
+      )
 
-  # # With source
-  # scheme, mesh, temperature = solve_prob(
-  #   :pseudo_transient,
-  #   # :implicit,
-  #   :with_source;
-  #   maxiter=Inf,
-  #   maxt=1.5e-3,
-  #   # maxt=2e-3,
-  #   direct_solve=false,
-  #   mean=:arithmetic,
-  #   # error_check_interval=2,
-  #   CFL=0.2,
-  # )
+      open(
+        "$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(resolution)_$(scheme_name).json",
+        "w",
+      ) do io
+        JSON3.pretty(io, TimerOutputs.todict(TimerOutputs.DEFAULT_TIMER))
+      end
+
+      GC.gc() # free gpu memory
+    end
+  end
   nothing
 end
+
+benchmark()

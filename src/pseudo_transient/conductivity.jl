@@ -4,7 +4,7 @@ function update_conductivity!(
 
   #
 
-  @batch for idx in mesh.iterators.cell.domain
+  @batch for idx in mesh.iterators.cell.full
     @inline kappa = κ(density[idx], temperature[idx])
     scheme.α[idx] = abs(kappa / (density[idx] * cₚ))
   end

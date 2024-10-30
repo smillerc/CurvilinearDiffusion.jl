@@ -64,8 +64,8 @@ begin
   nx = ny = 50
   for (grid_id, grid) in enumerate((
     wavy_grid_1(nx, ny), #
-    # wavy_grid_2(nx, ny), #
-    # uniform_grid(nx, ny),#
+    wavy_grid_2(nx, ny), #
+    uniform_grid(nx, ny),#
   ))
     f = Figure(; size=(500, 500))
     ax = Axis(

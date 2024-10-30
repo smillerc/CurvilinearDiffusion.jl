@@ -56,6 +56,7 @@ function ImplicitScheme(
   mean::Symbol=:harmonic,
   T=Float64,
   backend=CPU(),
+  kwargs...,
 )
   @assert mesh.nhalo >= 1 "The diffusion solver requires the mesh to have a halo region >= 1 cell wide"
 
@@ -200,6 +201,7 @@ function _direct_solve!(
   u,
   Δt;
   cutoff=true,
+  refresh_matrix=true,
   kwargs...,
 ) where {N,T}
 
@@ -217,8 +219,13 @@ function _direct_solve!(
   # but update the A matrix (which we did above via assemble!(...))
   # Setting isfresh=true will tell the direct solver that the 
   # A matrix has been changed. For iterative Krylov solvers, we don't need to 
-  # do this
-  scheme.linear_problem.isfresh = true
+  # do this.
+
+  # The _only_ time you can get away with not refreshing the matrix is when the A
+  # matrix is constant, e.g. diffusivity is constant
+  if refresh_matrix
+    scheme.linear_problem.isfresh = true
+  end
 
   if !warmedup(scheme)
     @info "Performing the first (cold) factorization (if direct) and solve, this will be re-used in subsequent solves"
@@ -266,15 +273,15 @@ function _iterative_solve!(
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
   KernelAbstractions.synchronize(scheme.backend)
 
-  if !warmedup(scheme)
-    refresh = true
-  else
-    refresh = scheme.linear_problem.solver.stats.niter > precon_iter_threshold
+  # if !warmedup(scheme)
+  refresh = true
+  # else
+  #   refresh = scheme.linear_problem.solver.stats.niter > precon_iter_threshold
 
-    if refresh
-      @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
-    end
-  end
+  #   if refresh
+  #     @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
+  #   end
+  # end
 
   precon, _ldiv = update_precon(
     scheme.linear_problem.A, scheme.linear_problem.precon, refresh, scheme.backend

@@ -17,10 +17,10 @@ function nonlinear_thermal_conduction_step!(
   domain = scheme.iterators.domain.cartesian
   nhalo = 1
 
-  @timeit "applybc!" applybcs!(scheme.bcs, mesh, T)
+  @timeit "applybc!" applybcs!(scheme.bcs, mesh, T, nhalo)
 
   if apply_density_bc
-    @timeit "applybc!" applybcs!(scheme.bcs, mesh, ρ)
+    @timeit "applybc!" applybcs!(scheme.bcs, mesh, ρ, nhalo)
   end
 
   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
