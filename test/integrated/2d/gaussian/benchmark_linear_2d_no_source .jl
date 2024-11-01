@@ -6,17 +6,17 @@ using Glob
 using LinearAlgebra
 using JSON3
 
-# @static if Sys.islinux()
-#   using MKL
-# elseif Sys.isapple()
-#   using AppleAccelerate
-# end
+@static if Sys.islinux()
+  using MKL
+elseif Sys.isapple()
+  using AppleAccelerate
+end
 
-# NMAX = Sys.CPU_THREADS
-# BLAS.set_num_threads(NMAX)
-# BLAS.get_num_threads()
+NMAX = Sys.CPU_THREADS
+BLAS.set_num_threads(NMAX)
+BLAS.get_num_threads()
 
-# @show BLAS.get_config()
+@show BLAS.get_config()
 
 dev = :GPU
 const DT = Float64
@@ -36,137 +36,101 @@ end
 # ------------------------------------------------------------
 # Grid Construction
 # ------------------------------------------------------------
-function wavy_grid(ni, nj, nk, nhalo)
-  Lx = Ly = Lz = 12
+function wavy_grid(ni, nj, nhalo)
+  Lx = 12
+  Ly = 12
+  n_xy = 6
+  n_yx = 6
 
   xmin = -Lx / 2
   ymin = -Ly / 2
-  zmin = -Lz / 2
 
-  Δx0 = Lx / ni
-  Δy0 = Ly / nj
-  Δz0 = Lz / nk
+  Δx0 = Lx / (ni - 1)
+  Δy0 = Ly / (nj - 1)
 
+  # Ax = 0.4 / Δx0
+  # Ay = 0.8 / Δy0
   Ax = 0.2 / Δx0
   Ay = 0.2 / Δy0
-  Az = 0.2 / Δz0
 
-  x = zeros(ni, nj, nk)
-  y = zeros(ni, nj, nk)
-  z = zeros(ni, nj, nk)
-
-  n = 0.5
-  for k in 1:nk
-    for j in 1:nj
-      for i in 1:ni
-        x[i, j, k] =
-          xmin + Δx0 * ((i - 1) + Ax * sinpi(n * (j - 1) * Δy0) * sinpi(n * (k - 1) * Δz0))
-        y[i, j, k] =
-          ymin + Δy0 * ((j - 1) + Ay * sinpi(n * (k - 1) * Δz0) * sinpi(n * (i - 1) * Δx0))
-        z[i, j, k] =
-          zmin + Δz0 * ((k - 1) + Az * sinpi(n * (i - 1) * Δx0) * sinpi(n * (j - 1) * Δy0))
-      end
+  x = zeros(ni, nj)
+  y = zeros(ni, nj)
+  for j in 1:nj
+    for i in 1:ni
+      x[i, j] = xmin + Δx0 * ((i - 1) + Ax * sinpi((n_xy * (j - 1) * Δy0) / Ly))
+      y[i, j] = ymin + Δy0 * ((j - 1) + Ay * sinpi((n_yx * (i - 1) * Δx0) / Lx))
     end
   end
 
-  return CurvilinearGrid3D(x, y, z, nhalo)
+  return CurvilinearGrid2D(x, y, nhalo)
 end
 
-function uniform_grid(nx, ny, nz, nhalo)
+function uniform_grid(nx, ny, nhalo)
   x0, x1 = (-6, 6)
   y0, y1 = (-6, 6)
-  z0, z1 = (-6, 6)
 
-  return CurvilinearGrids.RectlinearGrid((x0, y0, z0), (x1, y1, z1), (nx, ny, nz), nhalo)
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU(), DT)
 end
 
 function initialize_mesh(n)
-  nhalo = 4
+  nhalo = 1
   @show n
-  return wavy_grid(n, n, n, nhalo)
-  # return uniform_grid(n, n, n, nhalo)
+  return wavy_grid(n, n, nhalo)
+  # return uniform_grid(n, n, nhalo)
 end
 
-function init_state_with_source(scheme, resolution, kwargs...)
+function init_state_no_source(scheme, resolution, kwargs...)
 
   # Define the conductivity model
   @inline function κ(ρ, temperature)
     if !isfinite(temperature)
       return zero(ρ)
     else
-      return 2.5 * abs(temperature)^3
+      return 2.5
     end
   end
 
   mesh = initialize_mesh(resolution)
-  bcs = (
-    ilo=NeumannBC(), #
-    ihi=NeumannBC(), #
-    jlo=NeumannBC(), #
-    jhi=NeumannBC(), #
-    klo=NeumannBC(), #
-    khi=NeumannBC(), #
-  )
-  if scheme === :implicit
-    solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
-  elseif scheme === :pseudo_transient
+
+  bcs = (ilo=NeumannBC(), ihi=NeumannBC(), jlo=NeumannBC(), jhi=NeumannBC())
+
+  if scheme === :pseudo_transient
     solver = PseudoTransientSolver(mesh, bcs; backend=backend, T=DT, kwargs...)
-  else
-    error("Must choose either :implict or :pseudo_transient")
+  else # scheme === :implicit
+    solver = ImplicitScheme(mesh, bcs; backend=backend, kwargs...)
+    # else
+    #   error("Must choose either :implict or :pseudo_transient")
   end
 
   # Temperature and density
-  T_hot = 1e4 |> DT
-  T_cold = 1e-2 |> DT
+  T_cold = 1e-2
   T = ones(DT, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(DT, cellsize_withhalo(mesh))
-  source_term = zeros(DT, cellsize_withhalo(mesh))
-  cₚ = 1.0 |> DT
+  cₚ = 1.0
 
-  fwhm = 1.0 |> DT
-  x0 = y0 = z0 = 0.0 |> DT
-
+  fwhm = 1.0
+  x0 = 0.0
+  y0 = 0.0
+  xc = Array(mesh.centroid_coordinates.x)
+  yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
-
-    source_term[idx] =
-      T_hot *
-      exp(-(((x0 - x⃗c.x)^2) / fwhm + ((y0 - x⃗c.y)^2) / fwhm + ((z0 - x⃗c.z)^2) / fwhm)) +
-      T_cold
+    T[idx] = exp(-(((x0 - xc[idx])^2) / fwhm + ((y0 - yc[idx])^2) / fwhm)) #+ T_cold
   end
 
-  if scheme === :implicit
-    s1 = @view solver.source_term[solver.iterators.domain.cartesian]
-    s2 = source_term[mesh.iterators.cell.domain] # make a copy since copy! doesn't work with cpu views to gpu views (by design)
-    copy!(s1, s2)
-
-  elseif scheme === :pseudo_transient
-    copy!(solver.source_term, source_term)
-  end
-
-  return (
-    solver,
-    adapt(ArrayT, initialize_mesh(resolution)),
-    adapt(ArrayT, T),
-    adapt(ArrayT, ρ),
-    cₚ,
-    κ,
-  )
+  # copy!(solver.u, T)
+  return solver,
+  adapt(ArrayT, initialize_mesh(resolution)), adapt(ArrayT, T), adapt(ArrayT, ρ), cₚ,
+  κ
 end
-
 # ------------------------------------------------------------
 # Solve
 # ------------------------------------------------------------
 function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
   casename = "blob"
 
-  if case === :no_source
-    scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, resolution, kwargs...)
-  else
-    scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, resolution, kwargs...)
-  end
+  scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, resolution, kwargs...)
 
-  global Δt = 1e-8
+  global Δt = 1e-6
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -231,33 +195,32 @@ function benchmark()
   end
 
   for scheme_name in (
-    # :implicit, 
+    # :implicit_direct, 
+    :implicit_krylov,
     :pseudo_transient,
   )
     for resolution in (
-      # 51, 
-      101,
-      # 201
+      501,
+      1001,
+      2001,
+      #1001, 2001, 4001
     )
       reset_timer!()
       scheme, mesh, temperature = solve_prob(
         scheme_name,
-        :with_source,
+        :no_source,
         resolution;
         maxiter=Inf,
-        # maxt=1.5e-3, use this
-        maxt=4e-3,
-        direct_solve=false,
-        mean=:arithmetic,
-        apply_cutoff=true,
-        enforce_positivity=true,
-        # error_check_interval=2,
-        CFL=0.4,
-        subcycle_conductivity=false,
+        maxt=1e-3,
+        direct_solve=scheme_name == :implicit_direct,
+        mean=:harmonic,
+        error_check_interval=2,
+        # CFL=0.4,
+        refresh_matrix=false, # ok for linear conductivity
       )
 
       open(
-        "$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(resolution)_$(scheme_name).json",
+        "$(@__DIR__)/benchmark_results/linear_$(dev)_timing_$(resolution)_$(scheme_name).json",
         "w",
       ) do io
         JSON3.pretty(io, TimerOutputs.todict(TimerOutputs.DEFAULT_TIMER))
@@ -269,5 +232,4 @@ function benchmark()
   nothing
 end
 
-# @profview 
 benchmark()

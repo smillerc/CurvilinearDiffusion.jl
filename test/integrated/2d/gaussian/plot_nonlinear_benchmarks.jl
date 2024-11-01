@@ -15,31 +15,31 @@ function runtimes(fn)
   return tot |> u"s", per_cycle |> u"ms", n
 end
 
-dev = :GPU
-resolution = [51, 101, 201]
-
-cell_resolution = @. (resolution - 1)^3
+resolution = [501, 1001, 2001]
+cell_resolution = @. (resolution - 1)^2
 krylov_gpu = [
-  runtimes("$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(res)_implicit.json") for
+  runtimes("$(@__DIR__)/benchmark_results/nonlinear_GPU_timing_$(res)_implicit.json") for
   res in resolution
 ]
+
+krylov_cpu = [
+  runtimes("$(@__DIR__)/benchmark_results/nonlinear_CPU_timing_$(res)_implicit.json") for
+  res in resolution
+]
+
 pt_gpu = [
   runtimes(
-    "$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(res)_pseudo_transient.json"
+    "$(@__DIR__)/benchmark_results/nonlinear_GPU_timing_$(res)_pseudo_transient.json"
   ) for res in resolution
 ]
 
-dev = :CPU
-krylov_cpu = [
-  runtimes("$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(res)_implicit.json") for
-  res in resolution
-]
 pt_cpu = [
   runtimes(
-    "$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(res)_pseudo_transient.json"
+    "$(@__DIR__)/benchmark_results/nonlinear_CPU_timing_$(res)_pseudo_transient.json"
   ) for res in resolution
 ]
 
+update_theme!(; fontsize=20)
 fig = Figure()
 ax = Axis(
   fig[1, 1];
@@ -55,8 +55,9 @@ ax = Axis(
   yminorticks=IntervalsBetween(9),
   xlabel="Total Resolution",
   ylabel="Runtime [ms]",
-  title="3D Nonlinear Thermal Conduction (Problem 5)",
+  title="2D Nonlinear Thermal Conduction (Problem 4)",
 )
+
 palette = Makie.wong_colors()
 
 runtime_idx = 1
@@ -97,39 +98,13 @@ scatterlines!(
 lines!(ax, cell_resolution, cell_resolution; label="y=x", color=:black)
 
 xlims!(ax, 10^4.9, 10^7.25)
-ylims!(ax, 1e3, 10^7.1)
-# scatterlines!(
-#   ax,
-#   [case[1]^2 for case in accelerated_PT_CPU],
-#   [ustrip(u"ms", case[case_idx]) for case in accelerated_PT_CPU];
-#   label="PT solver [CPU]",
-#   linestyle=:dash,
-# )
 
-# scatterlines!(
-#   ax,
-#   [case[1]^2 for case in krylov_GPU],
-#   [ustrip(u"ms", case[case_idx]) for case in krylov_GPU];
-#   label="Krylov solver [GPU]",
-# )
-
-# scatterlines!(
-#   ax,
-#   [case[1]^2 for case in accelerated_PT_GPU],
-#   [ustrip(u"ms", case[case_idx]) for case in accelerated_PT_GPU];
-#   label="PT solver [GPU]",
-# )
+[round(typeof(1u"ms"), c[2]) for c in krylov_cpu]
+[round(typeof(1u"ms"), c[2]) for c in krylov_gpu]
+[round(typeof(1u"ms"), c[2]) for c in pt_cpu]
+[round(typeof(1u"ms"), c[2]) for c in pt_gpu]
 
 Legend(fig[1, 2], ax)
 display(fig)
 
-save("$(@__DIR__)/nonlinear_3dbenchmarks.png", fig)
-
-println("krylov_cpu");
-[round(typeof(1u"ms"), c[2]) for c in krylov_cpu]
-println("krylov_gpu");
-[round(typeof(1u"ms"), c[2]) for c in krylov_gpu]
-println("pt_cpu");
-[round(typeof(1u"ms"), c[2]) for c in pt_cpu]
-println("pt_gpu");
-[round(typeof(1u"ms"), c[2]) for c in pt_gpu]
+save("$(@__DIR__)/nonlinear_benchmarks.png", fig)

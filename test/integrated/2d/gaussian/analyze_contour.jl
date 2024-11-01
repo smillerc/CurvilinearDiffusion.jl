@@ -3,7 +3,8 @@ using Printf
 # f = CSV.File("$(@__DIR__)/t0_0.8contour.csv")
 # f = CSV.File("$(@__DIR__)/t1_0.8contour.csv")
 
-fn = "$(@__DIR__)/t40.csv"
+fn = "$(@__DIR__)/t0.csv"
+# fn = "$(@__DIR__)/t40.csv"
 f = CSV.File(fn)
 
 @show fn
@@ -13,7 +14,7 @@ z = f["Points:2"]
 
 # scatter(x, y)
 
-R = @. x^2 + y^2
+R = @. sqrt(x^2 + y^2)
 
 rmin, rmax = extrema(R)
 # rave = 0.5 * (rmin + rmax)
