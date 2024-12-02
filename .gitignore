@@ -10,4 +10,8 @@
 *.timing
 *.eps
 *.json
-test/integrated/for_publications/fig_6.svg
+
+*.svg
+*.pdf
+*.csv
+*.zip
