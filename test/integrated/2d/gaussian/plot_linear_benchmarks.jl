@@ -106,7 +106,7 @@ scatterlines!(
   color=palette[2],
 )
 
-lines!(ax, cell_resolution, 0.02cell_resolution; label="y~x", color=:black)
+lines!(ax, cell_resolution, 1.5e-3 * cell_resolution; label="y~x", color=:black)
 
 xlims!(ax, 10^4.9, 10^7.25)
 

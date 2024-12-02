@@ -11,6 +11,7 @@ export next_dt
 include("boundary_conditions/boundary_operators.jl")
 using .BoundaryConditions
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
+export FixedNegSymmetryBC
 
 include("implicit/ImplictSolver.jl")
 using .ImplicitSchemeType

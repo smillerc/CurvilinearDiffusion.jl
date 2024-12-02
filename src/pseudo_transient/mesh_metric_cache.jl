@@ -14,7 +14,7 @@ function update_metric_cache!(solver, mesh::CurvilinearGrid2D)
     ndrange=size(domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end
 
@@ -32,7 +32,7 @@ function update_metric_cache!(solver, mesh::CurvilinearGrid3D)   #
     ndrange=size(domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end
 

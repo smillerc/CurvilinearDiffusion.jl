@@ -28,7 +28,7 @@ function assemble!(
     ndrange=nrows,
   )
 
-  KernelAbstractions.synchronize(backend)
+  # # KernelAbstractions.synchronize(backend)
 
   return nothing
 end
@@ -58,7 +58,7 @@ function assemble!(
     ndrange=nrows,
   )
 
-  KernelAbstractions.synchronize(backend)
+  # # KernelAbstractions.synchronize(backend)
 
   return nothing
 end

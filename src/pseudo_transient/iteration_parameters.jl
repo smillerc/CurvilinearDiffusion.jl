@@ -1,11 +1,12 @@
 
-@kernel inbounds = true function _iter_param_kernel!(dτ_ρ, θr_dτ, _Vpdτ, L, _ρ, α, dt, β)
+@kernel inbounds = true function _iter_param_kernel!(dτ_ρ, θr_dτ, _Vpdτ, L, _ρ, α, dt, s)
   idx = @index(Global, Cartesian)
 
   _Re = π + sqrt(π^2 + (L^2 * _ρ[idx]) / (α[idx] * dt))
-  _dτ_ρ = (_Vpdτ * L / (α[idx] * _Re)) * β
-  _θr_dτ = (L / (_Vpdτ * _Re)) #* β
+  _dτ_ρ = (_Vpdτ * L / (α[idx] * _Re)) # * β
+  _θr_dτ = (L / (_Vpdτ * _Re))
 
+  # add in source term dependency somewhere in here?? Maybe this could help?
   isvalid = (abs(α[idx]) > 0) && isfinite(α[idx])
   dτ_ρ[idx] = _dτ_ρ * isvalid
   θr_dτ[idx] = _θr_dτ * isvalid
@@ -24,10 +25,10 @@ function update_iteration_params!(
     ρ,
     solver.α,
     Δt,
-    iter_scale;
+    solver.source_term;
     ndrange=size(solver.dτ_ρ),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end

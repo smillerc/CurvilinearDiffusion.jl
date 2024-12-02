@@ -41,6 +41,7 @@ struct PseudoTransientSolver{N,T,BE,AA<:AbstractArray{T,N},CA,NT1,DM,B,F}
   bcs::B # boundary conditions
   mean::F
   backend::BE
+  last_err_check::Vector{Int}
 end
 
 function PseudoTransientSolver(
@@ -78,7 +79,7 @@ function PseudoTransientSolver(
   end
 
   metric_cache = get_metric_cache(mesh, backend, T)
-
+  last_err_check = [0]
   return PseudoTransientSolver(
     u,
     u_prev,
@@ -96,6 +97,7 @@ function PseudoTransientSolver(
     bcs,
     mean_func,
     backend,
+    last_err_check,
   )
 end
 
@@ -118,11 +120,18 @@ end
 
 function phys_dims(mesh::CurvilinearGrid2D, T)
   x, y = coords(mesh)
-  spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
+  # spacing = (minimum(diff(x; dims=1)), minimum(diff(y; dims=2))) .|> T
+
+  @views begin
+    ds = sqrt(minimum(mesh.cell_center_metrics.J[mesh.iterators.cell.domain]))
+    spacing = (ds, ds)
+  end
+
   min_x, max_x = extrema(x)
   min_y, max_y = extrema(y)
   # L = max(abs(max_x - min_x), abs(max_y - min_y)) |> T
   L = min(abs(max_x - min_x), abs(max_y - min_y)) |> T
+  # @show L
   # L = maximum(spacing)
   # error("checkme!")
   return L, spacing
@@ -175,10 +184,9 @@ function step!(
   cₚ,
   κ,
   dt;
-  # max_iter=1e5,
-  max_iter=15000,
-  rel_tol=1e-5,
-  abs_tol=sqrt(eps(DT)),
+  max_iter=1500,
+  rtol=1e-5,
+  atol=sqrt(eps(DT)),
   error_check_interval=2,
   apply_cutoff=false,
   calculate_next_dt=true,
@@ -188,143 +196,152 @@ function step!(
   CFL=1 / sqrt(3),
   kwargs...,
 ) where {N,DT}
+  ##
+  rt = @elapsed begin
+    last_iter_count = solver.last_err_check[1]
+    min_err_check = Int(round(last_iter_count * 0.9))
+    err_interval = max(1, Int(ceil(last_iter_count - min_err_check) ÷ 2))
 
-  #
-  domain = solver.iterators.domain.cartesian
-  nhalo = 1
-  # nhalo = mesh.nhalo
+    ##
 
-  iter = 0
-  rel_error = 2 * rel_tol
-  abs_error = 2 * abs_tol
-  init_L₂ = Inf
+    #
+    domain = solver.iterators.domain.cartesian
+    nhalo = 1
+    # nhalo = mesh.nhalo
 
-  # dx, dy = solver.spacing
-  Vpdτ = CFL * min(solver.spacing...)
-  # Vpdτ = 0.008
-  # @show CFL, Vpdτ, solver.spacing
-  # error("done")
+    norm_iter = 0
+    iter = 0
+    rel_error = 2 * rtol
+    abs_error = 2 * atol
+    init_L₂ = Inf
 
-  @assert dt > 0
-  @assert all(solver.spacing .> 0)
-  @assert Vpdτ > 0
+    Vpdτ = CFL * min(solver.spacing...)
 
-  copy!(solver.u, T)
-  copy!(solver.u_prev, T)
+    @assert dt > 0
+    @assert all(solver.spacing .> 0)
+    @assert Vpdτ > 0
 
-  @timeit "update_metric_cache" update_metric_cache!(solver, mesh)
+    copy!(solver.u, T)
+    copy!(solver.u_prev, T)
 
-  # @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
+    @timeit "update_metric_cache" update_metric_cache!(solver, mesh)
 
-  # @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
+    # @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
 
-  @timeit "validate_scalar (α)" validate_scalar(
-    solver.α, domain, nhalo, :diffusivity; enforce_positivity=enforce_positivity
-  )
+    # @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
 
-  # @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
+    @timeit "validate_scalar (α)" validate_scalar(
+      solver.α, domain, nhalo, :diffusivity; enforce_positivity=enforce_positivity
+    )
 
-  # @timeit "validate_scalar (u)" validate_scalar(
-  #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
-  # )
+    # @timeit "applybcs! (α)" applybcs!(solver.bcs, mesh, solver.α, nhalo)
 
-  @timeit "validate_scalar (source_term)" validate_scalar(
-    solver.source_term, domain, nhalo, :source_term; enforce_positivity=false
-  )
-
-  # Pseudo-transient iteration
-  while true
-    @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
-
-    # Diffusion coefficient
-    if subcycle_conductivity || iter == 0
-      @timeit "update_conductivity!" update_conductivity!(solver, mesh, solver.u, ρ, cₚ, κ)
-      @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
-    end
-
-    iter += 1
-
-    # @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
-
-    # @timeit "validate_scalar (θr_dτ)" validate_scalar(
-    #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
+    # @timeit "validate_scalar (u)" validate_scalar(
+    #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
     # )
 
-    # @timeit "validate_scalar (dτ_ρ)" validate_scalar(
-    #   solver.dτ_ρ, domain, nhalo, :dτ_ρ; enforce_positivity=false
-    # )
+    @timeit "validate_scalar (source_term)" validate_scalar(
+      solver.source_term, domain, nhalo, :source_term; enforce_positivity=false
+    )
 
-    @timeit "compute_flux!" compute_flux!(solver, mesh)
-    @timeit "compute_update!" compute_update!(solver, mesh, dt)
+    # Pseudo-transient iteration
+    while true
+      @timeit "applybcs! (u)" applybcs!(solver.bcs, mesh, solver.u, nhalo)
+      # Diffusion coefficient
+      if subcycle_conductivity || iter == 0
+        @timeit "update_conductivity!" update_conductivity!(
+          solver, mesh, solver.u, ρ, cₚ, κ
+        )
+        @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
+      end
 
-    # Apply a cutoff function to remove negative / non-finite values
+      iter += 1
 
-    if iter % error_check_interval == 0 || iter == 1
-      @timeit "update_residual!" update_residual!(solver, mesh, dt)
-      # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
+      # @timeit "update_iteration_params!" update_iteration_params!(solver, ρ, Vpdτ, dt;)
 
-      # @show extrema(solver.res)
-      # @show extrema(solver.res[domain])
-      # @show extrema(solver.α[begin:(end - 1), 2:50])
-      # @show extrema(solver.u)
-      @timeit "norm" begin
-        L₂ = L2_norm(solver.res, solver.backend)
+      # @timeit "validate_scalar (θr_dτ)" validate_scalar(
+      #   solver.θr_dτ, domain, nhalo, :θr_dτ; enforce_positivity=false
+      # )
 
-        if iter == 1
-          init_L₂ = L₂
+      # @timeit "validate_scalar (dτ_ρ)" validate_scalar(
+      #   solver.dτ_ρ, domain, nhalo, :dτ_ρ; enforce_positivity=false
+      # )
+
+      @timeit "compute_flux!" compute_flux!(solver, mesh)
+      @timeit "compute_update!" compute_update!(solver, mesh, dt)
+
+      # Apply a cutoff function to remove negative / non-finite values
+
+      if (iter >= min_err_check && iter % err_interval == 0 || iter == 1)
+        @timeit "update_residual!" update_residual!(solver, mesh, dt)
+        # validate_scalar(solver.res, domain, nhalo, :resid; enforce_positivity=false)
+
+        norm_iter += 1
+
+        @timeit "norm" begin
+          L₂ = L2_norm(solver.res, solver.backend)
+
+          if iter == 1
+            init_L₂ = L₂
+          end
+
+          rel_error = L₂ / init_L₂
+          abs_error = L₂
         end
+      end
 
-        rel_error = L₂ / init_L₂
-        abs_error = L₂
+      if write_diagnostic_vtk
+        to_vtk(solver, mesh, solver.u, ρ, iter, iter)
+      end
+
+      if !isfinite(rel_error) || !isfinite(abs_error)
+        to_vtk(solver, mesh, solver.u, ρ, iter, iter)
+        error(
+          "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
+        )
+      end
+
+      if iter > max_iter
+        to_vtk(solver, mesh, solver.u, ρ, iter, iter)
+        error(
+          "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
+        )
+      end
+
+      if (rel_error <= rtol || abs_error <= atol)
+        break
       end
     end
 
-    if write_diagnostic_vtk
-      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
+    solver.last_err_check[1] = iter
+
+    if enforce_positivity
+      @timeit "enforce_positivity" begin
+        solver.u .= abs.(solver.u)
+      end
     end
 
-    if !isfinite(rel_error) || !isfinite(abs_error)
-      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
-      error(
-        "Non-finite error detected! abs_error = $abs_error, rel_error = $rel_error, exiting...",
-      )
+    if apply_cutoff
+      @timeit "cutoff!" cutoff!(solver.u, solver.backend)
     end
 
-    if iter > max_iter
-      to_vtk(solver, mesh, solver.u, ρ, iter, iter)
-      error(
-        "Maximum iteration limit reached ($max_iter), abs_error = $abs_error, rel_error = $rel_error, exiting...",
-      )
+    # @timeit "validate_scalar (u)" validate_scalar(
+    #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
+    # )'
+    # @timeit "norrmmm" norm(solver.res)
+
+    if calculate_next_dt
+      @timeit "next_dt" begin
+        next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
+      end
+    else
+      next_Δt = dt
     end
 
-    if (rel_error <= rel_tol || abs_error <= abs_tol)
-      break
-    end
+    copy!(T, solver.u)
   end
 
-  if enforce_positivity
-    solver.u .= abs.(solver.u)
-  end
-
-  if apply_cutoff
-    @timeit "cutoff!" cutoff!(solver.u, solver.backend)
-  end
-
-  # @timeit "validate_scalar (u)" validate_scalar(
-  #   solver.u, domain, nhalo, :u; enforce_positivity=enforce_positivity
-  # )
-
-  if calculate_next_dt
-    @timeit "next_dt" begin
-      next_Δt = next_dt(solver.u, solver.u_prev, dt; kwargs...)
-    end
-  else
-    next_Δt = dt
-  end
-
-  copy!(T, solver.u)
-
-  stats = (rel_err=rel_error, abs_err=abs_error, niter=iter)
+  stats = (rel_err=rel_error, abs_err=abs_error, niter=iter, time=rt)
   return stats, next_Δt
 end
 

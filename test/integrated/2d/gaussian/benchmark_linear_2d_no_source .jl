@@ -18,7 +18,7 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :GPU
+dev = :CPU
 const DT = Float64
 
 if dev === :GPU
@@ -130,7 +130,7 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
 
   scheme, mesh, T, ρ, cₚ, κ = init_state_no_source(scheme, resolution, kwargs...)
 
-  global Δt = 1e-6
+  global Δt = 5e-6
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -176,7 +176,7 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     if iter >= maxiter - 1
       break
     end
-    Δt = min(next_dt, 1e-4)
+    # Δt = min(next_dt, 1e-4)
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
@@ -194,17 +194,8 @@ function benchmark()
     mkdir("benchmark_results")
   end
 
-  for scheme_name in (
-    # :implicit_direct, 
-    :implicit_krylov,
-    :pseudo_transient,
-  )
-    for resolution in (
-      501,
-      1001,
-      2001,
-      #1001, 2001, 4001
-    )
+  for scheme_name in (:implicit_direct, :implicit_krylov, :pseudo_transient)
+    for resolution in (251, 501, 1001, 2001)
       reset_timer!()
       scheme, mesh, temperature = solve_prob(
         scheme_name,

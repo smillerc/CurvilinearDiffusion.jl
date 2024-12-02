@@ -5,6 +5,8 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 using JSON3
+using CSV
+using DataFrames
 
 @static if Sys.islinux()
   using MKL
@@ -18,7 +20,9 @@ BLAS.get_num_threads()
 
 @show BLAS.get_config()
 
-dev = :CPU
+dev = :GPU
+# mesh_config = :wavy
+mesh_config = :uniform
 const DT = Float64
 
 if dev === :GPU
@@ -74,9 +78,11 @@ end
 
 function initialize_mesh(n)
   nhalo = 1
-  @show n
-  return wavy_grid(n, n, nhalo)
-  # return uniform_grid(n, n, nhalo)
+  if mesh_config === :wavy
+    return wavy_grid(n, n, nhalo)
+  else
+    return uniform_grid(n, n, nhalo)
+  end
 end
 
 function init_state_with_source(scheme, resolution, kwargs...)
@@ -107,7 +113,8 @@ function init_state_with_source(scheme, resolution, kwargs...)
 
   # Temperature and density
   T_hot = 1e4 |> DT
-  T_cold = 1e-2 |> DT
+  # T_cold = 1e-2 |> DT
+  T_cold = 1e0 |> DT
   T = ones(DT, cellsize_withhalo(mesh)) * T_cold
   ρ = ones(DT, cellsize_withhalo(mesh))
   source_term = zeros(DT, cellsize_withhalo(mesh))
@@ -153,7 +160,8 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, resolution, kwargs...)
   end
 
-  global Δt = 1e-8
+  global Δt = 5e-6
+  # global Δt = 1e-8
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -161,6 +169,10 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
   @timeit "update_conductivity!" update_conductivity!(scheme, mesh, T, ρ, cₚ, κ)
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
+  time = Vector{Float64}(undef, 0)
+  time_per_cycle = Vector{Float64}(undef, 0)
+  iter_per_cycle = Vector{Float64}(undef, 0)
+  err = Vector{Float64}(undef, 0)
   while true
     @printf "cycle: %i t: %.4e, Δt: %.3e\n" iter t Δt
     @timeit "nonlinear_thermal_conduction_step!" begin
@@ -179,6 +191,10 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
       )
     end
 
+    push!(time, t)
+    push!(time_per_cycle, stats.time)
+    push!(iter_per_cycle, stats.niter)
+    push!(err, stats.rel_err)
     # if t + Δt > io_next
     #   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(
     #     scheme, T, ρ, mesh, iter, t, casename
@@ -186,7 +202,7 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     #   global io_next += io_interval
     # end
 
-    if iter == 0
+    if iter == 0 #|| iter == 125
       reset_timer!()
     end
 
@@ -199,13 +215,13 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     if iter >= maxiter - 1
       break
     end
-    Δt = min(next_dt, 1e-4)
+    # Δt = min(next_dt, 1e-4)
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
 
   print_timer()
-  return scheme, mesh, T
+  return scheme, mesh, T, time, time_per_cycle, iter_per_cycle, err
 end
 
 # @profview 
@@ -217,25 +233,24 @@ function benchmark()
     mkdir("benchmark_results")
   end
 
-  for scheme_name in (
-    :implicit,
-    # :pseudo_transient,
-  )
+  for scheme_name in (:implicit, :pseudo_transient)
     for resolution in (
-      501,
-      # 1001,
-      # 2001,
-      #1001, 2001, 4001
+      # 251,
+      # 501,
+      1001,
+      2001,
     )
       reset_timer!()
-      scheme, mesh, temperature = solve_prob(
+      scheme, mesh, T, time, time_per_cycle, iter_per_cycle, err = solve_prob(
         scheme_name,
         :with_source,
         resolution;
         maxiter=Inf,
         maxt=1.5e-3,
         # maxt=2e-3,
-        direct_solve=true,
+        rtol=1e-5,
+        atol=sqrt(eps()),
+        direct_solve=false,
         mean=:arithmetic,
         apply_cutoff=true,
         enforce_positivity=true,
@@ -245,8 +260,15 @@ function benchmark()
         subcycle_conductivity=false,
       )
 
+      csv_file = "$(@__DIR__)/benchmark_results/$(mesh_config)_mesh_nonlinear_$(dev)_timing_$(resolution)_$(scheme_name).csv"
+      df = DataFrame(;
+        time=time, time_per_cycle=time_per_cycle, iter_per_cycle=iter_per_cycle, error=err
+      )
+
+      CSV.write(csv_file, df)
+
       open(
-        "$(@__DIR__)/benchmark_results/nonlinear_$(dev)_timing_$(resolution)_$(scheme_name).json",
+        "$(@__DIR__)/benchmark_results/$(mesh_config)_mesh_nonlinear_$(dev)_timing_$(resolution)_$(scheme_name).json",
         "w",
       ) do io
         JSON3.pretty(io, TimerOutputs.todict(TimerOutputs.DEFAULT_TIMER))
@@ -255,7 +277,9 @@ function benchmark()
       GC.gc() # free gpu memory
     end
   end
-  nothing
+  return nothing
 end
 
 benchmark()
+
+# using CairoMakie

@@ -1,6 +1,8 @@
 function L2_norm(A, ::GPU)
-  _norm = sqrt(mapreduce(x -> (x^2), +, A) / length(A))
-  return _norm
+  # _norm = sqrt(mapreduce(x -> (x^2), +, A) / length(A))
+  # return _norm
+  # return norm(A) / sqrt(length(A))
+  return norm(A, Inf) / sqrt(length(A))
 end
 
 function L2_norm(A, ::CPU)
@@ -69,6 +71,6 @@ function update_residual!(
     ndrange=size(domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end

@@ -14,11 +14,11 @@ function u_initial(x, t)
 end
 
 function q(x, t)
-  return q0 * sinpi(x)
+  return 0 #q0 * sinpi(x)
 end
 
 function u_analytic(x, t)
-  return sinpi(3x) * exp(-9π² * t) + (q0 / π²) * sinpi(x) * (1 - exp(-π² * t))
+  return sinpi(3x) * exp(-9π² * t) #+ (q0 / π²) * sinpi(x) * (1 - exp(-π² * t))
 end
 
 # u_initial(x, t) = 0.25sinpi(2x) + sinpi(3x)
@@ -79,20 +79,20 @@ function wavy_grid(nx, ny, nhalo)
 end
 
 function uniform_grid(nx, ny, nhalo)
-  # x0, x1 = (0, 1)
-  # y0, y1 = (0, 1)
+  x0, x1 = (0, 1)
+  y0, y1 = (0, 1)
 
-  dx = 1 / (nx - 1)
-  dy = 1 / (ny - 1)
-  x = (0.5dx):dx:(1 - 0.5dx) |> collect
-  y = (0.5dy):dy:(1 - 0.5dy) |> collect
+  # dx = 1 / (nx - 1)
+  # dy = 1 / (ny - 1)
+  # x = (0.5dx):dx:(1 - 0.5dx) |> collect
+  # y = (0.5dy):dy:(1 - 0.5dy) |> collect
 
-  return CurvilinearGrids.RectlinearGrid(x, y, nhalo, CPU())
-  # return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU())
+  # return CurvilinearGrids.RectlinearGrid(x, y, nhalo, CPU())
+  return CurvilinearGrids.RectlinearGrid((x0, y0), (x1, y1), (nx, ny), nhalo, CPU())
 end
 
 function initialize_mesh()
-  ni = nj = 51
+  ni = nj = 451
   nhalo = 1
   # return wavy_grid(ni, nj, nhalo)
   return uniform_grid(ni, nj, nhalo)
@@ -109,8 +109,10 @@ function init_state()
   mesh = adapt(ArrayT, initialize_mesh())
 
   bcs = (
-    ilo=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
-    ihi=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
+    # ilo=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
+    # ihi=DirichletBC((; ρ=1.0, u=0, α=1.0)),  #
+    ilo=FixedNegSymmetryBC(),  #
+    ihi=FixedNegSymmetryBC(),  #
     # jlo=NeumannBC(),  #
     # jhi=NeumannBC(),  #
     jlo=PeriodicBC(),  #
@@ -126,14 +128,16 @@ function init_state()
   ρ = ones(Float64, cellsize_withhalo(mesh))
   cₚ = 1.0
 
+  xc = Array(mesh.centroid_coordinates.x)
+  # yc = Array(mesh.centroid_coordinates.y)
   for idx in mesh.iterators.cell.domain
-    x⃗c = centroid(mesh, idx)
-    T[idx] = u_initial(x⃗c.x, 0.0)
-    source_term[idx] = q(x⃗c.x, 0.0) # / mesh.cell_center_metrics.J[idx]
+    # x⃗c = centroid(mesh, idx)
+    T[idx] = u_initial(xc[idx], 0.0)
+    source_term[idx] = q(xc[idx], 0.0) # / mesh.cell_center_metrics.J[idx]
   end
 
   scheme_q = @view solver.source_term[solver.iterators.domain.cartesian]
-  mesh_q = @view source_term[mesh.iterators.cell.domain]
+  mesh_q = source_term[mesh.iterators.cell.domain]
   copy!(scheme_q, mesh_q)
 
   #   fill!(solver.source_term, 0.0)
@@ -149,7 +153,7 @@ function run(maxt, maxiter=Inf)
   casename = "multimode_sine"
 
   scheme, mesh, T, ρ, cₚ, κ = init_state()
-  global Δt = 1e-6
+  global Δt = 1e-7
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -192,9 +196,9 @@ function run(maxt, maxiter=Inf)
     global iter += 1
     global t += Δt
 
-    # if isfinite(next_dt)
-    # Δt = next_dt
-    # end
+    if isfinite(next_dt)
+      Δt = min(next_dt, 1e-4)
+    end
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
@@ -207,7 +211,7 @@ begin
   cd(@__DIR__)
   rm.(glob("*.vts"))
   # tfinal = 0.03
-  tfinal = 0.05
+  tfinal = 0.04
   scheme, mesh, temperature = run(tfinal, Inf)
   nothing
 end
@@ -251,11 +255,45 @@ begin
   scatter!(ax2, vec(xc), vec(sol); markersize=4, color=:black, label="analytic")
 
   # lines!(ax2, x, sol; label="analytic", linestyle=:dash, linewidth=1)
-  axislegend(; position=:cb)
+  # axislegend(; position=:cb)
+  axislegend(;)
   save("$(@__DIR__)/multimode_sine.png", f)
+  display(f)
+end
+
+# L₂ = 0.0028167836012538065 # 50
+
+begin
+  res = 1 ./ [50, 150, 450]
+  err = [
+    0.0028167836012538065, # 50
+    0.000743386916876679, # 150
+    0.0005328113359953201, # 450
+  ]
+
+  f = Figure()
+  ax = Axis(f[1, 1]; xscale=log10, yscale=log10)
+  scatterlines!(ax, res, err)
+  scatterlines!(ax, res, res .^ 1.2)
   f
 end
 
+q_2 = log(err[3] / err[2]) / log(res[3] / res[2])
+q_2 = log(err[2] / err[1]) / log(res[2] / res[1])
+q_2 = log(err[1] / err[2]) / log(res[1] / res[2])
+err[2] / err[1]
+res[2] / res[1]
+
+# sim[:,1] |> lines
+# sol[:,1] |> lines
+
+# delta_sol = sim .- sol
+# delta_sol[:, 1] |> lines
+
+# heatmap(sim .- sol)
+
+# extrema(sim .- sol)
+# lines(vec(abs.(sim .- sol)))
 # f, ax, p = heatmap(sim - sol)
 # Colorbar(f, p)
 # f

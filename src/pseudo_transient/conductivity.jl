@@ -34,7 +34,7 @@ end
 #   backend = scheme.backend
 #   conductivity_kernel(backend)(α, T, ρ, cₚ, κ; ndrange=size(α))
 
-#   KernelAbstractions.synchronize(backend)
+#   # KernelAbstractions.synchronize(backend)
 
 #   return nothing
 # end
@@ -52,7 +52,7 @@ end
 #   backend = scheme.backend
 #   conductivity_kernel(backend)(α, T, ρ, _cₚ, κ; ndrange=size(α))
 
-#   KernelAbstractions.synchronize(backend)
+#   # KernelAbstractions.synchronize(backend)
 
 #   return nothing
 # end

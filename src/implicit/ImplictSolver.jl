@@ -213,7 +213,7 @@ function _direct_solve!(
   # update the A matrix and b vector; A is a separate argument
   # so we can dispatch on type for GPU vs CPU assembly
   @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
-  KernelAbstractions.synchronize(scheme.backend)
+  # KernelAbstractions.synchronize(scheme.backend)
 
   # For the direct solve, we want to re-use the symbolic factorization (sparsity pattern)
   # but update the A matrix (which we did above via assemble!(...))
@@ -264,66 +264,69 @@ function _iterative_solve!(
 ) where {N,T}
 
   #
-  domain_u = @views u[scheme.iterators.mesh]
 
-  @assert size(u) == size(mesh.iterators.cell.full)
+  rt = @elapsed begin
+    domain_u = @views u[scheme.iterators.mesh]
 
-  # update the A matrix and b vector; A is a separate argument
-  # so we can dispatch on type for GPU vs CPU assembly
-  @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
-  KernelAbstractions.synchronize(scheme.backend)
+    @assert size(u) == size(mesh.iterators.cell.full)
 
-  # if !warmedup(scheme)
-  refresh = true
-  # else
-  #   refresh = scheme.linear_problem.solver.stats.niter > precon_iter_threshold
+    # update the A matrix and b vector; A is a separate argument
+    # so we can dispatch on type for GPU vs CPU assembly
+    @timeit "assembly" assemble!(scheme.linear_problem.A, u, scheme, mesh, Δt)
+    # KernelAbstractions.synchronize(scheme.backend)
 
-  #   if refresh
-  #     @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
-  #   end
-  # end
+    # if !warmedup(scheme)
+    refresh = true
+    # else
+    #   refresh = scheme.linear_problem.solver.stats.niter > precon_iter_threshold
 
-  precon, _ldiv = update_precon(
-    scheme.linear_problem.A, scheme.linear_problem.precon, refresh, scheme.backend
-  )
+    #   if refresh
+    #     @info "Refreshing the preconditioner (niter > $precon_iter_threshold)"
+    #   end
+    # end
 
-  if !warmedup(scheme)
-    @timeit "linear solve" Krylov.solve!(
-      scheme.linear_problem.solver,
-      scheme.linear_problem.A,
-      scheme.linear_problem.b,
-      atol=atol,
-      rtol=rtol,
-      history=true,
-      N=precon,
-      ldiv=_ldiv,
+    precon, _ldiv = update_precon(
+      scheme.linear_problem.A, scheme.linear_problem.precon, refresh, scheme.backend
     )
-    warmup!(scheme)
-  else
-    @timeit "linear solve" Krylov.solve!(
-      scheme.linear_problem.solver,
-      scheme.linear_problem.A,
-      scheme.linear_problem.b,
-      scheme.linear_problem.solver.x;
-      atol=atol,
-      rtol=rtol,
-      history=true,
-      N=precon,
-      ldiv=_ldiv,
-    )
-  end
 
-  # @show scheme.linear_problem.solver.stats
-  # Apply a cutoff function to remove negative u values
-  if cutoff
-    cutoff!(scheme.linear_problem.solver.x)
-  end
+    if !warmedup(scheme)
+      @timeit "linear solve" Krylov.solve!(
+        scheme.linear_problem.solver,
+        scheme.linear_problem.A,
+        scheme.linear_problem.b,
+        atol=atol,
+        rtol=rtol,
+        history=true,
+        N=precon,
+        ldiv=_ldiv,
+      )
+      warmup!(scheme)
+    else
+      @timeit "linear solve" Krylov.solve!(
+        scheme.linear_problem.solver,
+        scheme.linear_problem.A,
+        scheme.linear_problem.b,
+        scheme.linear_problem.solver.x;
+        atol=atol,
+        rtol=rtol,
+        history=true,
+        N=precon,
+        ldiv=_ldiv,
+      )
+    end
 
-  @timeit "next_dt" begin
-    next_Δt = next_dt(scheme.linear_problem.solver.x, domain_u, Δt; kwargs...)
-  end
+    # @show scheme.linear_problem.solver.stats
+    # Apply a cutoff function to remove negative u values
+    if cutoff
+      cutoff!(scheme.linear_problem.solver.x)
+    end
 
-  copyto!(domain_u, scheme.linear_problem.solver.x) # update solution
+    @timeit "next_dt" begin
+      next_Δt = next_dt(scheme.linear_problem.solver.x, domain_u, Δt; kwargs...)
+    end
+
+    copyto!(domain_u, scheme.linear_problem.solver.x) # update solution
+  end
 
   niter = scheme.linear_problem.solver.stats.niter
   L₂norm = last(scheme.linear_problem.solver.stats.residuals)
@@ -332,7 +335,10 @@ function _iterative_solve!(
     @printf "\tKrylov stats: L₂: %.1e, iterations: %i\n" L₂norm niter
   end
 
-  return scheme.linear_problem.solver.stats, next_Δt
+  stats = (rel_err=L₂norm, abs_err=L₂norm, niter=niter, time=rt)
+
+  return stats, next_Δt
+  # return scheme.linear_problem.solver.stats, next_Δt
 end
 
 preconditioner(A, ::CPU) = ILUZero.ilu0(A)

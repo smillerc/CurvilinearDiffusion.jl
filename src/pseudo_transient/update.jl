@@ -37,6 +37,6 @@ function compute_update!(solver::PseudoTransientSolver{N,T}, mesh, Δt) where {N
     ndrange=size(domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end

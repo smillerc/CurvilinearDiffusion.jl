@@ -23,7 +23,7 @@ function update_nonorthogonal!(
     ndrange=size(domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
   return nothing
 end
 

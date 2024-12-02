@@ -89,7 +89,7 @@ function compute_flux!(solver::PseudoTransientSolver{2,T}, ::CurvilinearGrid2D) 
     ndrange=size(ⱼ₊½_domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
 
   return nothing
 end
@@ -143,7 +143,7 @@ function compute_flux!(solver::PseudoTransientSolver{3,T}, ::CurvilinearGrid3D) 
     ndrange=size(ₖ₊½_domain),
   )
 
-  KernelAbstractions.synchronize(solver.backend)
+  # KernelAbstractions.synchronize(solver.backend)
 
   return nothing
 end

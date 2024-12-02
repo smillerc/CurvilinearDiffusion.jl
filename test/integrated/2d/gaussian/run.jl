@@ -248,36 +248,36 @@ begin
   # scheme, mesh, temperature = solve_prob(:implicit, :no_source, 10; direct_solve=true)
 
   # No source
-  # scheme, mesh, temperature = solve_prob(
-  #   # :pseudo_transient,
-  #   :implicit,
-  #   :no_source;
-  #   maxiter=Inf,
-  #   maxt=1e-5,
-  #   direct_solve=false,
-  #   mean=:harmonic,
-  #   error_check_interval=2,
-  #   # CFL=0.4,
-  #   refresh_matrix=false,
-  # )
-
-  # With source
   scheme, mesh, temperature = solve_prob(
     :pseudo_transient,
     # :implicit,
-    :with_source;
+    :no_source;
     maxiter=Inf,
-    # maxt=1.5e-3,
-    # maxt=2e-3,
-    maxt=4e-3,
+    maxt=0.4,
     direct_solve=false,
-    mean=:arithmetic,
-    apply_cutoff=true,
-    enforce_positivity=true,
-    error_check_interval=10,
-    CFL=0.4, # working
-    # CFL=0.5,
-    subcycle_conductivity=false,
+    mean=:harmonic,
+    error_check_interval=2,
+    # CFL=0.4,
+    refresh_matrix=false,
   )
+
+  # With source
+  # scheme, mesh, temperature = solve_prob(
+  #   :pseudo_transient,
+  #   # :implicit,
+  #   :with_source;
+  #   maxiter=Inf,
+  #   # maxt=1.5e-3,
+  #   # maxt=2e-3,
+  #   maxt=4e-3,
+  #   direct_solve=false,
+  #   mean=:arithmetic,
+  #   apply_cutoff=true,
+  #   enforce_positivity=true,
+  #   error_check_interval=10,
+  #   CFL=0.4, # working
+  #   # CFL=0.5,
+  #   subcycle_conductivity=false,
+  # )
   nothing
 end

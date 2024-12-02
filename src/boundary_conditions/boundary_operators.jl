@@ -1,8 +1,10 @@
 module BoundaryConditions
 
 using CurvilinearGrids, UnPack
+using .Threads
 
 export DirichletBC, NeumannBC, PeriodicBC, applybc!, applybcs!, check_diffusivity_validity
+export FixedNegSymmetryBC
 
 abstract type AbstractBC end
 
@@ -10,6 +12,7 @@ struct DirichletBC{T} <: AbstractBC
   val::T
 end
 
+struct FixedNegSymmetryBC <: AbstractBC end
 struct NeumannBC <: AbstractBC end
 struct PeriodicBC <: AbstractBC end
 
@@ -151,6 +154,27 @@ function applybc!(
   end
 end
 
+function applybc!(
+  ::FixedNegSymmetryBC, mesh::CurvilinearGrid2D, u::AbstractArray, loc::Int, nhalo=1
+)
+  @unpack ilo, ihi, jlo, jhi = mesh.domain_limits.cell
+
+  @views begin
+    if loc == ILO_BC_LOC
+      u[ilo - 1, jlo:jhi] .= -u[ilo, jlo:jhi]
+    elseif loc == IHI_BC_LOC
+      u[ihi + 1, jlo:jhi] .= -u[ihi, jlo:jhi]
+    elseif loc == JLO_BC_LOC
+      u[ilo:ihi, jlo - 1] .= -u[ilo:ihi, jlo]
+    elseif loc == JHI_BC_LOC
+      u[ilo:ihi, jhi + 1] .= -u[ilo:ihi, jhi]
+    else
+      error("Bad 2d boundary location value $(loc), must be 1-4")
+    end
+  end
+end
+
+# Periodic
 function applybc!(
   bc::DirichletBC, mesh::CurvilinearGrid3D, u::AbstractArray, loc::Int, nhalo=1
 )
