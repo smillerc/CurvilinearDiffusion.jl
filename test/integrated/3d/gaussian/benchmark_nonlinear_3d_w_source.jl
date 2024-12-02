@@ -166,7 +166,8 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     scheme, mesh, T, ρ, cₚ, κ = init_state_with_source(scheme, resolution, kwargs...)
   end
 
-  global Δt = 1e-8
+  # global Δt = 1e-8
+  global Δt = 5e-6
   global t = 0.0
   global iter = 0
   global io_interval = 0.01
@@ -212,7 +213,7 @@ function solve_prob(scheme, case, resolution; maxiter=Inf, maxt=0.2, kwargs...)
     if iter >= maxiter - 1
       break
     end
-    Δt = min(next_dt, 1e-4)
+    # Δt = min(next_dt, 1e-4)
   end
 
   @timeit "save_vtk" CurvilinearDiffusion.save_vtk(scheme, T, ρ, mesh, iter, t, casename)
@@ -231,12 +232,12 @@ function benchmark()
   end
 
   for scheme_name in (
-    # :implicit, 
     :pseudo_transient,
+    # :implicit
   )
     for resolution in (
-      # 51, 
-      101,
+      51,
+      # 101,
       # 201
     )
       reset_timer!()

@@ -6,7 +6,7 @@ using KernelAbstractions
 using Glob
 using LinearAlgebra
 
-dev = :CPU
+dev = :GPU
 const DT = Float64
 
 if dev === :GPU
@@ -75,6 +75,8 @@ function init_state(scheme, kwargs...)
     ihi=DirichletBC((; ρ=0.0, u=0.0)),  #
     jlo=PeriodicBC(),  #
     jhi=PeriodicBC(),  #
+    # jlo=NeumannBC(),  #
+    # jhi=NeumannBC(),  #
   )
 
   if scheme === :implicit
@@ -153,6 +155,7 @@ function run(solver_scheme, maxt; maxiter=Inf, kwargs...)
       break
     end
     if isfinite(next_dt)
+      # Δt = min(next_dt, 1e-5)
       Δt = next_dt
     end
   end
@@ -174,58 +177,6 @@ begin
 end
 
 begin
-  # T_analytic = [
-  #   0.999,
-  #   0.968,
-  #   0.933,
-  #   0.898,
-  #   0.865,
-  #   0.838,
-  #   0.799,
-  #   0.76,
-  #   0.702,
-  #   0.653,
-  #   0.614,
-  #   0.567,
-  #   0.513,
-  #   0.451,
-  #   0.407,
-  #   0.364,
-  #   0.319,
-  #   0.273,
-  #   0.218,
-  #   0.154,
-  #   0.102,
-  #   0.0527,
-  #   0.0,
-  # ]
-
-  # x_analytic = [
-  #   0.006,
-  #   0.089,
-  #   0.186,
-  #   0.263,
-  #   0.337,
-  #   0.386,
-  #   0.458,
-  #   0.517,
-  #   0.594,
-  #   0.653,
-  #   0.689,
-  #   0.728,
-  #   0.764,
-  #   0.799,
-  #   0.818,
-  #   0.835,
-  #   0.846,
-  #   0.856,
-  #   0.863,
-  #   0.867,
-  #   0.871,
-  #   0.87,
-  #   0.87,
-  # ]
-
   x_analytic = [
     0.000772,
     0.0703,
@@ -288,14 +239,14 @@ begin
     0.00368,
   ]
 
-  xc, yc = centroids(grid)
+  xc, yc = centroids(grid) .|> Array
 
   domain = grid.iterators.cell.domain
   ddomain = scheme.iterators.domain.cartesian
-  T = @view temperature[domain]
-  st = @view scheme.source_term[ddomain]
+  T = Array(temperature[domain])
+  st = Array(scheme.source_term[ddomain])
 
-  x = xc[:, 1]
+  x = Array(xc[:, 1])
 
   T1d = copy(T[:, 1])
 
